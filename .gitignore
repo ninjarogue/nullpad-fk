@@ -26,6 +26,3 @@ Thumbs.db
 
 # Claude Code worktrees
 .claude/worktrees/
-
-# e2e runner output
-.e2e/

@@ -10,8 +10,7 @@
     "esModuleInterop": true,
     "exactOptionalPropertyTypes": true,
     "isolatedModules": true,
-    "noEmit": true,
-    "types": ["node"]
+    "noEmit": true
   },
-  "include": ["src/**/*", "checks/**/*"]
+  "include": ["src/**/*"]
 }

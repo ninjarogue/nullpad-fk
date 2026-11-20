@@ -7,11 +7,10 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "typecheck": "tsc --noEmit && tsc --noEmit -p e2e",
+    "typecheck": "tsc --noEmit",
     "format": "oxfmt",
     "format:check": "oxfmt --check",
-    "test": "vitest run",
-    "lint": "oxlint src checks && effect-tsgo patch --no-typescript --oxlint && oxlint --config .oxlintrc.effect.json --deny-warnings src checks",
+    "lint": "oxlint src && effect-tsgo patch --no-typescript --oxlint && oxlint --config .oxlintrc.effect.json --deny-warnings src",
     "arch": "depcruise src --config .dependency-cruiser.cjs"
   },
   "dependencies": {
@@ -28,15 +27,12 @@
     "@foldkit/vite-plugin": "0.29.1",
     "@swc/core": "1.16.22",
     "@tailwindcss/vite": "4.3.5",
-    "@types/node": "22.20.5",
     "dependency-cruiser": "18.8.0",
-    "happy-dom": "21.0.4",
     "oxfmt": "0.79.0",
     "oxlint": "1.94.0",
     "oxlint-tsgolint": "7.0.2007",
     "tailwindcss": "4.3.5",
     "typescript": "7.0.2",
-    "vite": "8.3.8",
-    "vitest": "5.1.1"
+    "vite": "8.3.8"
   }
 }

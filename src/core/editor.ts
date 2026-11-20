@@ -21,6 +21,7 @@ export type Editor = typeof Editor.Type
 /** Everything the view draws. The view reads nothing else from the Editor. */
 export type Frame = Readonly<{
   rows: ReadonlyArray<Screen.Row>
+  gutter: number
   status: Readonly<{
     mode: Mode
     line: number
@@ -178,6 +179,7 @@ export const paint = (editor: Editor): Frame => {
   const before = (lines[caret.line]?.text ?? '').slice(0, caret.column)
   return {
     rows: Screen.rows(editor.buffer, editor.view, editor.preedit),
+    gutter: Screen.gutterWidth(editor.buffer),
     status: {
       mode: editor.mode,
       line: caret.line + 1,

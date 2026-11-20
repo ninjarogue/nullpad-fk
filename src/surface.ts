@@ -234,7 +234,8 @@ const rowView = (
 }
 
 /**
- * Paints the frame: one keyed `white-space: pre` div per Row, carrying data-line-id and data-start.
+ * Paints the frame: one keyed `white-space: pre` div per Row, carrying data-line-id and data-start,
+ * indented by the gutter (`--gutter`, in cells) that holds its line number.
  * Caret and CaretPastEnd become span#caret.cur, the CSS anchor the port sits on.
  * CaretPastEnd and Preedit spans carry data-ghost.
  */
@@ -246,6 +247,7 @@ export const surface = (
   h.div(
     [
       h.Class(keyboard === 'Focused' ? 'surface focused' : 'surface'),
+      h.Style({ '--gutter': String(frame.gutter) }),
       h.OnMount(SurfacePort()),
     ],
     [

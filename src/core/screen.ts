@@ -2,7 +2,7 @@ import { Array, Option, Order, Schema } from 'effect'
 
 import { type Buffer, type Grapheme, type LineId, graphemes } from './buffer'
 
-/** The screen is a grid of cells whose size the shell reports, as a terminal does. */
+/** The screen is a grid of cells whose size the shell reports, as a terminal does. The gutter is part of it. */
 export const Size = Schema.Struct({
   columns: Schema.Number,
   rows: Schema.Number,
@@ -159,6 +159,16 @@ const rowOfColumn = (lineLayout: Layout, column: number): number =>
     ),
     () => 0,
   )
+
+/** Cells left of the text: the largest line number, at least four digits, then two blank cells. */
+export const gutterWidth = (buffer: Buffer): number =>
+  Math.max(4, String(buffer.lines.length).length) + 2
+
+const maxTextColumns = 76
+
+/** The wrap width: what the gutter leaves of the screen, at most a comfortable reading width. */
+const textColumns = (buffer: Buffer, size: Size): number =>
+  Math.max(1, Math.min(maxTextColumns, size.columns - gutterWidth(buffer)))
 
 const lineText = (buffer: Buffer, line: number): string =>
   buffer.lines[line]?.text ?? ''
@@ -343,10 +353,12 @@ export const rows = (
           0,
           Array.appendAll(
             collected,
-            lineRows(buffer, line, preedit, view.size.columns).slice(
-              skip,
-              skip + view.size.rows - collected.length,
-            ),
+            lineRows(
+              buffer,
+              line,
+              preedit,
+              textColumns(buffer, view.size),
+            ).slice(skip, skip + view.size.rows - collected.length),
           ),
         )
   return collect(view.top.line, view.top.row, [])
@@ -354,7 +366,7 @@ export const rows = (
 
 /** The smallest scroll that puts the caret row on screen. Applying it twice changes nothing. */
 export const follow = (buffer: Buffer, view: View, preedit: string): View => {
-  const layoutOf = layouts(buffer, preedit, view.size.columns)
+  const layoutOf = layouts(buffer, preedit, textColumns(buffer, view.size))
   const top = clampTop(buffer, layoutOf, view.top)
   const caret = caretTop(buffer, layoutOf, preedit)
   const bottom = walk(buffer, layoutOf, top, view.size.rows - 1)
@@ -368,7 +380,7 @@ export const follow = (buffer: Buffer, view: View, preedit: string): View => {
 
 /** Scrolls by whole rows and stops where the last row of the text reaches the bottom. The caret stays where it is. */
 export const scroll = (buffer: Buffer, view: View, rows: number): View => {
-  const layoutOf = layouts(buffer, '', view.size.columns)
+  const layoutOf = layouts(buffer, '', textColumns(buffer, view.size))
   const top = clampTop(buffer, layoutOf, view.top)
   const moved = walk(buffer, layoutOf, top, rows)
   const limit = Order.max(orderTop)(top, lastTop(buffer, layoutOf, view.size))
@@ -380,7 +392,7 @@ export const scroll = (buffer: Buffer, view: View, rows: number): View => {
 
 /** Keeps the screen full after a resize shrank the text's height. */
 export const settle = (buffer: Buffer, view: View): View => {
-  const layoutOf = layouts(buffer, '', view.size.columns)
+  const layoutOf = layouts(buffer, '', textColumns(buffer, view.size))
   return {
     ...view,
     top: Order.min(orderTop)(
@@ -393,7 +405,7 @@ export const settle = (buffer: Buffer, view: View): View => {
 export const caretCell = (buffer: Buffer, view: View): number => {
   const lineLayout = layout(
     lineText(buffer, buffer.caret.line),
-    view.size.columns,
+    textColumns(buffer, view.size),
   )
   return Array.reduce(
     rowGlyphs(lineLayout, rowOfColumn(lineLayout, buffer.caret.column)),
@@ -411,7 +423,7 @@ export const rowTarget = (
   view: View,
   rows: number,
 ): Buffer['caret'] => {
-  const layoutOf = layouts(buffer, '', view.size.columns)
+  const layoutOf = layouts(buffer, '', textColumns(buffer, view.size))
   const from = caretTop(buffer, layoutOf, '')
   const to = walk(buffer, layoutOf, from, rows)
   if (orderTop(from, to) === 0) {

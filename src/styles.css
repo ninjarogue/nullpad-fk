@@ -37,16 +37,13 @@ body {
   display: flex;
   flex-direction: column;
   height: 100%;
-  padding-left: 2ch;
 }
 
 .surface {
   position: relative;
   flex: 1;
-  box-sizing: content-box;
   min-height: 0;
-  max-width: 76ch;
-  padding: 10px 2ch 0 6ch;
+  padding: 10px 2ch 0;
   overflow: hidden;
   cursor: text;
   user-select: none;
@@ -55,6 +52,7 @@ body {
 .row {
   position: relative;
   height: var(--row);
+  margin-left: calc(var(--gutter) * 1ch);
   white-space: pre;
   tab-size: 1;
 }
@@ -62,8 +60,8 @@ body {
 .row[data-n]::before {
   content: attr(data-n);
   position: absolute;
-  left: -5ch;
-  width: 3.5ch;
+  left: calc(var(--gutter) * -1ch);
+  width: calc((var(--gutter) - 2) * 1ch);
   text-align: right;
   color: var(--number);
 }
@@ -129,6 +127,7 @@ body {
   gap: 2ch;
   align-items: center;
   height: var(--row);
+  margin-left: 2ch;
   padding: 0 1ch;
   overflow: hidden;
   border-top: 1px solid var(--rule);

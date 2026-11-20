@@ -1,6 +1,12 @@
 import { Array, Option, Order, Schema } from 'effect'
 
-import { type Buffer, type Grapheme, type LineId, graphemes } from './buffer'
+import {
+  type Buffer,
+  type Grapheme,
+  type LineId,
+  graphemes,
+  segmenter,
+} from './buffer'
 
 /** The screen is a grid of cells whose size the shell reports, as a terminal does. The gutter is part of it. */
 export const Size = Schema.Struct({
@@ -83,82 +89,133 @@ const cells = (grapheme: string): 1 | 2 => {
 
 type Glyph = Grapheme & Readonly<{ cells: 1 | 2 }>
 
-/** A line cut into visual rows. `rowStarts` holds the index into `glyphs` of each row's first glyph. */
+/**
+ * A line cut into visual rows: row `r` begins at column `starts[r]`, after `counts[r]` graphemes.
+ * Rows hold no glyphs, so a long line costs one pass to wrap and its rows are cut only when drawn.
+ */
 type Layout = Readonly<{
   text: string
-  glyphs: ReadonlyArray<Glyph>
-  rowStarts: Array.NonEmptyReadonlyArray<number>
+  columns: number
+  starts: Array.NonEmptyReadonlyArray<number>
+  counts: Array.NonEmptyReadonlyArray<number>
 }>
+
+const isAscii = /^[\x00-\x7f]*$/
+
+/** Calls `place` with each grapheme's column and cells, without building an array of them. */
+const eachGlyph = (
+  text: string,
+  place: (index: number, cells: 1 | 2, isSpace: boolean) => void,
+): void => {
+  if (isAscii.test(text)) {
+    for (let index = 0; index < text.length; index++) {
+      place(index, 1, text.charCodeAt(index) === 32)
+    }
+    return
+  }
+  for (const { index, segment } of segmenter.segment(text)) {
+    place(index, cells(segment), segment === ' ')
+  }
+}
 
 /**
  * Breaks after a space, or inside a word longer than a row. No row is wider than `columns`
  * unless it holds one glyph, and a row ends at a space only when text precedes that space in it,
  * so a space never sits alone on a row while the text after it could join it.
  */
-const layout = (text: string, columns: number): Layout => {
-  const glyphs = Array.map(graphemes(text), grapheme => ({
-    ...grapheme,
-    cells: cells(grapheme.segment),
-  }))
-  const rowStarts: Array.NonEmptyArray<number> = [0]
+const wrap = (text: string, columns: number): Layout => {
+  const starts: Array.NonEmptyArray<number> = [0]
+  const counts: Array.NonEmptyArray<number> = [0]
+  let count = 0
   let rowStart = 0
   let width = 0
   let hasText = false
   let breakAt = -1
+  let breakCount = 0
   let sinceBreak = 0
-  glyphs.forEach((glyph, at) => {
-    if (width + glyph.cells > columns && at > rowStart) {
+  const startRow = (at: number, before: number) => {
+    starts.push(at)
+    counts.push(before)
+    rowStart = at
+  }
+  eachGlyph(text, (at, glyphCells, isSpace) => {
+    if (width + glyphCells > columns && at > rowStart) {
       if (breakAt > rowStart) {
-        rowStarts.push(breakAt)
-        rowStart = breakAt
+        startRow(breakAt, breakCount)
         width = sinceBreak
         hasText = sinceBreak > 0
       }
-      if (width + glyph.cells > columns && at > rowStart) {
-        rowStarts.push(at)
-        rowStart = at
+      if (width + glyphCells > columns && at > rowStart) {
+        startRow(at, count)
         width = 0
         hasText = false
       }
       breakAt = -1
     }
-    width += glyph.cells
-    if (glyph.segment === ' ' && hasText) {
+    width += glyphCells
+    count += 1
+    if (isSpace && hasText) {
       breakAt = at + 1
+      breakCount = count
       sinceBreak = 0
     } else {
-      hasText ||= glyph.segment !== ' '
-      sinceBreak += glyph.cells
+      hasText ||= !isSpace
+      sinceBreak += glyphCells
     }
   })
-  return { text, glyphs, rowStarts }
+  return { text, columns, starts, counts }
 }
 
-const rowCount = (lineLayout: Layout): number => lineLayout.rowStarts.length
+const layouts = new Map<LineId, Layout>()
 
-const rowGlyphs = (lineLayout: Layout, row: number): ReadonlyArray<Glyph> =>
-  lineLayout.glyphs.slice(
-    lineLayout.rowStarts[row] ?? lineLayout.glyphs.length,
-    lineLayout.rowStarts[row + 1] ?? lineLayout.glyphs.length,
-  )
+/** The wrap of one line, remembered by line id while its text and the width stay the same. */
+const layout = (id: LineId, text: string, columns: number): Layout => {
+  if (text.length * 2 <= columns) {
+    return { text, columns, starts: [0], counts: [0] }
+  }
+  const known = layouts.get(id)
+  if (known !== undefined && known.text === text && known.columns === columns) {
+    return known
+  }
+  const wrapped = wrap(text, columns)
+  if (layouts.size >= 256) {
+    layouts.clear()
+  }
+  layouts.set(id, wrapped)
+  return wrapped
+}
+
+const rowCount = (lineLayout: Layout): number => lineLayout.starts.length
 
 const rowColumn = (lineLayout: Layout, row: number): number =>
-  Option.match(
-    Option.fromUndefinedOr(
-      lineLayout.glyphs[lineLayout.rowStarts[row] ?? lineLayout.glyphs.length],
-    ),
-    { onNone: () => lineLayout.text.length, onSome: ({ index }) => index },
+  lineLayout.starts[row] ?? lineLayout.text.length
+
+const rowGlyphs = (lineLayout: Layout, row: number): ReadonlyArray<Glyph> => {
+  const start = rowColumn(lineLayout, row)
+  return Array.map(
+    graphemes(lineLayout.text.slice(start, rowColumn(lineLayout, row + 1))),
+    ({ index, segment }) => ({
+      index: start + index,
+      segment,
+      cells: cells(segment),
+    }),
   )
+}
 
 /** The row of a column. A column on a break belongs to the row it starts. */
-const rowOfColumn = (lineLayout: Layout, column: number): number =>
-  Option.getOrElse(
-    Array.findLastIndex(
-      lineLayout.rowStarts,
-      (_, row) => rowColumn(lineLayout, row) <= column,
-    ),
-    () => 0,
-  )
+const rowOfColumn = (lineLayout: Layout, column: number): number => {
+  let low = 0
+  let high = lineLayout.starts.length - 1
+  while (low < high) {
+    const middle = Math.ceil((low + high) / 2)
+    if (rowColumn(lineLayout, middle) <= column) {
+      low = middle
+    } else {
+      high = middle - 1
+    }
+  }
+  return low
+}
 
 /** Cells left of the text: the largest line number, at least four digits, then two blank cells. */
 export const gutterWidth = (buffer: Buffer): number =>
@@ -182,10 +239,14 @@ const displayText = (buffer: Buffer, line: number, preedit: string): string => {
     : text
 }
 
-const layouts =
+const lineLayouts =
   (buffer: Buffer, preedit: string, columns: number) =>
   (line: number): Layout =>
-    layout(displayText(buffer, line, preedit), columns)
+    layout(
+      buffer.lines[line]?.id ?? buffer.lines[0].id,
+      displayText(buffer, line, preedit),
+      columns,
+    )
 
 const orderTop: Order.Order<Top> = Order.combine(
   Order.mapInput(Order.Number, (top: Top) => top.line),
@@ -284,17 +345,19 @@ const mergeInto = (
         : Array.append(spans, span),
   })
 
+/** Rows `from` up to `to` of one line, cut from its layout only for those rows. */
 const lineRows = (
   buffer: Buffer,
   line: number,
   preedit: string,
-  columns: number,
+  lineLayout: Layout,
+  from: number,
+  to: number,
 ): ReadonlyArray<Row> => {
   const isCaretLine = line === buffer.caret.line
   const caretColumn = buffer.caret.column
   const ghost = isCaretLine ? preedit.length : 0
   const caretAt = isCaretLine ? caretColumn + ghost : -1
-  const lineLayout = layout(displayText(buffer, line, preedit), columns)
   const lastRow = rowCount(lineLayout) - 1
   const lineColumn = (at: number): number =>
     at <= caretColumn ? at : at < caretColumn + ghost ? caretColumn : at - ghost
@@ -305,7 +368,7 @@ const lineRows = (
         ? 'Caret'
         : 'Text'
   const id = buffer.lines[line]?.id ?? buffer.lines[0].id
-  return Array.map(lineLayout.rowStarts, (_, row) => {
+  return Array.map(Array.range(from, Math.min(to, lastRow + 1) - 1), row => {
     const spans = Array.reduce(
       rowGlyphs(lineLayout, row),
       Array.empty<Span>(),
@@ -341,32 +404,32 @@ export const rows = (
   view: View,
   preedit: string,
 ): ReadonlyArray<Row> => {
-  const collect = (
-    line: number,
-    skip: number,
-    collected: ReadonlyArray<Row>,
-  ): ReadonlyArray<Row> =>
-    collected.length >= view.size.rows || line >= buffer.lines.length
-      ? collected
-      : collect(
-          line + 1,
-          0,
-          Array.appendAll(
-            collected,
-            lineRows(
-              buffer,
-              line,
-              preedit,
-              textColumns(buffer, view.size),
-            ).slice(skip, skip + view.size.rows - collected.length),
-          ),
-        )
-  return collect(view.top.line, view.top.row, [])
+  const layoutOf = lineLayouts(buffer, preedit, textColumns(buffer, view.size))
+  const screen: Array<Row> = []
+  let skip = view.top.row
+  for (
+    let line = view.top.line;
+    screen.length < view.size.rows && line < buffer.lines.length;
+    line++
+  ) {
+    screen.push(
+      ...lineRows(
+        buffer,
+        line,
+        preedit,
+        layoutOf(line),
+        skip,
+        skip + view.size.rows - screen.length,
+      ),
+    )
+    skip = 0
+  }
+  return screen
 }
 
 /** The smallest scroll that puts the caret row on screen. Applying it twice changes nothing. */
 export const follow = (buffer: Buffer, view: View, preedit: string): View => {
-  const layoutOf = layouts(buffer, preedit, textColumns(buffer, view.size))
+  const layoutOf = lineLayouts(buffer, preedit, textColumns(buffer, view.size))
   const top = clampTop(buffer, layoutOf, view.top)
   const caret = caretTop(buffer, layoutOf, preedit)
   const bottom = walk(buffer, layoutOf, top, view.size.rows - 1)
@@ -380,7 +443,7 @@ export const follow = (buffer: Buffer, view: View, preedit: string): View => {
 
 /** Scrolls by whole rows and stops where the last row of the text reaches the bottom. The caret stays where it is. */
 export const scroll = (buffer: Buffer, view: View, rows: number): View => {
-  const layoutOf = layouts(buffer, '', textColumns(buffer, view.size))
+  const layoutOf = lineLayouts(buffer, '', textColumns(buffer, view.size))
   const top = clampTop(buffer, layoutOf, view.top)
   const moved = walk(buffer, layoutOf, top, rows)
   const limit = Order.max(orderTop)(top, lastTop(buffer, layoutOf, view.size))
@@ -392,7 +455,7 @@ export const scroll = (buffer: Buffer, view: View, rows: number): View => {
 
 /** Keeps the screen full after a resize shrank the text's height. */
 export const settle = (buffer: Buffer, view: View): View => {
-  const layoutOf = layouts(buffer, '', textColumns(buffer, view.size))
+  const layoutOf = lineLayouts(buffer, '', textColumns(buffer, view.size))
   return {
     ...view,
     top: Order.min(orderTop)(
@@ -402,11 +465,33 @@ export const settle = (buffer: Buffer, view: View): View => {
   }
 }
 
-export const caretCell = (buffer: Buffer, view: View): number => {
-  const lineLayout = layout(
-    lineText(buffer, buffer.caret.line),
+/** Graphemes before the caret on its line, counted from the line's layout rather than the whole line. */
+export const caretGrapheme = (
+  buffer: Buffer,
+  view: View,
+  preedit: string,
+): number => {
+  const lineLayout = lineLayouts(
+    buffer,
+    preedit,
     textColumns(buffer, view.size),
+  )(buffer.caret.line)
+  const row = rowOfColumn(lineLayout, buffer.caret.column)
+  return (
+    (lineLayout.counts[row] ?? 0) +
+    Array.filter(
+      rowGlyphs(lineLayout, row),
+      glyph => glyph.index < buffer.caret.column,
+    ).length
   )
+}
+
+export const caretCell = (buffer: Buffer, view: View): number => {
+  const lineLayout = lineLayouts(
+    buffer,
+    '',
+    textColumns(buffer, view.size),
+  )(buffer.caret.line)
   return Array.reduce(
     rowGlyphs(lineLayout, rowOfColumn(lineLayout, buffer.caret.column)),
     0,
@@ -423,7 +508,7 @@ export const rowTarget = (
   view: View,
   rows: number,
 ): Buffer['caret'] => {
-  const layoutOf = layouts(buffer, '', textColumns(buffer, view.size))
+  const layoutOf = lineLayouts(buffer, '', textColumns(buffer, view.size))
   const from = caretTop(buffer, layoutOf, '')
   const to = walk(buffer, layoutOf, from, rows)
   if (orderTop(from, to) === 0) {

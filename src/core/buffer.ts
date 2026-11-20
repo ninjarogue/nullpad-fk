@@ -38,7 +38,9 @@ export type Motion = typeof Motion.Type
 
 export type Grapheme = Readonly<{ index: number; segment: string }>
 
-const segmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' })
+export const segmenter = new Intl.Segmenter(undefined, {
+  granularity: 'grapheme',
+})
 
 export const graphemes = (text: string): ReadonlyArray<Grapheme> =>
   Array.map(
@@ -49,6 +51,37 @@ export const graphemes = (text: string): ReadonlyArray<Grapheme> =>
     }),
   )
 
+/** The grapheme around a column, found by segmenting only near it. None at the end of the text. */
+const graphemeAt = (text: string, column: number) =>
+  Option.fromUndefinedOr(segmenter.segment(text).containing(column))
+
+const previousBoundary = (text: string, column: number): number =>
+  column <= 0
+    ? 0
+    : Option.match(graphemeAt(text, column - 1), {
+        onNone: () => text.length,
+        onSome: ({ index }) => index,
+      })
+
+const nextBoundary = (text: string, column: number): number =>
+  Option.match(graphemeAt(text, column), {
+    onNone: () => text.length,
+    onSome: ({ index, segment }) => index + segment.length,
+  })
+
+const boundaryAtOrBefore = (text: string, column: number): number =>
+  Option.match(graphemeAt(text, column), {
+    onNone: () => text.length,
+    onSome: ({ index }) => index,
+  })
+
+const boundaryAtOrAfter = (text: string, column: number): number =>
+  Option.match(graphemeAt(text, column), {
+    onNone: () => text.length,
+    onSome: ({ index, segment }) =>
+      index === column ? column : index + segment.length,
+  })
+
 const splitLines = (text: string): Array.NonEmptyReadonlyArray<string> => {
   const [first = '', ...rest] = text.split(/\r\n|\r|\n/)
   return [first, ...rest]
@@ -57,46 +90,22 @@ const splitLines = (text: string): Array.NonEmptyReadonlyArray<string> => {
 const lineAt = (buffer: Buffer, index: number): Line =>
   buffer.lines[index] ?? buffer.lines[0]
 
+/** Typing replaces one line with one line, so that case copies the line array once instead of three times. */
 const replaceLines = (
   buffer: Buffer,
   from: number,
   to: number,
   replacement: Array.NonEmptyReadonlyArray<Line>,
 ): Array.NonEmptyReadonlyArray<Line> =>
-  Array.prependAll(
-    Array.appendAll(replacement, buffer.lines.slice(to + 1)),
-    buffer.lines.slice(0, from),
-  )
-
-const boundaries = (text: string): ReadonlyArray<number> =>
-  Array.append(
-    Array.map(graphemes(text), ({ index }) => index),
-    text.length,
-  )
-
-const previousBoundary = (text: string, column: number): number =>
-  Option.getOrElse(
-    Array.findLast(boundaries(text), at => at < column),
-    () => 0,
-  )
-
-const nextBoundary = (text: string, column: number): number =>
-  Option.getOrElse(
-    Array.findFirst(boundaries(text), at => at > column),
-    () => text.length,
-  )
-
-const boundaryAtOrBefore = (text: string, column: number): number =>
-  Option.getOrElse(
-    Array.findLast(boundaries(text), at => at <= column),
-    () => 0,
-  )
-
-const boundaryAtOrAfter = (text: string, column: number): number =>
-  Option.getOrElse(
-    Array.findFirst(boundaries(text), at => at >= column),
-    () => text.length,
-  )
+  from === to && replacement.length === 1
+    ? Option.getOrElse(
+        Array.replace(buffer.lines, from, replacement[0]),
+        () => buffer.lines,
+      )
+    : Array.prependAll(
+        Array.appendAll(replacement, buffer.lines.slice(to + 1)),
+        buffer.lines.slice(0, from),
+      )
 
 export const fromText = (text: string): Buffer => {
   const lines = splitLines(text)

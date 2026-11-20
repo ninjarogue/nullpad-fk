@@ -177,14 +177,14 @@ export const resize = (
 
 export const paint = (editor: Editor): Frame => {
   const { caret, lines } = editor.buffer
-  const before = (lines[caret.line]?.text ?? '').slice(0, caret.column)
   return {
     rows: Screen.rows(editor.buffer, editor.view, editor.preedit),
     gutter: Screen.gutterWidth(editor.buffer),
     status: {
       mode: editor.mode,
       line: caret.line + 1,
-      column: Buffer.graphemes(before).length + 1,
+      column:
+        Screen.caretGrapheme(editor.buffer, editor.view, editor.preedit) + 1,
       lineCount: lines.length,
     },
   }

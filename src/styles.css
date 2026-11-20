@@ -78,6 +78,10 @@ body {
   vertical-align: top;
 }
 
+.hang {
+  font-size: 0;
+}
+
 .cur {
   anchor-name: --caret;
   background: var(--cur);

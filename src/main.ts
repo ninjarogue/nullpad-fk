@@ -29,9 +29,9 @@ export const update = (model: Model, message: Message) =>
         editor: editor => Editor.feed(editor, input),
       }),
     }),
-    ClickedText: ({ lineId, column, atRowEnd }) => ({
+    ClickedText: ({ row, cell }) => ({
       model: modifyFields(model, {
-        editor: editor => Editor.click(editor, lineId, column, atRowEnd),
+        editor: editor => Editor.click(editor, row, cell),
       }),
     }),
     ScrolledWheel: ({ rows }) => ({

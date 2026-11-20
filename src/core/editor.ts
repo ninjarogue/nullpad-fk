@@ -67,23 +67,38 @@ const samePosition = (a: Buffer.Position, b: Buffer.Position): boolean =>
   a.line === b.line && a.column === b.column
 
 const insertText =
-  (text: string) =>
+  (text: string, atRowEnd = false) =>
   (editor: Editor): Editor => {
     const { buffer, view } = settled(editor)
     return show(editor, Buffer.insert(buffer, text), {
       ...view,
       goalCell: Option.none(),
-      caretAtRowEnd: false,
+      caretAtRowEnd: atRowEnd,
     })
   }
 
-/** Text typed by a key, after which Chrome moves the caret past a grapheme the text joined (z before ZWJ 🇵). */
+/**
+ * Text typed by a key, after which Chrome moves the caret past a grapheme the text joined (z before ZWJ 🇵).
+ * After a space typed by a key, a caret left where the line now wraps shows at the end of the upper row, as in Chrome;
+ * the same space inserted another way leaves it at the start of the lower row.
+ */
 const typeText =
   (text: string) =>
   (editor: Editor): Editor => {
-    const inserted = insertText(text)(editor)
+    const inserted = insertText(text, text === ' ')(editor)
     return { ...inserted, buffer: Buffer.settle(inserted.buffer) }
   }
+
+/** Enter. Chrome keeps the goal cell when the break splits a line, and clears it at a line end. */
+const breakLine = (editor: Editor): Editor => {
+  const { caret } = Buffer.settle(editor.buffer)
+  const splits =
+    caret.column < (editor.buffer.lines[caret.line]?.text.length ?? 0)
+  const typed = typeText('\n')(editor)
+  return splits
+    ? { ...typed, view: { ...typed.view, goalCell: editor.view.goalCell } }
+    : typed
+}
 
 const eraseTo =
   (motion: Buffer.Motion) =>
@@ -137,7 +152,7 @@ const moveToRowEdge =
   }
 
 const moveRows =
-  (rowsOf: (view: Screen.View) => number) =>
+  (rows: number) =>
   (editor: Editor): Editor => {
     const { buffer, view } = settled(editor)
     const aimed = {
@@ -146,7 +161,7 @@ const moveRows =
         Option.getOrElse(view.goalCell, () => Screen.caretCell(buffer, view)),
       ),
     }
-    const { caret, atRowEnd } = Screen.rowTarget(buffer, aimed, rowsOf(view))
+    const { caret, atRowEnd } = Screen.rowTarget(buffer, aimed, rows)
     const moved = Buffer.moveTo(buffer, caret)
     return show(
       editor,
@@ -155,24 +170,46 @@ const moveRows =
     )
   }
 
+/**
+ * Page Up and Page Down move the caret a page of rows at the cell it is drawn on, then scroll its row to the top of
+ * the screen, as far as the end of the text allows. Like Chrome, they forget the goal cell.
+ */
+const page =
+  (direction: -1 | 1) =>
+  (editor: Editor): Editor => {
+    const { buffer, view } = settled(editor)
+    const { caret, atRowEnd } = Screen.pageTarget(buffer, view, direction)
+    const moved = Buffer.moveTo(buffer, caret)
+    const next = samePosition(moved.caret, buffer.caret) ? editor.buffer : moved
+    return {
+      ...editor,
+      buffer: next,
+      view: Screen.caretRowFirst(next, {
+        ...view,
+        goalCell: Option.none(),
+        caretAtRowEnd: atRowEnd,
+      }),
+    }
+  }
+
 const plainKeys: Readonly<
   Record<NamedKey, (editor: Editor, modifiers: Modifiers) => Editor>
 > = {
   Escape: editor => editor,
-  Enter: typeText('\n'),
+  Enter: breakLine,
   Tab: typeText('  '),
   Backspace: eraseTo('BackspaceStart'),
   Delete: eraseTo('Right'),
   ArrowLeft: step('Left'),
   ArrowRight: step('Right'),
-  ArrowUp: moveRows(() => -1),
-  ArrowDown: moveRows(() => 1),
+  ArrowUp: moveRows(-1),
+  ArrowDown: moveRows(1),
   Home: (editor, { ctrl }) =>
     ctrl ? moveBy('DocumentStart')(editor) : moveToRowEdge('Start')(editor),
   End: (editor, { ctrl }) =>
     ctrl ? moveBy('DocumentEnd')(editor) : moveToRowEdge('End')(editor),
-  PageUp: moveRows(view => 1 - view.size.rows),
-  PageDown: moveRows(view => view.size.rows - 1),
+  PageUp: page(-1),
+  PageDown: page(1),
 }
 
 /**
@@ -200,24 +237,23 @@ export const feed = (editor: Editor, input: Input): Editor =>
   })
 
 /**
- * The pointer chose a place. An unknown line id returns the same Editor. The column is clamped.
- * `atRowEnd` says the pointer was past the end of the row the column ends, rather than on the row it starts.
+ * The pointer pressed `row` rows down the screen and `cell` cells from its left edge, the gutter included.
+ * The place is read against this Editor, so a click lands where it would after every input fed before it.
  */
-export const click = (
-  editor: Editor,
-  lineId: number,
-  column: number,
-  atRowEnd: boolean,
-): Editor =>
-  Option.match(Buffer.indexOf(editor.buffer, lineId), {
-    onNone: () => editor,
-    onSome: line =>
-      show(editor, Buffer.moveTo(editor.buffer, { line, column }), {
-        ...editor.view,
-        goalCell: Option.none(),
-        caretAtRowEnd: atRowEnd,
-      }),
+export const click = (editor: Editor, row: number, cell: number): Editor => {
+  const { caret, atRowEnd } = Screen.pointAt(
+    editor.buffer,
+    editor.view,
+    editor.preedit,
+    row,
+    cell,
+  )
+  return show(editor, Buffer.moveTo(editor.buffer, caret), {
+    ...editor.view,
+    goalCell: Option.none(),
+    caretAtRowEnd: atRowEnd,
   })
+}
 
 /** The wheel moved the screen by whole rows. The caret may leave the screen until a `feed` that follows it. */
 export const scroll = (editor: Editor, rows: number): Editor =>

@@ -15,81 +15,23 @@ const probeCells = 100
 
 const pixels = (value: string): number => Number.parseFloat(value) || 0
 
-const isGhost = (node: Node): boolean =>
-  node instanceof HTMLElement && node.hasAttribute('data-ghost')
-
-const lengthOf = (node: Node): number =>
-  isGhost(node) ? 0 : (node.textContent ?? '').length
-
-const sumLengths = (nodes: ReadonlyArray<Node>): number =>
-  Array.reduce(nodes, 0, (sum, node) => sum + lengthOf(node))
-
-/** Characters of the line in the row before the hit, skipping ghost spans. */
-const offsetInRow = (row: HTMLElement, hit: CaretPosition): number => {
-  const children = Array.fromIterable(row.childNodes)
-  if (hit.offsetNode === row) {
-    return sumLengths(children.slice(0, hit.offset))
-  }
-  return Option.match(
-    Array.findFirstIndex(children, child => child.contains(hit.offsetNode)),
-    {
-      onNone: () => 0,
-      onSome: index =>
-        sumLengths(children.slice(0, index)) +
-        Math.min(hit.offset, lengthOf(children[index] ?? row)),
-    },
-  )
-}
-
 /**
- * The row under the pointer by its fixed height, then the column inside it by the browser's hit test.
- * Past the end of a row that wraps, the column is that row's end. Below the text, when the text ends on screen,
- * it is the end of the text, as in a Chrome text field.
+ * The pointer as rows down from the top of the text area and cells from its left edge, the gutter included.
+ * Only the core knows what text is there, and it reads the place against the editor after every input before
+ * the click, so a click right after a keystroke lands where the keystroke left the text.
  */
 const pointAt = (
   surface: HTMLElement,
-  cell: Readonly<{ height: number; rows: number }>,
+  style: CSSStyleDeclaration,
+  cell: Readonly<{ width: number; height: number }>,
   event: PointerEvent,
-): Option.Option<typeof Message.ClickedText.Type> => {
-  const rows = Array.fromIterable(
-    surface.querySelectorAll<HTMLElement>('[data-line-id]'),
-  )
-  return Option.flatMap(Array.head(rows), first => {
-    const index = Math.floor(
-      (event.clientY - first.getBoundingClientRect().top) / cell.height,
-    )
-    const row = rows[Math.max(0, Math.min(rows.length - 1, index))] ?? first
-    if (index >= rows.length && rows.length < cell.rows) {
-      return Option.some(
-        Message.ClickedText({
-          lineId: Number(row.dataset['lineId']),
-          column: Number.MAX_SAFE_INTEGER,
-          atRowEnd: false,
-        }),
-      )
-    }
-    const box = row.getBoundingClientRect()
-    const hit = document.caretPositionFromPoint(
-      Math.max(box.left, Math.min(box.right - 1, event.clientX)),
-      box.top + box.height / 2,
-    )
-    const offset =
-      hit === null || !row.contains(hit.offsetNode)
-        ? event.clientX <= box.left
-          ? 0
-          : Number.MAX_SAFE_INTEGER
-        : offsetInRow(row, hit)
-    const length = sumLengths(Array.fromIterable(row.childNodes))
-    const continues =
-      row.nextElementSibling instanceof HTMLElement &&
-      row.nextElementSibling.dataset['lineId'] === row.dataset['lineId']
-    return Option.some(
-      Message.ClickedText({
-        lineId: Number(row.dataset['lineId']),
-        column: Number(row.dataset['start']) + Math.min(offset, length),
-        atRowEnd: continues && offset >= length,
-      }),
-    )
+): typeof Message.ClickedText.Type => {
+  const box = surface.getBoundingClientRect()
+  return Message.ClickedText({
+    row: Math.floor(
+      (event.clientY - box.top - pixels(style.paddingTop)) / cell.height,
+    ),
+    cell: (event.clientX - box.left - pixels(style.paddingLeft)) / cell.width,
   })
 }
 
@@ -159,9 +101,7 @@ const observe = (
                 return
               }
               event.preventDefault()
-              Option.map(pointAt(surface, cell, event), message =>
-                Queue.offerUnsafe(queue, message),
-              )
+              Queue.offerUnsafe(queue, pointAt(surface, style, cell, event))
             },
             { signal },
           )
@@ -192,7 +132,10 @@ export const SurfacePort = Mount.defineStream('SurfacePort', {
   },
 })
 
-/** A boxed span is an inline-block `--cells` cells wide, the class `w`. */
+/**
+ * A boxed span is an inline-block `--cells` cells wide, the class `w`. A box of 0 cells holds spaces that hang past
+ * the row's edge, and the class `hang` sets them in no room at all.
+ */
 const boxed = (
   span: Span,
   className: string,
@@ -201,7 +144,7 @@ const boxed = (
   Option.match(span.box, {
     onNone: () => [h.Class(className)],
     onSome: cells => [
-      h.Class(`${className} w`.trim()),
+      h.Class(`${className} w${cells === 0 ? ' hang' : ''}`.trim()),
       h.Style({ '--cells': String(cells) }),
     ],
   })

@@ -67,21 +67,25 @@ const samePosition = (a: Buffer.Position, b: Buffer.Position): boolean =>
   a.line === b.line && a.column === b.column
 
 const insertText =
-  (text: string) =>
+  (text: string, atRowEnd = false) =>
   (editor: Editor): Editor => {
     const { buffer, view } = settled(editor)
     return show(editor, Buffer.insert(buffer, text), {
       ...view,
       goalCell: Option.none(),
-      caretAtRowEnd: false,
+      caretAtRowEnd: atRowEnd,
     })
   }
 
-/** Text typed by a key, after which Chrome moves the caret past a grapheme the text joined (z before ZWJ 🇵). */
+/**
+ * Text typed by a key, after which Chrome moves the caret past a grapheme the text joined (z before ZWJ 🇵).
+ * After a space typed by a key, a caret left where the line now wraps shows at the end of the upper row, as in Chrome;
+ * the same space inserted another way leaves it at the start of the lower row.
+ */
 const typeText =
   (text: string) =>
   (editor: Editor): Editor => {
-    const inserted = insertText(text)(editor)
+    const inserted = insertText(text, text === ' ')(editor)
     return { ...inserted, buffer: Buffer.settle(inserted.buffer) }
   }
 

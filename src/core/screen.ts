@@ -9,6 +9,11 @@ import {
   graphemes,
   segmenter,
 } from './buffer'
+import {
+  breaksBefore,
+  endsSpacedIdeographicSpace,
+  isBreakSpace,
+} from './lineBreak'
 
 /** The screen is a grid of cells whose size the shell reports, as a terminal does. The gutter is part of it. */
 export const Size = Schema.Struct({
@@ -36,7 +41,10 @@ export const View = Schema.Struct({
 })
 export type View = typeof View.Type
 
-/** CaretPastEnd is the caret on the cell after the last character. It and Preedit are not text of the line. */
+/**
+ * CaretPastEnd is the caret on the cell after the last character, or at the row's edge when it sits among or after
+ * spaces that hang past it, where Chrome draws its caret. It and Preedit are not text of the line.
+ */
 export const SpanKind = Schema.Literals([
   'Text',
   'Caret',
@@ -48,7 +56,8 @@ export type SpanKind = typeof SpanKind.Type
 /**
  * A span with a `box` is one grapheme the shell draws in a box that many cells wide: a grapheme wider than one cell,
  * so a fallback font cannot shift the row, or the first grapheme after a line join, so it is shaped apart from the
- * text before it, the way Chrome hit-tests the two sides of a join.
+ * text before it, the way Chrome hit-tests the two sides of a join. A box of 0 cells holds the spaces that hang past
+ * the row's edge, which take no room, as in a Chrome text field.
  */
 export type Span = Readonly<{
   text: string
@@ -143,30 +152,32 @@ const pieces = (
   return Array.zip([from, ...inside], [...inside, to])
 }
 
+/** Calls `place` with each grapheme from `from` on, until it returns true. */
 const eachGlyph = (
   text: string,
   joins: ReadonlyArray<number>,
   from: number,
-  place: (index: number, cells: number, isSpace: boolean) => boolean,
-): void => {
+  place: (index: number, segment: string, cells: number) => boolean,
+): boolean => {
   const rest = text.slice(from)
   if (isAscii.test(rest)) {
     for (let index = from; index < text.length; index++) {
-      if (place(index, 1, text.charCodeAt(index) === 32)) {
-        return
+      if (place(index, text.charAt(index), 1)) {
+        return true
       }
     }
-    return
+    return false
   }
   for (const [start, end] of pieces(joins, from, text.length)) {
     for (const { index, segment } of segmenter.segment(
       text.slice(start, end),
     )) {
-      if (place(start + index, cells(segment), segment === ' ')) {
-        return
+      if (place(start + index, segment, cells(segment))) {
+        return true
       }
     }
   }
+  return false
 }
 
 type Rows = Readonly<{
@@ -179,66 +190,119 @@ type Tail = Readonly<{
   counts: ReadonlyArray<number>
 }>
 
+type Placed = Readonly<{ at: number; segment: string; cells: number }>
+
 /**
- * Breaks after a space, or inside a word longer than a row. No row is wider than `columns`
- * unless it holds one glyph, and a row ends at a space only when text precedes that space in it,
- * so a space never sits alone on a row while the text after it could join it.
+ * Cuts a line into rows as a Chrome text field does with `white-space: pre-wrap` and `overflow-wrap: break-word`.
+ * A row ends at the last place `breaksBefore` allows before the first grapheme that would cross the edge, or inside
+ * a word longer than a row. Spaces never cross the edge: they stay on the row they end and hang past it, however
+ * many there are, so a row starts with a space only at the start of a line.
+ * Graphemes from `context` to `from` are only read, as the rules look two graphemes back. The rules also look two
+ * ahead, so each grapheme is placed once the two after it are read.
  * Starts at row start `from`, `before` graphemes in, and stops early once `tailAt` knows the rest.
  */
 const wrap = (
   text: string,
   joins: ReadonlyArray<number>,
   columns: number,
+  context: number,
   from: number,
   before: number,
-  tailAt: (start: number, count: number) => Option.Option<Tail>,
+  tailAt: (
+    start: number,
+    count: number,
+    previous: number,
+  ) => Option.Option<Tail>,
 ): Rows => {
   const starts: Array.NonEmptyArray<number> = [from]
   const counts: Array.NonEmptyArray<number> = [before]
   let count = before
   let rowStart = from
   let width = 0
-  let hasText = false
   let breakAt = -1
   let breakCount = 0
+  let breakPrevious = -1
   let sinceBreak = 0
   let tail: Option.Option<Tail> = Option.none()
-  const startRow = (at: number, graphemesBefore: number) => {
+  let previous: Placed | undefined
+  let twoBefore: string | undefined
+  let spacedIdeographicSpace = false
+  const startRow = (at: number, graphemesBefore: number, last: number) => {
     starts.push(at)
     counts.push(graphemesBefore)
     rowStart = at
-    tail = tailAt(at, graphemesBefore)
+    tail = tailAt(at, graphemesBefore, last)
   }
-  eachGlyph(text, joins, from, (at, glyphCells, isSpace) => {
-    if (width + glyphCells > columns && at > rowStart) {
-      if (breakAt > rowStart) {
-        startRow(breakAt, breakCount)
-        width = sinceBreak
-        hasText = sinceBreak > 0
+  const place = (
+    glyph: Placed,
+    after: string | undefined,
+    twoAfter: string | undefined,
+  ): boolean => {
+    const { at, segment } = glyph
+    if (at >= from && previous !== undefined) {
+      if (
+        at > rowStart &&
+        breaksBefore({
+          twoBefore,
+          before: previous.segment,
+          at: segment,
+          after,
+          twoAfter,
+          spacedIdeographicSpace,
+        })
+      ) {
+        breakAt = at
+        breakCount = count
+        breakPrevious = previous.at
+        sinceBreak = 0
       }
       if (
-        Option.isNone(tail) &&
-        width + glyphCells > columns &&
+        !isBreakSpace(segment) &&
+        width + glyph.cells > columns &&
         at > rowStart
       ) {
-        startRow(at, count)
-        width = 0
-        hasText = false
+        if (breakAt > rowStart) {
+          startRow(breakAt, breakCount, breakPrevious)
+          width = sinceBreak
+        }
+        if (
+          Option.isNone(tail) &&
+          width + glyph.cells > columns &&
+          at > rowStart
+        ) {
+          startRow(at, count, previous.at)
+          width = 0
+        }
+        breakAt = -1
       }
-      breakAt = -1
     }
-    width += glyphCells
-    count += 1
-    if (isSpace && hasText) {
-      breakAt = at + 1
-      breakCount = count
-      sinceBreak = 0
-    } else {
-      hasText ||= !isSpace
-      sinceBreak += glyphCells
+    if (at >= from) {
+      width += glyph.cells
+      count += 1
+      sinceBreak += glyph.cells
     }
+    spacedIdeographicSpace = endsSpacedIdeographicSpace(
+      segment,
+      previous?.segment,
+      spacedIdeographicSpace,
+    )
+    twoBefore = previous?.segment
+    previous = glyph
     return Option.isSome(tail)
+  }
+  const ahead: Array<Placed> = []
+  let stopped = eachGlyph(text, joins, context, (at, segment, glyphCells) => {
+    ahead.push({ at, segment, cells: glyphCells })
+    const next = ahead.length === 3 ? ahead.shift() : undefined
+    return (
+      next !== undefined && place(next, ahead[0]?.segment, ahead[1]?.segment)
+    )
   })
+  while (!stopped && ahead.length > 0) {
+    const next = ahead.shift()
+    stopped =
+      next !== undefined && place(next, ahead[0]?.segment, ahead[1]?.segment)
+  }
   return Option.match(tail, {
     onNone: () => ({ starts, counts }),
     onSome: rest => ({
@@ -270,10 +334,10 @@ const sharedSuffix = (a: string, b: string, prefix: number): number => {
 }
 
 /**
- * Wraps `text` again after an edit, reusing the rows of the text before it. A row's end
- * depends only on the graphemes up to the first one of the next row, so rows that end before
- * the edit keep their starts. From the first row start in the unchanged tail that lines up
- * with an old one, the old rows repeat, moved by the edit's length.
+ * Wraps `text` again after an edit, reusing the rows of the text before it. A row's end depends only on the
+ * graphemes from its start to two past the first one of the next row, so rows that start two rows before the edit
+ * keep their starts. From the first row start in the unchanged tail that lines up with an old one, and whose
+ * grapheme before it is unchanged too, the old rows repeat, moved by the edit's length.
  */
 const rewrap = (
   known: Layout,
@@ -284,11 +348,15 @@ const rewrap = (
   const prefix = sharedPrefix(known.text, text)
   const tailFrom = text.length - sharedSuffix(known.text, text, prefix)
   const shift = text.length - known.text.length
-  const resume = Math.max(0, rowOfColumn(known, prefix - 1) - 1)
-  const tailAt = (start: number, count: number): Option.Option<Tail> => {
+  const resume = Math.max(0, rowOfColumn(known, prefix - 1) - 2)
+  const tailAt = (
+    start: number,
+    count: number,
+    previous: number,
+  ): Option.Option<Tail> => {
     const row = rowOfColumn(known, start - shift)
     const oldCount = known.counts[row] ?? 0
-    return start >= tailFrom && known.starts[row] === start - shift
+    return previous >= tailFrom && known.starts[row] === start - shift
       ? Option.some({
           starts: Array.map(known.starts.slice(row + 1), at => at + shift),
           counts: Array.map(
@@ -302,6 +370,7 @@ const rewrap = (
     text,
     joins,
     columns,
+    rowColumn(known, Math.max(0, resume - 1)),
     rowColumn(known, resume),
     known.counts[resume] ?? 0,
     tailAt,
@@ -342,7 +411,7 @@ const layout = (
           text,
           joins,
           columns,
-          ...wrap(text, joins, columns, 0, 0, () => Option.none()),
+          ...wrap(text, joins, columns, 0, 0, 0, () => Option.none()),
         }
   if (layouts.size >= 256) {
     layouts.clear()
@@ -518,8 +587,8 @@ const mergeInto = (
     onSome: previous =>
       previous.kind === span.kind &&
       span.kind !== 'Caret' &&
-      Option.isNone(previous.box) &&
-      Option.isNone(span.box)
+      ((Option.isNone(previous.box) && Option.isNone(span.box)) ||
+        (Option.contains(previous.box, 0) && Option.contains(span.box, 0)))
         ? Array.append(spans.slice(0, -1), {
             ...previous,
             text: previous.text + span.text,
@@ -558,19 +627,39 @@ const lineRows = (
         ? 'Caret'
         : 'Text'
   const id = buffer.lines[line]?.id ?? buffer.lines[0].id
+  const noSpans: Readonly<{ spans: ReadonlyArray<Span>; width: number }> = {
+    spans: [],
+    width: 0,
+  }
+  const ghostCaret: Span = {
+    text: ' ',
+    kind: 'CaretPastEnd',
+    box: Option.none(),
+  }
   return Array.map(Array.range(from, Math.min(to, lastRow + 1) - 1), row => {
-    const spans = Array.reduce(
+    const { spans } = Array.reduce(
       rowGlyphs(lineLayout, row),
-      Array.empty<Span>(),
-      (spans: ReadonlyArray<Span>, glyph) =>
-        mergeInto(spans, {
+      noSpans,
+      ({ spans, width }, glyph) => {
+        const kind = kindOf(glyph)
+        const hangs = width >= lineLayout.columns
+        const span: Span = {
           text: glyph.segment,
-          kind: kindOf(glyph),
-          box:
-            glyph.cells > 1 || glyph.opensPiece
+          kind: kind === 'Caret' && hangs ? 'Text' : kind,
+          box: hangs
+            ? Option.some(0)
+            : glyph.cells > 1 || glyph.opensPiece
               ? Option.some(glyph.cells)
               : Option.none(),
-        }),
+        }
+        return {
+          spans: mergeInto(
+            kind === 'Caret' && hangs ? mergeInto(spans, ghostCaret) : spans,
+            span,
+          ),
+          width: width + glyph.cells,
+        }
+      },
     )
     return {
       key: `${id}:${row}`,
@@ -579,13 +668,7 @@ const lineRows = (
         ? lineColumn(rowColumn(lineLayout, row))
         : rowColumn(lineLayout, row),
       lineNumber: row === 0 ? Option.some(line + 1) : Option.none(),
-      spans: endsWithCaret(row)
-        ? Array.append(spans, {
-            text: ' ',
-            kind: 'CaretPastEnd',
-            box: Option.none(),
-          })
-        : spans,
+      spans: endsWithCaret(row) ? Array.append(spans, ghostCaret) : spans,
     }
   })
 }
@@ -688,16 +771,20 @@ export const caretGrapheme = (
 const caretLayout = (buffer: Buffer, view: View): Layout =>
   lineLayouts(buffer, '', textColumns(buffer, view.size))(buffer.caret.line)
 
+/** The caret's cell on its row. A caret among or after spaces that hang past the edge is at the edge. */
 export const caretCell = (buffer: Buffer, view: View): number => {
   const lineLayout = caretLayout(buffer, view)
-  return Array.reduce(
-    rowGlyphs(
-      lineLayout,
-      caretRow(lineLayout, buffer.caret.column, view.caretAtRowEnd),
+  return Math.min(
+    lineLayout.columns,
+    Array.reduce(
+      rowGlyphs(
+        lineLayout,
+        caretRow(lineLayout, buffer.caret.column, view.caretAtRowEnd),
+      ),
+      0,
+      (sum, glyph) =>
+        glyph.index < buffer.caret.column ? sum + glyph.cells : sum,
     ),
-    0,
-    (sum, glyph) =>
-      glyph.index < buffer.caret.column ? sum + glyph.cells : sum,
   )
 }
 

@@ -192,7 +192,10 @@ export const SurfacePort = Mount.defineStream('SurfacePort', {
   },
 })
 
-/** A boxed span is an inline-block `--cells` cells wide, the class `w`. */
+/**
+ * A boxed span is an inline-block `--cells` cells wide, the class `w`. A box of 0 cells holds spaces that hang past
+ * the row's edge, and the class `hang` sets them in no room at all.
+ */
 const boxed = (
   span: Span,
   className: string,
@@ -201,7 +204,7 @@ const boxed = (
   Option.match(span.box, {
     onNone: () => [h.Class(className)],
     onSome: cells => [
-      h.Class(`${className} w`.trim()),
+      h.Class(`${className} w${cells === 0 ? ' hang' : ''}`.trim()),
       h.Style({ '--cells': String(cells) }),
     ],
   })

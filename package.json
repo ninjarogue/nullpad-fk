@@ -7,11 +7,14 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p src/core/tsconfig.json",
     "format": "oxfmt",
     "format:check": "oxfmt --check",
-    "lint": "oxlint src && effect-tsgo patch --no-typescript --oxlint && oxlint --config .oxlintrc.effect.json --deny-warnings src",
-    "arch": "depcruise src --config .dependency-cruiser.cjs"
+    "lint": "oxlint src && oxlint --config .oxlintrc.effect.json --deny-warnings src",
+    "arch": "depcruise src --config .dependency-cruiser.cjs && npm run -s arch:core-ts-only",
+    "arch:core-ts-only": "bad=$(find src/core -type f ! -name '*.ts' ! -name '*.mts' ! -name '*.cts' ! -name tsconfig.json); test -z \"$bad\" || { echo \"src/core holds only .ts, .mts and .cts files. Found:\"; echo \"$bad\"; exit 1; }",
+    "postinstall": "effect-tsgo patch --no-typescript --oxlint",
+    "prepare": "test -e .git && git config core.hooksPath .githooks || true"
   },
   "dependencies": {
     "@effect/platform-browser": "4.1.5",

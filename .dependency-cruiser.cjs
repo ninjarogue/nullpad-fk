@@ -3,10 +3,10 @@ const core = '^src/core/'
 module.exports = {
   forbidden: [
     {
-      name: 'core-imports-shell',
+      name: 'core-imports-outside-core',
       severity: 'error',
       from: { path: core },
-      to: { path: '^src/', pathNot: core },
+      to: { pathNot: [core, '^node_modules/'] },
     },
     {
       name: 'core-imports-foldkit',

@@ -6,10 +6,9 @@ A markdown note editor that feels like a terminal, built with [Foldkit](https://
 
 ```sh
 npm install
-git config core.hooksPath .githooks
 ```
 
-The second command turns on `.githooks/pre-push`. Without it, `git push` runs no checks. Run it once in every clone.
+Installing also turns on `.githooks/pre-push` (the `prepare` script sets `core.hooksPath`) and applies the Effect lint patch (`postinstall`).
 
 ## Run
 

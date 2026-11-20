@@ -5,6 +5,10 @@ import type { Html, HtmlBuilder } from 'foldkit/html'
 import { Input, type Modifiers, NamedKey } from './core/input'
 import { Message } from './message'
 
+/** Whether the app's one text control has focus, which decides how the caret is drawn. */
+export const Keyboard = Schema.Literals(['Focused', 'Blurred'])
+export type Keyboard = typeof Keyboard.Type
+
 const browserChords: ReadonlySet<string> = new Set([
   'r',
   't',
@@ -33,7 +37,7 @@ const modifiersOf = (event: KeyboardEvent): Modifiers => ({
  * as text. Windows reports AltGr as Ctrl+Alt, so a character typed with both arrives as text.
  * It reads the event and nothing else, so its answer cannot depend on a stale Model.
  */
-export const fromKeyDown = (event: KeyboardEvent): Option.Option<Input> => {
+const fromKeyDown = (event: KeyboardEvent): Option.Option<Input> => {
   const { key } = event
   if (
     event.isComposing ||
@@ -60,7 +64,7 @@ export const fromKeyDown = (event: KeyboardEvent): Option.Option<Input> => {
 }
 
 /** A cancelable beforeinput as an Input. Only insertText carries one. */
-export const fromBeforeInput = (event: InputEvent): Option.Option<Input> =>
+const fromBeforeInput = (event: InputEvent): Option.Option<Input> =>
   event.inputType === 'insertText' && event.data !== null && event.data !== ''
     ? Option.some(Input.cases.Text.make({ text: event.data }))
     : Option.none()

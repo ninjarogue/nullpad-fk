@@ -1,12 +1,10 @@
-import { Array, Effect, Option, Queue, Schema, Stream } from 'effect'
+import { Array, Effect, Option, Queue, Stream } from 'effect'
 import { Mount } from 'foldkit'
 import type { Html, HtmlBuilder } from 'foldkit/html'
 
 import type { Frame, Mode, Row, Span, SpanKind } from './core/editor'
+import type { Keyboard } from './keyboard'
 import { Message } from './message'
-
-export const Keyboard = Schema.Literals(['Focused', 'Blurred'])
-export type Keyboard = typeof Keyboard.Type
 
 type SurfaceMessage =
   | typeof Message.ResizedScreen.Type

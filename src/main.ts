@@ -4,9 +4,9 @@ import type { Document, HtmlBuilder } from 'foldkit/html'
 import { modifyFields } from 'foldkit/struct'
 
 import * as Editor from './core/editor'
-import { keyboardPort } from './keyboard'
+import { Keyboard, keyboardPort } from './keyboard'
 import { Message } from './message'
-import { Keyboard, statusLine, surface } from './surface'
+import { statusLine, surface } from './surface'
 
 export { Message }
 

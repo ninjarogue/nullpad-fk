@@ -126,3 +126,22 @@ test('typing ASCII, CJK and emoji mid-line moves no row, and each wide character
     3 + 3 + 6,
   )
 })
+
+test('Korean syllables take two cells each, like CJK, for the wrap and the cursor', async ({
+  nullpad,
+}) => {
+  await nullpad.paste(`${'漢'.repeat(39)}\n${'한'.repeat(39)}`)
+  const screen = await nullpad.screen()
+  const rowLengths = (lineId: string | undefined) =>
+    screen.rows.filter(row => row.lineId === lineId).map(row => row.text.length)
+  const cjk = rowLengths(screen.rows[0]?.lineId)
+  expect(cjk, 'the CJK line wraps').toHaveLength(2)
+  expect(
+    rowLengths(screen.rows.at(-1)?.lineId),
+    'the Korean line wraps the same',
+  ).toEqual(cjk)
+  expectRowsFit(screen, 'the Korean line')
+  await nullpad.press('Home')
+  await nullpad.press('ArrowRight', 3)
+  expect((await nullpad.cursor())?.cell, 'three syllables of two cells').toBe(6)
+})

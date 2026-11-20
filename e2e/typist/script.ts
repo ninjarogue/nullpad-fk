@@ -201,6 +201,68 @@ export const namedScripts: ReadonlyArray<
     script: [...codePoints('👨‍👩‍👧'), key('Backspace'), text('y')],
   },
   {
+    name: 'Backspace takes a heart with its variation selector',
+    script: [text('❤'), text('️'), key('Backspace'), text('y')],
+  },
+  {
+    name: 'Backspace takes a whole keycap',
+    script: [...codePoints('1️⃣'), key('Backspace'), text('y')],
+  },
+  {
+    name: 'Backspace takes a keycap with no variation selector',
+    script: [...codePoints('#⃣'), key('Backspace'), text('y')],
+  },
+  {
+    name: 'ArrowLeft at a line start lands at the end of the line above',
+    script: [
+      text('a'),
+      text('b'),
+      key('Enter'),
+      text('c'),
+      key('Home'),
+      key('ArrowLeft'),
+      text('y'),
+    ],
+  },
+  {
+    name: 'Delete joins a mark onto a heart, then a thumbs up',
+    script: [
+      key('Enter'),
+      text('́'),
+      key('Control+Home'),
+      text('❤'),
+      key('Delete'),
+      text('👍'),
+    ],
+  },
+  {
+    name: 'Backspace and Delete re-pair flag letters, then a',
+    script: [
+      key('Enter'),
+      text('🇺'),
+      text('🇸'),
+      key('ArrowLeft'),
+      text('🇺'),
+      key('Backspace'),
+      key('ArrowLeft'),
+      text('🇸'),
+      key('Delete'),
+      text('a'),
+    ],
+  },
+  {
+    name: 'a flag typed at a lone flag letter that Backspace joined back',
+    script: [
+      text(' '),
+      text('🇸'),
+      key('ArrowLeft'),
+      key('Enter'),
+      key('Backspace'),
+      text('🇯'),
+      text('🇵'),
+    ],
+  },
+  {
     name: 'Enter and Backspace around a flag',
     script: [
       ...codePoints('🇯🇵'),

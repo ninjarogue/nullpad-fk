@@ -178,3 +178,58 @@ test('one huge wheel turn on a 20,000-line note scrolls without a crash and keep
   expect(back.status.lineCount).toBe(20_000)
   expect(pageErrors).toEqual([])
 })
+
+test('after another element on the page takes the keyboard, a click on the text gives it back', async ({
+  nullpad,
+}) => {
+  await nullpad.type('ab')
+  await nullpad.page.evaluate(() => {
+    const other = document.createElement('input')
+    other.id = 'other'
+    other.style.cssText =
+      'position: fixed; right: 8px; bottom: 40px; width: 120px; z-index: 1'
+    document.body.append(other)
+  })
+  const other = await nullpad.page.locator('#other').boundingBox()
+  await nullpad.click(
+    (other?.x ?? 0) + (other?.width ?? 0) / 2,
+    (other?.y ?? 0) + (other?.height ?? 0) / 2,
+  )
+  await nullpad.type('xy')
+  expect(await nullpad.text(), 'the note did not take the typing').toBe('ab')
+  const screen = await nullpad.screen()
+  await clickAt(nullpad, pointIn(screen, 0, 1))
+  await nullpad.type('Z')
+  expect(await nullpad.text(), 'typing after the click lands in the note').toBe(
+    'aZb',
+  )
+})
+
+test('wheel turns under one row never scroll, and turns add up to exactly one row per full row', async ({
+  nullpad,
+}) => {
+  await nullpad.paste(numberedLines(200))
+  await nullpad.press('Control+Home')
+  const { rowHeight } = await nullpad.screen()
+  await nullpad.page.mouse.move(400, 300)
+  const turns: ReadonlyArray<readonly [rows: number, top: string]> = [
+    [0.5, '1'],
+    [0.375, '1'],
+    [0.125, '2'],
+    [0.875, '2'],
+    [0.875, '3'],
+    [0.25, '4'],
+    [-0.5, '4'],
+    [-0.375, '4'],
+    [-0.125, '3'],
+  ]
+  let carried = 0
+  for (const [rows, top] of turns) {
+    carried += rows
+    await nullpad.wheel(rowHeight * rows)
+    expect(
+      (await nullpad.screen()).rows[0]?.number,
+      `after turns adding up to ${carried} rows`,
+    ).toBe(top)
+  }
+})

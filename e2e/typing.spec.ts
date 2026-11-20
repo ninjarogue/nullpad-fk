@@ -1,4 +1,9 @@
-import { type Nullpad, expect, test, textOf } from './nullpad'
+import { type Nullpad, expect, numberedLines, test, textOf } from './nullpad'
+
+const fortyWords = Array.from(
+  { length: 40 },
+  (_, i) => `w${String(i).padStart(2, '0')}`,
+).join(' ')
 
 test('a fresh editor takes typing at once and the status line reads EDIT untitled.md 1:1 1L', async ({
   nullpad,
@@ -218,11 +223,7 @@ test('300 keys sent while the main thread is blocked land in order', async ({
 test('Down then Up through wrapped rows and a short line keeps the cursor in cell 40', async ({
   nullpad,
 }) => {
-  const long = Array.from(
-    { length: 40 },
-    (_, i) => `w${String(i).padStart(2, '0')}`,
-  ).join(' ')
-  await nullpad.paste(`${long}\nshort\n${long}`)
+  await nullpad.paste(`${fortyWords}\nshort\n${fortyWords}`)
   await nullpad.press('Control+Home')
   await nullpad.press('ArrowRight', 40)
   const where = async () => {
@@ -258,4 +259,117 @@ test('Down then Up through wrapped rows and a short line keeps the cursor in cel
     { row: 1, cell: 40, at: '1:117' },
     { row: 0, cell: 40, at: '1:41' },
   ])
+})
+
+test('Down and Up from the start of a wrapped line walk every row at cell 0', async ({
+  nullpad,
+}) => {
+  await nullpad.paste(`${fortyWords}\nshort`)
+  await nullpad.press('Control+Home')
+  const screen = await nullpad.screen()
+  const starts = screen.rows.slice(0, 3).map(row => row.start)
+  expect(starts, 'the long line wraps to three rows').toHaveLength(3)
+  const where = async () => {
+    const after = await nullpad.screen()
+    return {
+      row: after.cursor?.row,
+      cell: after.cursor?.cell,
+      at: `${after.status.line}:${after.status.column}`,
+    }
+  }
+  const path = [await where()]
+  for (const key of ['ArrowDown', 'ArrowDown', 'ArrowDown']) {
+    await nullpad.press(key)
+    path.push(await where())
+  }
+  for (const key of ['ArrowUp', 'ArrowUp', 'ArrowUp']) {
+    await nullpad.press(key)
+    path.push(await where())
+  }
+  const rowStart = (row: number) => ({
+    row,
+    cell: 0,
+    at: `1:${(starts[row] ?? 0) + 1}`,
+  })
+  expect(path).toEqual([
+    rowStart(0),
+    rowStart(1),
+    rowStart(2),
+    { row: 3, cell: 0, at: '2:1' },
+    rowStart(2),
+    rowStart(1),
+    rowStart(0),
+  ])
+})
+
+test('ArrowRight off the end of the bottom row scrolls the next row of the same line into view', async ({
+  nullpad,
+}) => {
+  await nullpad.paste(numberedLines(200))
+  await nullpad.press('Control+Home')
+  const visible = (await nullpad.screen()).rows.length
+  await nullpad.press('ArrowDown', visible - 1)
+  await nullpad.paste(`${fortyWords} `)
+  await nullpad.press('Control+Home')
+  await nullpad.press('ArrowDown', visible - 1)
+  const before = await nullpad.screen()
+  const bottom = before.rows.at(-1)
+  expect(
+    { row: before.cursor?.row, top: before.rows[0]?.number },
+    'the cursor starts the long line on the bottom row',
+  ).toEqual({ row: visible - 1, top: '1' })
+  await nullpad.press('ArrowRight', (bottom?.text.length ?? 0) - 1)
+  expect(
+    (await nullpad.cursor())?.cell,
+    'the cursor on the last cell of the bottom row',
+  ).toBe((bottom?.text.length ?? 0) - 1)
+  await nullpad.press('ArrowRight')
+  const after = await nullpad.screen()
+  expect(
+    {
+      inside: after.cursor?.inside,
+      row: after.cursor?.row,
+      cell: after.cursor?.cell,
+      top: after.rows[0]?.number,
+    },
+    'one row scrolled up and the cursor starts the next row',
+  ).toEqual({ inside: true, row: visible - 1, cell: 0, top: '2' })
+})
+
+test('PageDown and PageUp move one screen less one row, so the row at the edge stays on screen', async ({
+  nullpad,
+}) => {
+  await nullpad.paste(numberedLines(200))
+  await nullpad.press('Control+Home')
+  const visible = (await nullpad.screen()).rows.length
+  const where = async () => {
+    const screen = await nullpad.screen()
+    return {
+      line: screen.status.line,
+      row: screen.cursor?.row,
+      top: Number(screen.rows[0]?.number),
+    }
+  }
+  const path = []
+  for (const key of ['PageDown', 'PageDown', 'PageUp', 'PageUp']) {
+    await nullpad.press(key)
+    path.push(await where())
+  }
+  expect(path).toEqual([
+    { line: visible, row: visible - 1, top: 1 },
+    { line: 2 * visible - 1, row: visible - 1, top: visible },
+    { line: visible, row: 0, top: visible },
+    { line: 1, row: 0, top: 1 },
+  ])
+})
+
+test('Ctrl+End from a short line lands at the end of the last line', async ({
+  nullpad,
+}) => {
+  await nullpad.paste('ab\nthe longer last line')
+  await nullpad.press('Control+Home')
+  await nullpad.press('Control+End')
+  expect(await nullpad.status()).toEqual({ line: 2, column: 21, lineCount: 2 })
+  await nullpad.type('!')
+  expect(await nullpad.text()).toBe('ab\nthe longer last line!')
 })

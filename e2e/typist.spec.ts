@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test'
 
-import { type Divergence, compare, openPair } from './typist/run'
+import { type Divergence, type Snapshot, compare, openPair } from './typist/run'
 import {
   type Script,
   hex,
@@ -13,17 +13,22 @@ import {
 } from './typist/script'
 
 const sequences = Number(process.env['TYPIST_SEQUENCES'] ?? 240)
-const shards = Number(process.env['TYPIST_SHARDS'] ?? 4)
+const shards = Number(process.env['TYPIST_SHARDS'] ?? 8)
 const runSeed = Number(process.env['TYPIST_SEED'])
 const replaySeed = process.env['TYPIST_REPLAY']
 
 test.describe.configure({ mode: 'parallel' })
 
+const rowsOf = (snapshot: Snapshot) =>
+  snapshot.rows === undefined
+    ? ''
+    : `, rows start at ${JSON.stringify(snapshot.rows)}`
+
 const describe = (divergence: Divergence): string =>
   [
     `after step ${divergence.at + 1} ${label(divergence.step)}`,
-    `  nullpad  ${JSON.stringify(divergence.nullpad.text)} [${hex(divergence.nullpad.text)}] at ${divergence.nullpad.line}:${divergence.nullpad.column}`,
-    `  textarea ${JSON.stringify(divergence.textarea.text)} [${hex(divergence.textarea.text)}] at ${divergence.textarea.line}:${divergence.textarea.column}`,
+    `  nullpad  ${JSON.stringify(divergence.nullpad.text)} [${hex(divergence.nullpad.text)}] at ${divergence.nullpad.line}:${divergence.nullpad.column}${rowsOf(divergence.nullpad)}`,
+    `  textarea ${JSON.stringify(divergence.textarea.text)} [${hex(divergence.textarea.text)}] at ${divergence.textarea.line}:${divergence.textarea.column}${rowsOf(divergence.textarea)}`,
   ].join('\n')
 
 test('typist: every named script matches a textarea', async ({

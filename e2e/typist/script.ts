@@ -1,4 +1,4 @@
-/** Random scripts leave out ArrowUp and ArrowDown: on wrapped or emoji rows a textarea aims by pixels, nullpad by cells. */
+/** Cluster scripts leave out ArrowUp and ArrowDown: on emoji rows a textarea aims by pixels, nullpad by cells. Prose scripts, whose characters are all one cell wide, press them. */
 export type TypistKey =
   | 'ArrowLeft'
   | 'ArrowRight'
@@ -12,19 +12,28 @@ export type TypistKey =
   | 'Delete'
   | 'Enter'
 
-/** A text step is typed as one key when it is one ASCII character, otherwise inserted as an IME or emoji picker does. */
+/**
+ * A text step is typed key by key when it is all ASCII, otherwise inserted as an IME or emoji picker does.
+ * An insert step is always inserted that way.
+ */
 export type Step =
   | Readonly<{ kind: 'text'; text: string }>
+  | Readonly<{ kind: 'insert'; text: string }>
   | Readonly<{ kind: 'key'; key: TypistKey }>
 
 export type Script = ReadonlyArray<Step>
 
 const text = (value: string): Step => ({ kind: 'text', text: value })
+const insert = (value: string): Step => ({ kind: 'insert', text: value })
 const key = (name: TypistKey): Step => ({ kind: 'key', key: name })
 const codePoints = (value: string): Script => [...value].map(text)
 
 export const label = (step: Step): string =>
-  step.kind === 'key' ? `<${step.key}>` : step.text
+  step.kind === 'key'
+    ? `<${step.key}>`
+    : step.kind === 'insert'
+      ? `<insert ${JSON.stringify(step.text)}>`
+      : step.text
 
 export const show = (script: Script): string => script.map(label).join(' ')
 
@@ -100,9 +109,8 @@ const pick = <A>(random: () => number, items: ReadonlyArray<A>): A => {
   return item
 }
 
-/** A script of 4 to 17 steps: whole clusters typed one code point at a time, lone code points, and editing keys. */
-export const randomScript = (seed: number): Script => {
-  const random = mulberry32(seed)
+/** 4 to 17 steps: whole clusters typed one code point at a time, lone code points, and editing keys. */
+const clusterScript = (random: () => number): Script => {
   const steps: Array<Step> = []
   const length = 4 + Math.floor(random() * 14)
   while (steps.length < length) {
@@ -116,6 +124,97 @@ export const randomScript = (seed: number): Script => {
     }
   }
   return steps
+}
+
+/** Words whose joints a textarea may or may not break at: hyphens, dashes, URLs, markdown, brackets, quotes and punctuation. */
+const words = [
+  'the',
+  'a',
+  'notes',
+  'editor',
+  'release',
+  'internationalization',
+  'state-of-the-art',
+  'well-known',
+  'page-12',
+  'x-1',
+  '-1',
+  'and/or',
+  'https://example.com/path/to/page?x=1&y=2',
+  '[a link](https://example.com)',
+  '**bold**',
+  '_italic_',
+  '`code`',
+  '(see',
+  'note)',
+  'word(note)',
+  'why?',
+  'wait!',
+  'ok...',
+  'end.',
+  'a,b',
+  '"quoted"',
+  "it's",
+  '$100',
+  '100%',
+  '#tag',
+  '@user',
+  'a=b+c',
+  '<tag>',
+  '{x}y',
+  '1,000.50',
+  'e.g.',
+  '- [ ]',
+  '>',
+  'long—dash',
+  'range–end',
+  'so…',
+  '“curly”',
+]
+const gaps = [' ', ' ', ' ', ' ', '  ', '   ', '']
+const proseKeys: ReadonlyArray<TypistKey> = [
+  ...keys,
+  'ArrowUp',
+  'ArrowDown',
+  'ArrowUp',
+  'ArrowDown',
+]
+
+const phrase = (random: () => number, count: number): string =>
+  Array.from(
+    { length: count },
+    () => pick(random, words) + pick(random, gaps),
+  ).join('')
+
+/**
+ * A line of 50 to 90 characters inserted at once, so the wrap edge is near, then 4 to 11 steps of one or two
+ * words typed key by key, runs of spaces, and editing keys.
+ */
+const proseScript = (random: () => number): Script => {
+  const target = 50 + Math.floor(random() * 41)
+  let line = ''
+  while (line.length < target) {
+    line += phrase(random, 1)
+  }
+  const steps: Array<Step> = [insert(line)]
+  const length = 5 + Math.floor(random() * 8)
+  while (steps.length < length) {
+    const roll = random()
+    if (roll < 0.45) {
+      steps.push(text(phrase(random, 1 + Math.floor(random() * 2))))
+    } else if (roll < 0.55) {
+      steps.push(text(' '.repeat(1 + Math.floor(random() * 6))))
+    } else {
+      steps.push(key(pick(random, proseKeys)))
+    }
+  }
+  return steps
+}
+
+/** A cluster script or a prose script, chosen by the seed. */
+export const randomScript = (seed: number): Script => {
+  const random = mulberry32(seed)
+  return random() < 0.5 ? clusterScript(random) : proseScript(random)
 }
 
 /** Scripts that once broke, kept as named cases. */

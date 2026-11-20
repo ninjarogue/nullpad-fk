@@ -333,6 +333,89 @@ export const expectNumbersClearOfText = async (
 export const numberedLines = (lines: number, suffix = ''): string =>
   Array.from({ length: lines }, (_, i) => `line ${i + 1}${suffix}`).join('\n')
 
+/** A grapheme the terminal grid gives two cells: an East Asian wide character or an emoji. */
+const wideGrapheme =
+  /^(?:\p{Emoji_Presentation}|\p{Extended_Pictographic}\ufe0f|[\u1100-\u115f\u2e80-\u303e\u3041-\u33ff\u3400-\u4dbf\u4e00-\u9fff\ua000-\ua4cf\uac00-\ud7a3\uf900-\ufaff\ufe30-\ufe6f\uff00-\uff60\uffe0-\uffe6])/u
+
+/**
+ * Where a textarea of the screen's wrap width breaks each line, in the editor's font and with each wide
+ * character two cells wide, as on the terminal grid. A div outside the app takes the textarea's wrap rules
+ * (pre-wrap, break-word); a margin pads each non-ASCII character to its cells, which moves no break.
+ */
+export const textareaRowStarts = (
+  page: Page,
+  lines: ReadonlyArray<string>,
+  columns: number,
+  cell: number,
+): Promise<ReadonlyArray<ReadonlyArray<number>>> =>
+  page.evaluate(
+    ({ lines, columns, cell, wide }) => {
+      const wideGrapheme = new RegExp(wide, 'u')
+      const segmenter = new Intl.Segmenter(undefined, {
+        granularity: 'grapheme',
+      })
+      const mirror = document.createElement('div')
+      Object.assign(mirror.style, {
+        position: 'absolute',
+        left: '0',
+        top: '0',
+        visibility: 'hidden',
+        width: `${columns * cell + 0.5}px`,
+        whiteSpace: 'pre-wrap',
+        overflowWrap: 'break-word',
+        wordBreak: 'normal',
+      })
+      document.body.append(mirror)
+      const range = document.createRange()
+      const starts = lines.map(line => {
+        mirror.replaceChildren()
+        const pieces: Array<{ node: Node; index: number }> = []
+        for (const { segment, index } of segmenter.segment(line)) {
+          if (/^[\x20-\x7e]$/.test(segment)) {
+            mirror.append(segment)
+            pieces.push({ node: mirror.lastChild ?? mirror, index })
+          } else {
+            const span = document.createElement('span')
+            span.textContent = segment
+            mirror.append(span)
+            const cells = wideGrapheme.test(segment) ? 2 : 1
+            span.style.marginLeft = `${cells * cell - span.getBoundingClientRect().width}px`
+            pieces.push({ node: span, index })
+          }
+        }
+        const rowStarts = [0]
+        let top: number | null = null
+        for (const { node, index } of pieces) {
+          range.selectNodeContents(node)
+          const rect = range.getClientRects()[0]
+          if (rect !== undefined) {
+            if (top !== null && rect.top > top + cell && index > 0) {
+              rowStarts.push(index)
+            }
+            top = rect.top
+          }
+        }
+        return rowStarts
+      })
+      mirror.remove()
+      return starts
+    },
+    { lines, columns, cell, wide: wideGrapheme.source },
+  )
+
+/** Where each line on screen starts its rows, as columns of the line. */
+export const rowStartsOf = (
+  screen: Screen,
+): ReadonlyArray<ReadonlyArray<number>> =>
+  screen.rows.reduce<Array<Array<number>>>((lines, row, index) => {
+    if (screen.rows[index - 1]?.lineId === row.lineId) {
+      lines.at(-1)?.push(row.start)
+    } else {
+      lines.push([row.start])
+    }
+    return lines
+  }, [])
+
 export const test = base.extend<{
   nullpad: Nullpad
   pageErrors: Array<string>

@@ -82,14 +82,14 @@ On a machine without Playwright's Chromium, install it once with `pnpm exec play
 
 ### Layout
 
-| File                                                     | What it covers                                                                                                                         |
-| -------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| `e2e/nullpad.ts`                                         | The `nullpad` fixture: opens the app and reads the screen (`screen()`, `text()`, `status()`, `cursor()`, `inkIn()`), and sends input.  |
-| `typing`, `ime`, `paste`, `pointer`, `layout` `.spec.ts` | Scenarios, one feature each. Every bug found so far has one here.                                                                      |
-| `click-sweep.spec.ts`                                    | Clicks a grid across the whole window and checks that the cursor lands on the nearest drawn character boundary each time.              |
-| `extremes.spec.ts`                                       | Giant and tiny wheel turns, 120,000-line pastes, line counts crossing 9,999 and 99,999, very long lines, AltGr keys, IME compositions. |
-| `typist.spec.ts`, `e2e/typist/`                          | The robot typist and its named scripts.                                                                                                |
-| `e2e/reporters/require-tests.ts`                         | Fails a run in which no test ran, so a filter or a skip cannot turn the gate green.                                                    |
+| File                                                             | What it covers                                                                                                                                                     |
+| ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `e2e/nullpad.ts`                                                 | The `nullpad` fixture: opens the app and reads the screen (`screen()`, `text()`, `status()`, `cursor()`, `inkIn()`), and sends input.                              |
+| `typing`, `ime`, `paste`, `pointer`, `layout`, `wrap` `.spec.ts` | Scenarios, one feature each. Every bug found so far has one here. `wrap` also checks where lines break against a textarea of the same width (`textareaRowStarts`). |
+| `click-sweep.spec.ts`                                            | Clicks a grid across the whole window and checks that the cursor lands on the nearest drawn character boundary each time.                                          |
+| `extremes.spec.ts`                                               | Giant and tiny wheel turns, 120,000-line pastes, line counts crossing 9,999 and 99,999, very long lines, AltGr keys, IME compositions.                             |
+| `typist.spec.ts`, `e2e/typist/`                                  | The robot typist and its named scripts.                                                                                                                            |
+| `e2e/reporters/require-tests.ts`                                 | Fails a run in which no test ran, so a filter or a skip cannot turn the gate green.                                                                                |
 
 ### Add a scenario
 

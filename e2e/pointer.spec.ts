@@ -290,3 +290,24 @@ for (const { name, upper, lower, cell, joined } of [
     expect(await nullpad.text()).toBe(`top\n${joined}`)
   })
 }
+
+test('a click sent right after typing lands by the text as typed, not by the frame still on screen', async ({
+  nullpad,
+}) => {
+  for (let trial = 1; trial <= 5; trial++) {
+    await nullpad.page.reload()
+    await nullpad.page.locator('#caret').waitFor()
+    const screen = await nullpad.screen()
+    const left = screen.rows[0]?.left ?? 0
+    await nullpad.page.keyboard.type('line one\nline two\n# Heading')
+    await nullpad.page.mouse.click(
+      left + 300,
+      screen.area.top + 2.5 * screen.rowHeight,
+    )
+    await nullpad.type('|')
+    expect(
+      await nullpad.text(),
+      `trial ${trial}: the click past the end of the third line`,
+    ).toBe('line one\nline two\n# Heading|')
+  }
+})

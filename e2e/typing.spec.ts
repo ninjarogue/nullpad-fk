@@ -336,31 +336,125 @@ test('ArrowRight off the end of the bottom row scrolls the next row of the same 
   ).toEqual({ inside: true, row: visible - 1, cell: 0, top: '2' })
 })
 
-test('PageDown and PageUp move one screen less one row, so the row at the edge stays on screen', async ({
+/** A textarea's page: seven eighths of the screen's rows, rounded down, as Chrome measured at every height. */
+const pageRows = (rows: number) => Math.floor((rows * 7) / 8)
+
+const pageStop = async (nullpad: Nullpad) => {
+  const screen = await nullpad.screen()
+  return {
+    line: screen.status.line,
+    column: screen.status.column,
+    row: screen.cursor?.row,
+    top: Number(screen.rows[0]?.number),
+  }
+}
+
+test('PageDown and PageUp move the cursor a textarea page and scroll its row to the top, as a textarea does', async ({
   nullpad,
 }) => {
   await nullpad.paste(numberedLines(200))
   await nullpad.press('Control+Home')
-  const visible = (await nullpad.screen()).rows.length
-  const where = async () => {
-    const screen = await nullpad.screen()
-    return {
-      line: screen.status.line,
-      row: screen.cursor?.row,
-      top: Number(screen.rows[0]?.number),
-    }
-  }
+  const page = pageRows((await nullpad.screen()).rows.length)
+  await nullpad.press('ArrowDown')
+  await nullpad.press('ArrowRight', 3)
   const path = []
-  for (const key of ['PageDown', 'PageDown', 'PageUp', 'PageUp']) {
+  for (const key of ['PageDown', 'PageDown', 'PageUp', 'PageUp', 'PageUp']) {
     await nullpad.press(key)
-    path.push(await where())
+    path.push({ key, ...(await pageStop(nullpad)) })
   }
   expect(path).toEqual([
-    { line: visible, row: visible - 1, top: 1 },
-    { line: 2 * visible - 1, row: visible - 1, top: visible },
-    { line: visible, row: 0, top: visible },
-    { line: 1, row: 0, top: 1 },
+    { key: 'PageDown', line: 2 + page, column: 4, row: 0, top: 2 + page },
+    {
+      key: 'PageDown',
+      line: 2 + 2 * page,
+      column: 4,
+      row: 0,
+      top: 2 + 2 * page,
+    },
+    { key: 'PageUp', line: 2 + page, column: 4, row: 0, top: 2 + page },
+    { key: 'PageUp', line: 2, column: 4, row: 0, top: 2 },
+    { key: 'PageUp', line: 1, column: 1, row: 0, top: 1 },
   ])
+})
+
+test('PageDown on the last page goes to the end of the note, and PageUp from there keeps the last page on screen', async ({
+  nullpad,
+}) => {
+  await nullpad.paste(numberedLines(200))
+  const visible = (await nullpad.screen()).rows.length
+  const page = pageRows(visible)
+  const lastTop = 200 - visible + 1
+  await nullpad.press('ArrowUp', 3)
+  await nullpad.press('Home')
+  await nullpad.press('PageDown')
+  expect(await pageStop(nullpad), 'PageDown past the last line').toEqual({
+    line: 200,
+    column: 9,
+    row: visible - 1,
+    top: lastTop,
+  })
+  await nullpad.press('PageDown')
+  expect(await pageStop(nullpad), 'PageDown at the end').toEqual({
+    line: 200,
+    column: 9,
+    row: visible - 1,
+    top: lastTop,
+  })
+  await nullpad.press('PageUp')
+  expect(await pageStop(nullpad), 'PageUp from the end').toEqual({
+    line: 200 - page,
+    column: 9,
+    row: visible - 1 - page,
+    top: lastTop,
+  })
+})
+
+test('PageDown and PageUp in a note that fits on screen go to its end and its start', async ({
+  nullpad,
+}) => {
+  await nullpad.paste('one\ntwo two\nthree')
+  await nullpad.press('ArrowUp')
+  await nullpad.press('Home')
+  await nullpad.press('ArrowRight')
+  await nullpad.press('PageDown')
+  expect(await nullpad.status(), 'PageDown').toEqual({
+    line: 3,
+    column: 6,
+    lineCount: 3,
+  })
+  await nullpad.press('PageUp')
+  expect(await nullpad.status(), 'PageUp').toEqual({
+    line: 1,
+    column: 1,
+    lineCount: 3,
+  })
+})
+
+test('PageDown aims at the cell the cursor is in, not at one an earlier move kept, as a textarea does', async ({
+  nullpad,
+}) => {
+  const empty = await nullpad.screen()
+  const page = pageRows(
+    Math.floor((empty.area.bottom - empty.area.top) / empty.rowHeight),
+  )
+  await nullpad.paste(
+    numberedLines(200)
+      .split('\n')
+      .map((line, index) => (index === 1 + page ? 'a' : line))
+      .join('\n'),
+  )
+  await nullpad.press('Control+Home')
+  await nullpad.press('ArrowDown')
+  await nullpad.press('ArrowRight', 5)
+  await nullpad.press('PageDown')
+  expect(await pageStop(nullpad), 'onto a line holding only "a"').toMatchObject(
+    { line: 2 + page, column: 2 },
+  )
+  await nullpad.press('PageDown')
+  expect(
+    await pageStop(nullpad),
+    'the next page aims at the cell after the "a"',
+  ).toMatchObject({ line: 2 + 2 * page, column: 2 })
 })
 
 test('Ctrl+End from a short line lands at the end of the last line', async ({

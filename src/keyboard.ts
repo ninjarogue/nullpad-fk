@@ -30,7 +30,8 @@ const modifiersOf = (event: KeyboardEvent): Modifiers => ({
 
 /**
  * A keydown as an Input, or none when the key belongs to the browser or the IME, or will arrive
- * as text. It reads the event and nothing else, so its answer cannot depend on a stale Model.
+ * as text. Windows reports AltGr as Ctrl+Alt, so a character typed with both arrives as text.
+ * It reads the event and nothing else, so its answer cannot depend on a stale Model.
  */
 export const fromKeyDown = (event: KeyboardEvent): Option.Option<Input> => {
   const { key } = event
@@ -47,10 +48,10 @@ export const fromKeyDown = (event: KeyboardEvent): Option.Option<Input> => {
       Input.cases.Key.make({ key, modifiers: modifiersOf(event) }),
     )
   }
+  const isAltGraph =
+    event.getModifierState('AltGraph') || (event.ctrlKey && event.altKey)
   const isChord =
-    [...key].length === 1 &&
-    (event.ctrlKey || event.metaKey) &&
-    !event.getModifierState('AltGraph')
+    [...key].length === 1 && (event.ctrlKey || event.metaKey) && !isAltGraph
   return isChord && !browserChords.has(key.toLowerCase())
     ? Option.some(
         Input.cases.Chord.make({ char: key, modifiers: modifiersOf(event) }),

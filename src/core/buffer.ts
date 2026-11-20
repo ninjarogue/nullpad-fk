@@ -68,67 +68,6 @@ const replaceLines = (
     buffer.lines.slice(0, from),
   )
 
-export const fromText = (text: string): Buffer => {
-  const lines = splitLines(text)
-  return {
-    lines: Array.map(lines, (text, index) => ({
-      id: LineId.make(index),
-      text,
-    })),
-    caret: { line: 0, column: 0 },
-    nextLineId: lines.length,
-  }
-}
-
-export const toText = (buffer: Buffer): string =>
-  Array.join(
-    Array.map(buffer.lines, line => line.text),
-    '\n',
-  )
-
-/** Inserts at the caret. A line break splits the line. The caret ends after the inserted text. */
-export const insert = (buffer: Buffer, text: string): Buffer => {
-  const { line, column } = buffer.caret
-  const current = lineAt(buffer, line)
-  const before = current.text.slice(0, column)
-  const after = current.text.slice(column)
-  const parts = splitLines(text)
-  const lastPart = Array.lastNonEmpty(parts)
-  const added = parts.length - 1
-  const replacement = Array.map(parts, (part, index) => ({
-    id: index === 0 ? current.id : LineId.make(buffer.nextLineId + index - 1),
-    text: (index === 0 ? before : '') + part + (index === added ? after : ''),
-  }))
-  return {
-    lines: replaceLines(buffer, line, line, replacement),
-    caret: {
-      line: line + added,
-      column: (added === 0 ? column : 0) + lastPart.length,
-    },
-    nextLineId: buffer.nextLineId + added,
-  }
-}
-
-const isBefore = (a: Position, b: Position): boolean =>
-  a.line < b.line || (a.line === b.line && a.column < b.column)
-
-/** Removes the text between two positions, in either order. The caret ends at the earlier one. */
-export const erase = (buffer: Buffer, from: Position, to: Position): Buffer => {
-  const [start, end] = isBefore(to, from) ? [to, from] : [from, to]
-  const first = lineAt(buffer, start.line)
-  const joined = {
-    id: first.id,
-    text:
-      first.text.slice(0, start.column) +
-      lineAt(buffer, end.line).text.slice(end.column),
-  }
-  return {
-    ...buffer,
-    lines: replaceLines(buffer, start.line, end.line, [joined]),
-    caret: start,
-  }
-}
-
 const boundaries = (text: string): ReadonlyArray<number> =>
   Array.append(
     Array.map(graphemes(text), ({ index }) => index),
@@ -152,6 +91,82 @@ const boundaryAtOrBefore = (text: string, column: number): number =>
     Array.findLast(boundaries(text), at => at <= column),
     () => 0,
   )
+
+const boundaryAtOrAfter = (text: string, column: number): number =>
+  Option.getOrElse(
+    Array.findFirst(boundaries(text), at => at >= column),
+    () => text.length,
+  )
+
+export const fromText = (text: string): Buffer => {
+  const lines = splitLines(text)
+  return {
+    lines: Array.map(lines, (text, index) => ({
+      id: LineId.make(index),
+      text,
+    })),
+    caret: { line: 0, column: 0 },
+    nextLineId: lines.length,
+  }
+}
+
+export const toText = (buffer: Buffer): string =>
+  Array.join(
+    Array.map(buffer.lines, line => line.text),
+    '\n',
+  )
+
+/**
+ * Inserts at the caret. A line break splits the line. The caret ends after the inserted text,
+ * or after the grapheme it joined with (🇺 typed before 🇸 makes one flag).
+ */
+export const insert = (buffer: Buffer, text: string): Buffer => {
+  const { line, column } = buffer.caret
+  const current = lineAt(buffer, line)
+  const before = current.text.slice(0, column)
+  const after = current.text.slice(column)
+  const parts = splitLines(text)
+  const lastPart = Array.lastNonEmpty(parts)
+  const added = parts.length - 1
+  const replacement = Array.map(parts, (part, index) => ({
+    id: index === 0 ? current.id : LineId.make(buffer.nextLineId + index - 1),
+    text: (index === 0 ? before : '') + part + (index === added ? after : ''),
+  }))
+  return {
+    lines: replaceLines(buffer, line, line, replacement),
+    caret: {
+      line: line + added,
+      column: boundaryAtOrAfter(
+        Array.lastNonEmpty(replacement).text,
+        (added === 0 ? column : 0) + lastPart.length,
+      ),
+    },
+    nextLineId: buffer.nextLineId + added,
+  }
+}
+
+const isBefore = (a: Position, b: Position): boolean =>
+  a.line < b.line || (a.line === b.line && a.column < b.column)
+
+/** Removes the text between two positions, in either order. The caret ends at the earlier one, or before the grapheme the removal joined. */
+export const erase = (buffer: Buffer, from: Position, to: Position): Buffer => {
+  const [start, end] = isBefore(to, from) ? [to, from] : [from, to]
+  const first = lineAt(buffer, start.line)
+  const joined = {
+    id: first.id,
+    text:
+      first.text.slice(0, start.column) +
+      lineAt(buffer, end.line).text.slice(end.column),
+  }
+  return {
+    ...buffer,
+    lines: replaceLines(buffer, start.line, end.line, [joined]),
+    caret: {
+      line: start.line,
+      column: boundaryAtOrBefore(joined.text, start.column),
+    },
+  }
+}
 
 type MotionContext = Readonly<{
   buffer: Buffer

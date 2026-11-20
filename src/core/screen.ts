@@ -102,50 +102,79 @@ type Layout = Readonly<{
 
 const isAscii = /^[\x00-\x7f]*$/
 
-/** Calls `place` with each grapheme's column and cells, without building an array of them. */
+/** Calls `place` with each grapheme's column and cells from `from` on, until it returns true. */
 const eachGlyph = (
   text: string,
-  place: (index: number, cells: 1 | 2, isSpace: boolean) => void,
+  from: number,
+  place: (index: number, cells: 1 | 2, isSpace: boolean) => boolean,
 ): void => {
-  if (isAscii.test(text)) {
-    for (let index = 0; index < text.length; index++) {
-      place(index, 1, text.charCodeAt(index) === 32)
+  const rest = text.slice(from)
+  if (isAscii.test(rest)) {
+    for (let index = from; index < text.length; index++) {
+      if (place(index, 1, text.charCodeAt(index) === 32)) {
+        return
+      }
     }
     return
   }
-  for (const { index, segment } of segmenter.segment(text)) {
-    place(index, cells(segment), segment === ' ')
+  for (const { index, segment } of segmenter.segment(rest)) {
+    if (place(from + index, cells(segment), segment === ' ')) {
+      return
+    }
   }
 }
+
+type Rows = Readonly<{
+  starts: Array.NonEmptyReadonlyArray<number>
+  counts: Array.NonEmptyReadonlyArray<number>
+}>
+
+type Tail = Readonly<{
+  starts: ReadonlyArray<number>
+  counts: ReadonlyArray<number>
+}>
 
 /**
  * Breaks after a space, or inside a word longer than a row. No row is wider than `columns`
  * unless it holds one glyph, and a row ends at a space only when text precedes that space in it,
  * so a space never sits alone on a row while the text after it could join it.
+ * Starts at row start `from`, `before` graphemes in, and stops early once `tailAt` knows the rest.
  */
-const wrap = (text: string, columns: number): Layout => {
-  const starts: Array.NonEmptyArray<number> = [0]
-  const counts: Array.NonEmptyArray<number> = [0]
-  let count = 0
-  let rowStart = 0
+const wrap = (
+  text: string,
+  columns: number,
+  from: number,
+  before: number,
+  tailAt: (start: number, count: number) => Option.Option<Tail>,
+): Rows => {
+  const starts: Array.NonEmptyArray<number> = [from]
+  const counts: Array.NonEmptyArray<number> = [before]
+  let count = before
+  let rowStart = from
   let width = 0
   let hasText = false
   let breakAt = -1
   let breakCount = 0
   let sinceBreak = 0
-  const startRow = (at: number, before: number) => {
+  let tail: Option.Option<Tail> = Option.none()
+  const startRow = (at: number, graphemesBefore: number) => {
     starts.push(at)
-    counts.push(before)
+    counts.push(graphemesBefore)
     rowStart = at
+    tail = tailAt(at, graphemesBefore)
   }
-  eachGlyph(text, (at, glyphCells, isSpace) => {
+  eachGlyph(text, from, (at, glyphCells, isSpace) => {
     if (width + glyphCells > columns && at > rowStart) {
       if (breakAt > rowStart) {
         startRow(breakAt, breakCount)
         width = sinceBreak
         hasText = sinceBreak > 0
       }
-      if (width + glyphCells > columns && at > rowStart) {
+      if (
+        Option.isNone(tail) &&
+        width + glyphCells > columns &&
+        at > rowStart
+      ) {
         startRow(at, count)
         width = 0
         hasText = false
@@ -162,13 +191,81 @@ const wrap = (text: string, columns: number): Layout => {
       hasText ||= !isSpace
       sinceBreak += glyphCells
     }
+    return Option.isSome(tail)
   })
-  return { text, columns, starts, counts }
+  return Option.match(tail, {
+    onNone: () => ({ starts, counts }),
+    onSome: rest => ({
+      starts: Array.appendAll(starts, rest.starts),
+      counts: Array.appendAll(counts, rest.counts),
+    }),
+  })
+}
+
+const sharedPrefix = (a: string, b: string): number => {
+  const limit = Math.min(a.length, b.length)
+  let at = 0
+  while (at < limit && a.charCodeAt(at) === b.charCodeAt(at)) {
+    at++
+  }
+  return at
+}
+
+const sharedSuffix = (a: string, b: string, prefix: number): number => {
+  const limit = Math.min(a.length, b.length) - prefix
+  let at = 0
+  while (
+    at < limit &&
+    a.charCodeAt(a.length - 1 - at) === b.charCodeAt(b.length - 1 - at)
+  ) {
+    at++
+  }
+  return at
+}
+
+/**
+ * Wraps `text` again after an edit, reusing the rows of the text before it. A row's end
+ * depends only on the graphemes up to the first one of the next row, so rows that end before
+ * the edit keep their starts. From the first row start in the unchanged tail that lines up
+ * with an old one, the old rows repeat, moved by the edit's length.
+ */
+const rewrap = (known: Layout, text: string): Layout => {
+  const { columns } = known
+  const prefix = sharedPrefix(known.text, text)
+  const tailFrom = text.length - sharedSuffix(known.text, text, prefix)
+  const shift = text.length - known.text.length
+  const resume = Math.max(0, rowOfColumn(known, prefix - 1) - 1)
+  const tailAt = (start: number, count: number): Option.Option<Tail> => {
+    const row = rowOfColumn(known, start - shift)
+    const oldCount = known.counts[row] ?? 0
+    return start >= tailFrom && known.starts[row] === start - shift
+      ? Option.some({
+          starts: Array.map(known.starts.slice(row + 1), at => at + shift),
+          counts: Array.map(
+            known.counts.slice(row + 1),
+            at => at + count - oldCount,
+          ),
+        })
+      : Option.none()
+  }
+  const rows = wrap(
+    text,
+    columns,
+    rowColumn(known, resume),
+    known.counts[resume] ?? 0,
+    tailAt,
+  )
+  return {
+    text,
+    columns,
+    starts: Array.prependAll(rows.starts, known.starts.slice(0, resume)),
+    counts: Array.prependAll(rows.counts, known.counts.slice(0, resume)),
+  }
 }
 
 const layouts = new Map<LineId, Layout>()
 
-/** The wrap of one line, remembered by line id while its text and the width stay the same. */
+/** The wrap of one line, remembered by line id. An edit wraps again only near the change. */
 const layout = (id: LineId, text: string, columns: number): Layout => {
   if (text.length * 2 <= columns) {
     return { text, columns, starts: [0], counts: [0] }
@@ -177,7 +274,10 @@ const layout = (id: LineId, text: string, columns: number): Layout => {
   if (known !== undefined && known.text === text && known.columns === columns) {
     return known
   }
-  const wrapped = wrap(text, columns)
+  const wrapped =
+    known !== undefined && known.columns === columns
+      ? rewrap(known, text)
+      : { text, columns, ...wrap(text, columns, 0, 0, () => Option.none()) }
   if (layouts.size >= 256) {
     layouts.clear()
   }

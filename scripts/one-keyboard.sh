@@ -1,7 +1,13 @@
 #!/bin/sh
-builders='(^|[^A-Za-z0-9_$.])i?h\.(textarea|input|Value|Contenteditable|OnKeyDown[A-Za-z]*|OnKeyUp[A-Za-z]*|OnKeyPress|OnInput|OnBeforeInput[A-Za-z]*|OnPaste[A-Za-z]*)([^A-Za-z0-9_$]|$)'
+# Names are matched wherever they appear, so a builder not called h or a destructured handler is still seen.
+start='(^|[^A-Za-z0-9_$])'
+end='([^A-Za-z0-9_$]|$)'
+handlers="${start}(OnKey[A-Za-z]*|OnInput|OnBeforeInput[A-Za-z]*|OnPaste[A-Za-z]*|OnComposition[A-Za-z]*|Contenteditable)${end}"
+elements="\.(input|Value)[[:space:]]*\(|\{[^}]*${start}(input|Value)${end}[^}]*\}[[:space:]]*=[^=>]"
 events="[\"'\`](keydown|keyup|keypress|beforeinput|input|paste|compositionstart|compositionupdate|compositionend)[\"'\`]"
-hits=$(grep -rnE --include='*.ts' -e "$builders" -e "$events" src | grep -v '^src/keyboard\.ts:')
+anyCase="textarea|contenteditable|${start}on(keydown|keyup|keypress|beforeinput|input|paste|compositionstart|compositionupdate|compositionend)${end}"
+files=$(find src -type f ! -path src/keyboard.ts; echo index.html)
+hits=$(grep -nE -e "$handlers" -e "$elements" -e "$events" $files; grep -niE -e "$anyCase" $files)
 if [ -n "$hits" ]; then
   echo "Only src/keyboard.ts reads the keyboard. Found:"
   echo "$hits"

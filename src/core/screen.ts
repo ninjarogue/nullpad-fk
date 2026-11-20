@@ -90,48 +90,46 @@ type Layout = Readonly<{
   rowStarts: Array.NonEmptyReadonlyArray<number>
 }>
 
-type WrapState = Readonly<{
-  rowStarts: Array.NonEmptyReadonlyArray<number>
-  width: number
-  breakAt: number
-  sinceBreak: number
-}>
-
-/** Breaks after a space, or inside a word longer than a row. */
+/**
+ * Breaks after a space, or inside a word longer than a row. No row is wider than `columns`
+ * unless it holds one glyph, and a row ends at a space only when text precedes that space in it,
+ * so a space never sits alone on a row while the text after it could join it.
+ */
 const layout = (text: string, columns: number): Layout => {
   const glyphs = Array.map(graphemes(text), grapheme => ({
     ...grapheme,
     cells: cells(grapheme.segment),
   }))
-  const initial: WrapState = {
-    rowStarts: [0],
-    width: 0,
-    breakAt: 0,
-    sinceBreak: 0,
-  }
-  const { rowStarts } = Array.reduce(glyphs, initial, (state, glyph, at) => {
-    const rowStart = Array.lastNonEmpty(state.rowStarts)
-    const overflows = state.width + glyph.cells > columns && at > rowStart
-    const softBreak = state.breakAt > rowStart
-    const wrapped: WrapState = !overflows
-      ? state
-      : softBreak
-        ? {
-            rowStarts: Array.append(state.rowStarts, state.breakAt),
-            width: state.sinceBreak,
-            breakAt: state.breakAt,
-            sinceBreak: state.sinceBreak,
-          }
-        : {
-            rowStarts: Array.append(state.rowStarts, at),
-            width: 0,
-            breakAt: at,
-            sinceBreak: 0,
-          }
-    const width = wrapped.width + glyph.cells
-    return glyph.segment === ' '
-      ? { ...wrapped, width, breakAt: at + 1, sinceBreak: 0 }
-      : { ...wrapped, width, sinceBreak: wrapped.sinceBreak + glyph.cells }
+  const rowStarts: Array.NonEmptyArray<number> = [0]
+  let rowStart = 0
+  let width = 0
+  let hasText = false
+  let breakAt = -1
+  let sinceBreak = 0
+  glyphs.forEach((glyph, at) => {
+    if (width + glyph.cells > columns && at > rowStart) {
+      if (breakAt > rowStart) {
+        rowStarts.push(breakAt)
+        rowStart = breakAt
+        width = sinceBreak
+        hasText = sinceBreak > 0
+      }
+      if (width + glyph.cells > columns && at > rowStart) {
+        rowStarts.push(at)
+        rowStart = at
+        width = 0
+        hasText = false
+      }
+      breakAt = -1
+    }
+    width += glyph.cells
+    if (glyph.segment === ' ' && hasText) {
+      breakAt = at + 1
+      sinceBreak = 0
+    } else {
+      hasText ||= glyph.segment !== ' '
+      sinceBreak += glyph.cells
+    }
   })
   return { text, glyphs, rowStarts }
 }

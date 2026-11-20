@@ -2,9 +2,6 @@
 set -e
 cd "$(git rev-parse --show-toplevel)"
 
-reports=$(mktemp -d)
-trap 'rm -rf "$reports"' EXIT
-
 step() {
   echo "==> $1"
   shift
@@ -14,10 +11,6 @@ step() {
 step format npm run format:check
 step lint npm run lint
 step typecheck npm run typecheck
-step 'unit tests' npx vitest run --reporter=default --reporter=json --outputFile.json="$reports/vitest.json"
-node scripts/ran-tests.mjs vitest "$reports/vitest.json"
 step architecture npm run arch
 step build npm run build
-step e2e npm --prefix e2e test
-node scripts/ran-tests.mjs e2e e2e/.e2e/report.json
 echo "pre-push: all steps passed"

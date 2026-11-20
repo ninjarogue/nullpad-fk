@@ -18,5 +18,11 @@
     ]
   },
   "sortPackageJson": false,
-  "ignorePatterns": ["node_modules", "dist", "repos", "*.tsbuildinfo"]
+  "ignorePatterns": [
+    "node_modules",
+    "dist",
+    "repos",
+    "*.tsbuildinfo",
+    "pnpm-lock.yaml"
+  ]
 }

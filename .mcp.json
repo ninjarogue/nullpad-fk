@@ -1,8 +1,8 @@
 {
   "mcpServers": {
     "foldkit-devtools": {
-      "command": "npx",
-      "args": ["-y", "@foldkit/devtools-mcp@0.26.0"]
+      "command": "pnpm",
+      "args": ["dlx", "@foldkit/devtools-mcp@0.26.0"]
     }
   }
 }

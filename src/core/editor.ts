@@ -120,8 +120,9 @@ const plainKeys: Readonly<
 }
 
 /**
- * The one way the keyboard changes the editor. Total: an Input the mode has no use for returns
- * the same Editor. The caret row is on screen in every Editor this returns.
+ * The one way the keyboard changes the editor. Total: an Input the mode has no use for
+ * (Escape, a Chord) returns the same Editor, so a caret the wheel scrolled away stays off screen.
+ * Every other Input puts the caret row on screen, even a motion that cannot move the caret.
  */
 export const feed = (editor: Editor, input: Input): Editor =>
   Input.match(input, {
@@ -145,7 +146,7 @@ export const click = (editor: Editor, lineId: number, column: number): Editor =>
       edit(editor, Buffer.moveTo(editor.buffer, { line, column })),
   })
 
-/** The wheel moved the screen by whole rows. The caret may leave the screen until the next `feed`. */
+/** The wheel moved the screen by whole rows. The caret may leave the screen until a `feed` that follows it. */
 export const scroll = (editor: Editor, rows: number): Editor =>
   rows === 0
     ? editor

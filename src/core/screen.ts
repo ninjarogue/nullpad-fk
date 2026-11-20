@@ -184,44 +184,39 @@ const orderTop: Order.Order<Top> = Order.combine(
   Order.mapInput(Order.Number, (top: Top) => top.row),
 )
 
+/** Moves `delta` visual rows from `from`, stopping at the first and last row of the text. */
 const walk = (
   buffer: Buffer,
   layoutOf: (line: number) => Layout,
   from: Top,
   delta: number,
 ): Top => {
-  if (delta > 0) {
-    const rows = rowCount(layoutOf(from.line))
-    const left = rows - 1 - from.row
-    if (delta <= left) {
-      return { line: from.line, row: from.row + delta }
+  let { line, row } = from
+  let left = delta
+  while (left > 0) {
+    const last = rowCount(layoutOf(line)) - 1
+    if (left <= last - row) {
+      return { line, row: row + left }
     }
-    return from.line >= buffer.lines.length - 1
-      ? { line: from.line, row: rows - 1 }
-      : walk(
-          buffer,
-          layoutOf,
-          { line: from.line + 1, row: 0 },
-          delta - left - 1,
-        )
-  }
-  if (delta < 0) {
-    if (-delta <= from.row) {
-      return { line: from.line, row: from.row + delta }
+    if (line >= buffer.lines.length - 1) {
+      return { line, row: last }
     }
-    return from.line === 0
-      ? { line: 0, row: 0 }
-      : walk(
-          buffer,
-          layoutOf,
-          {
-            line: from.line - 1,
-            row: rowCount(layoutOf(from.line - 1)) - 1,
-          },
-          delta + from.row + 1,
-        )
+    left -= last - row + 1
+    line += 1
+    row = 0
   }
-  return from
+  while (left < 0) {
+    if (-left <= row) {
+      return { line, row: row + left }
+    }
+    if (line === 0) {
+      return { line: 0, row: 0 }
+    }
+    left += row + 1
+    line -= 1
+    row = rowCount(layoutOf(line)) - 1
+  }
+  return { line, row }
 }
 
 /** Puts a top that edits left behind back inside the text. */

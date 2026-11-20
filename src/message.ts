@@ -5,7 +5,11 @@ import { Input } from './core/input'
 
 export const Message = defineMessageUnion({
   ReceivedInput: { input: Input },
-  ClickedText: { lineId: Schema.Number, column: Schema.Number },
+  ClickedText: {
+    lineId: Schema.Number,
+    column: Schema.Number,
+    atRowEnd: Schema.Boolean,
+  },
   ScrolledWheel: { rows: Schema.Number },
   ResizedScreen: { columns: Schema.Number, rows: Schema.Number },
   FocusedKeyboard: {},

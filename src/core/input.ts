@@ -27,14 +27,16 @@ export type Modifiers = typeof Modifiers.Type
 
 /**
  * What the keyboard said, in the terms a terminal program receives it.
- * Text is characters, not keys: layout, shift, AltGr and dead keys are already applied.
+ * Text is characters, not keys: layout, shift, AltGr and dead keys are already applied. `byKey` is false for text
+ * an emoji picker or the like inserts without a keypress: Chrome leaves its caret right after that text, but moves
+ * it past a grapheme typed text joined with.
  * Paste is separate from Text so a mode that reads Text as commands never runs a paste.
  * Preedit is the IME's unfinished text ('' when it has none). Commit ends a composition.
  */
 export const Input = Schema.TaggedUnion({
   Key: { key: NamedKey, modifiers: Modifiers },
   Chord: { char: Schema.String, modifiers: Modifiers },
-  Text: { text: Schema.String },
+  Text: { text: Schema.String, byKey: Schema.Boolean },
   Paste: { text: Schema.String },
   Preedit: { text: Schema.String },
   Commit: { text: Schema.String },
@@ -67,7 +69,7 @@ const notationKeys: Readonly<Record<string, NamedKey>> = {
 
 const fromNotation = (name: string): Option.Option<Input> => {
   if (name === 'lt') {
-    return Option.some(Input.cases.Text.make({ text: '<' }))
+    return Option.some(Input.cases.Text.make({ text: '<', byKey: true }))
   }
   const chord = /^C-(.)$/.exec(name)
   if (chord !== null && chord[1] !== undefined) {
@@ -91,7 +93,7 @@ export const script = (notation: string): ReadonlyArray<Input> =>
       Option.match(Option.flatMap(Option.fromUndefinedOr(name), fromNotation), {
         onNone: () =>
           Array.map(Array.fromIterable(token), text =>
-            Input.cases.Text.make({ text }),
+            Input.cases.Text.make({ text, byKey: true }),
           ),
         onSome: input => [input],
       }),

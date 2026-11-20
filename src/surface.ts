@@ -1,6 +1,6 @@
 import { Array, Effect, Option, Queue, Stream } from 'effect'
 import { Mount } from 'foldkit'
-import type { Html, HtmlBuilder } from 'foldkit/html'
+import type { Attribute, Html, HtmlBuilder } from 'foldkit/html'
 
 import type { Frame, Mode, Row, Span, SpanKind } from './core/editor'
 import type { Keyboard } from './keyboard'
@@ -41,10 +41,14 @@ const offsetInRow = (row: HTMLElement, hit: CaretPosition): number => {
   )
 }
 
-/** The row under the pointer by its fixed height, then the column inside it by the browser's hit test. */
+/**
+ * The row under the pointer by its fixed height, then the column inside it by the browser's hit test.
+ * Past the end of a row that wraps, the column is that row's end. Below the text, when the text ends on screen,
+ * it is the end of the text, as in a Chrome text field.
+ */
 const pointAt = (
   surface: HTMLElement,
-  rowHeight: number,
+  cell: Readonly<{ height: number; rows: number }>,
   event: PointerEvent,
 ): Option.Option<typeof Message.ClickedText.Type> => {
   const rows = Array.fromIterable(
@@ -52,9 +56,18 @@ const pointAt = (
   )
   return Option.flatMap(Array.head(rows), first => {
     const index = Math.floor(
-      (event.clientY - first.getBoundingClientRect().top) / rowHeight,
+      (event.clientY - first.getBoundingClientRect().top) / cell.height,
     )
     const row = rows[Math.max(0, Math.min(rows.length - 1, index))] ?? first
+    if (index >= rows.length && rows.length < cell.rows) {
+      return Option.some(
+        Message.ClickedText({
+          lineId: Number(row.dataset['lineId']),
+          column: Number.MAX_SAFE_INTEGER,
+          atRowEnd: false,
+        }),
+      )
+    }
     const box = row.getBoundingClientRect()
     const hit = document.caretPositionFromPoint(
       Math.max(box.left, Math.min(box.right - 1, event.clientX)),
@@ -73,9 +86,8 @@ const pointAt = (
     return Option.some(
       Message.ClickedText({
         lineId: Number(row.dataset['lineId']),
-        column:
-          Number(row.dataset['start']) +
-          (continues && offset >= length ? length - 1 : offset),
+        column: Number(row.dataset['start']) + Math.min(offset, length),
+        atRowEnd: continues && offset >= length,
       }),
     )
   })
@@ -95,7 +107,7 @@ const observe = (
         Effect.sync(() => {
           const controller = new AbortController()
           const { signal } = controller
-          const cell = { width: 1, height: 1 }
+          const cell = { width: 1, height: 1, rows: 1 }
           const wheel = { carry: 0 }
 
           const measure = () => {
@@ -109,11 +121,12 @@ const observe = (
               pixels(style.paddingBottom)
             cell.width = probeBox.width / probeCells
             cell.height = probeBox.height
+            cell.rows = Math.floor(height / cell.height + 0.01)
             Queue.offerUnsafe(
               queue,
               Message.ResizedScreen({
                 columns: Math.floor(width / cell.width + 0.01),
-                rows: Math.floor(height / cell.height + 0.01),
+                rows: cell.rows,
               }),
             )
           }
@@ -146,7 +159,7 @@ const observe = (
                 return
               }
               event.preventDefault()
-              Option.map(pointAt(surface, cell.height, event), message =>
+              Option.map(pointAt(surface, cell, event), message =>
                 Queue.offerUnsafe(queue, message),
               )
             },
@@ -179,8 +192,19 @@ export const SurfacePort = Mount.defineStream('SurfacePort', {
   },
 })
 
-const boxed = (span: Span, className: string): string =>
-  span.width === 'Wide' ? `${className} w` : className
+/** A boxed span is an inline-block `--cells` cells wide, the class `w`. */
+const boxed = (
+  span: Span,
+  className: string,
+  h: HtmlBuilder<Message>,
+): ReadonlyArray<Attribute<Message>> =>
+  Option.match(span.box, {
+    onNone: () => [h.Class(className)],
+    onSome: cells => [
+      h.Class(`${className} w`.trim()),
+      h.Style({ '--cells': String(cells) }),
+    ],
+  })
 
 const spanViews: Readonly<
   Record<
@@ -189,16 +213,18 @@ const spanViews: Readonly<
   >
 > = {
   Text: (span, _, h) =>
-    span.width === 'Wide' ? h.span([h.Class('w')], [span.text]) : span.text,
+    Option.isSome(span.box)
+      ? h.span(boxed(span, '', h), [span.text])
+      : span.text,
   Preedit: (span, _, h) =>
     h.span(
-      [h.Class(boxed(span, 'pre')), h.DataAttribute('ghost', '')],
+      [...boxed(span, 'pre', h), h.DataAttribute('ghost', '')],
       [span.text],
     ),
   Caret: (span, caretKey, h) =>
     h.keyed('span')(
       caretKey,
-      [h.Id('caret'), h.Class(boxed(span, 'cur'))],
+      [h.Id('caret'), ...boxed(span, 'cur', h)],
       [span.text],
     ),
   CaretPastEnd: (span, caretKey, h) =>

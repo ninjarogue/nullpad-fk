@@ -89,6 +89,17 @@ const typeText =
     return { ...inserted, buffer: Buffer.settle(inserted.buffer) }
   }
 
+/** Enter. Chrome keeps the goal cell when the break splits a line, and clears it at a line end. */
+const breakLine = (editor: Editor): Editor => {
+  const { caret } = Buffer.settle(editor.buffer)
+  const splits =
+    caret.column < (editor.buffer.lines[caret.line]?.text.length ?? 0)
+  const typed = typeText('\n')(editor)
+  return splits
+    ? { ...typed, view: { ...typed.view, goalCell: editor.view.goalCell } }
+    : typed
+}
+
 const eraseTo =
   (motion: Buffer.Motion) =>
   (editor: Editor): Editor => {
@@ -185,7 +196,7 @@ const plainKeys: Readonly<
   Record<NamedKey, (editor: Editor, modifiers: Modifiers) => Editor>
 > = {
   Escape: editor => editor,
-  Enter: typeText('\n'),
+  Enter: breakLine,
   Tab: typeText('  '),
   Backspace: eraseTo('BackspaceStart'),
   Delete: eraseTo('Right'),

@@ -29,7 +29,7 @@ export type Top = typeof Top.Type
  * `top` names the first row on screen: visual row `row` of line `line`.
  * Anchoring on a line keeps every function here O(size.rows). None of them wraps the whole text.
  * `goalCell` is the cell column that vertical motion aims for. As in Chrome, typing, a click or a caret move
- * that lands elsewhere clears it; Backspace, Delete and a move that stays put keep it.
+ * that lands elsewhere clears it; Backspace, Delete, Enter inside a line and a move that stays put keep it.
  * `caretAtRowEnd` draws a caret that sits where a line wraps at the end of the upper row, as Chrome's
  * upstream caret after End, a click past a row end, or a vertical move onto one. Any other move clears it.
  */

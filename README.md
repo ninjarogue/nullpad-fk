@@ -4,8 +4,10 @@ A markdown note editor that feels like a terminal, built with [Foldkit](https://
 
 ## Set up
 
+Needs Node 22.12 or later and pnpm. `corepack enable` installs the pnpm version pinned in `package.json`.
+
 ```sh
-npm install
+pnpm install
 ```
 
 Installing also turns on `.githooks/pre-push` (the `prepare` script sets `core.hooksPath`) and applies the Effect lint patch (`postinstall`).
@@ -13,17 +15,17 @@ Installing also turns on `.githooks/pre-push` (the `prepare` script sets `core.h
 ## Run
 
 ```sh
-npm run dev
+pnpm dev
 ```
 
 ## Check
 
 ```sh
-npm run format:check
-npm run lint
-npm run typecheck
-npm run arch
-npm run build
+pnpm format:check
+pnpm lint
+pnpm typecheck
+pnpm arch
+pnpm build
 ```
 
 `.githooks/pre-push` runs all of these in order. Run it by hand with `.githooks/pre-push`.

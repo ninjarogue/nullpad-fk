@@ -8,9 +8,9 @@ step() {
   "$@"
 }
 
-step format npm run format:check
-step lint npm run lint
-step typecheck npm run typecheck
-step architecture npm run arch
-step build npm run build
+step format pnpm format:check
+step lint pnpm lint
+step typecheck pnpm typecheck
+step architecture pnpm arch
+step build pnpm build
 echo "pre-push: all steps passed"

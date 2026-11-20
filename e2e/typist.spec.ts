@@ -26,20 +26,21 @@ const describe = (divergence: Divergence): string =>
     `  textarea ${JSON.stringify(divergence.textarea.text)} [${hex(divergence.textarea.text)}] at ${divergence.textarea.line}:${divergence.textarea.column}`,
   ].join('\n')
 
-for (const { name, script } of namedScripts) {
-  test(`typist: named script "${name}" matches a textarea`, async ({
-    browser,
-    baseURL,
-  }) => {
-    const pair = await openPair(browser, baseURL ?? '')
+test('typist: every named script matches a textarea', async ({
+  browser,
+  baseURL,
+}) => {
+  const pair = await openPair(browser, baseURL ?? '')
+  const failures: Array<string> = []
+  for (const { name, script } of namedScripts) {
     const divergence = await compare(pair, script)
-    await pair.close()
-    expect(
-      divergence,
-      divergence === null ? '' : describe(divergence),
-    ).toBeNull()
-  })
-}
+    if (divergence !== null) {
+      failures.push(`named script "${name}"\n${describe(divergence)}`)
+    }
+  }
+  await pair.close()
+  expect(failures, failures.join('\n\n')).toEqual([])
+})
 
 const runs: ReadonlyArray<
   Readonly<{ title: string; seeds: ReadonlyArray<number> }>

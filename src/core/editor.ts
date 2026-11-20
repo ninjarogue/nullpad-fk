@@ -106,7 +106,7 @@ const plainKeys: Readonly<
   Escape: editor => editor,
   Enter: insertText('\n'),
   Tab: insertText('  '),
-  Backspace: eraseTo('Left'),
+  Backspace: eraseTo('BackspaceStart'),
   Delete: eraseTo('Right'),
   ArrowLeft: moveBy('Left'),
   ArrowRight: moveBy('Right'),

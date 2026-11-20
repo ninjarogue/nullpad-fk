@@ -25,9 +25,13 @@ export const Buffer = Schema.Struct({
 })
 export type Buffer = typeof Buffer.Type
 
-/** Motions that need no screen. Moving by visual row needs the wrap width, so it lives in screen.ts. */
+/**
+ * Motions that need no screen. Moving by visual row needs the wrap width, so it lives in screen.ts.
+ * BackspaceStart is Left, except that a combining mark before the caret goes alone, as in Chrome.
+ */
 export const Motion = Schema.Literals([
   'Left',
+  'BackspaceStart',
   'Right',
   'LineStart',
   'LineEnd',
@@ -185,15 +189,29 @@ type MotionContext = Readonly<{
   lastLine: number
 }>
 
+const combiningMarkOutsideEmoji =
+  /(?![\u20e3\ufe00-\ufe0f\u{e0100}-\u{e01ef}])\p{M}$/u
+
+const left = ({ buffer, line, column, text }: MotionContext): Position => {
+  if (column > 0) {
+    return { line, column: previousBoundary(text, column) }
+  }
+  return line > 0
+    ? { line: line - 1, column: lineAt(buffer, line - 1).text.length }
+    : buffer.caret
+}
+
 const motions: Readonly<Record<Motion, (context: MotionContext) => Position>> =
   {
-    Left: ({ buffer, line, column, text }) => {
-      if (column > 0) {
-        return { line, column: previousBoundary(text, column) }
-      }
-      return line > 0
-        ? { line: line - 1, column: lineAt(buffer, line - 1).text.length }
-        : buffer.caret
+    Left: left,
+    BackspaceStart: context => {
+      const { line, column, text } = context
+      const mark = combiningMarkOutsideEmoji.exec(
+        text.slice(Math.max(0, column - 2), column),
+      )
+      return mark === null
+        ? left(context)
+        : { line, column: column - mark[0].length }
     },
     Right: ({ buffer, line, column, text, lastLine }) => {
       if (column < text.length) {
@@ -210,7 +228,7 @@ const motions: Readonly<Record<Motion, (context: MotionContext) => Position>> =
     }),
   }
 
-/** Where a motion lands from the caret. Backspace is `erase(target(b, 'Left'), b.caret)`; vim's `d{motion}` is the same call. */
+/** Where a motion lands from the caret. Backspace is `erase(target(b, 'BackspaceStart'), b.caret)`; vim's `d{motion}` is the same call. */
 export const target = (buffer: Buffer, motion: Motion): Position =>
   motions[motion]({
     buffer,

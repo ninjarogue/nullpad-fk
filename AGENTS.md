@@ -111,7 +111,7 @@ The fixture fails any test whose page logs an error or throws. A known bug that 
 
 ### Robot typist
 
-The typist types random scripts into nullpad and into a plain `<textarea>`, each in its own browser context, and compares the text and the caret (line and grapheme column) after every step. A script mixes whole emoji, flag and accented clusters typed one code point at a time, lone code points, and the keys Left, Right, Home, End, Ctrl+Home, Ctrl+End, Backspace, Delete and Enter. Up, Down, Page Up, Page Down and Tab are left out because a textarea moves or acts on them differently by design.
+The typist types random scripts into nullpad and into a plain `<textarea>`, each in its own browser context, and compares the text and the caret (line and grapheme column) after every step. A script mixes whole emoji, flag and accented clusters typed one code point at a time, lone code points, and the keys Left, Right, Home, End, Ctrl+Home, Ctrl+End, Backspace, Delete and Enter. Up, Down, Page Up, Page Down and Tab are left out because a textarea moves or acts on them differently by design. Named scripts may press Up and Down on short lines, where both aim at the same column.
 
 On a mismatch it replays the script from empty, shrinks it to the shortest script that still fails, and prints the sequence seed, the shortest script, and the shortest script as JSON for `namedScripts` in `e2e/typist/script.ts`.
 

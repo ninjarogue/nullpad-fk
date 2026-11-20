@@ -1,6 +1,9 @@
+/** Random scripts leave out ArrowUp and ArrowDown: on wrapped or emoji rows a textarea aims by pixels, nullpad by cells. */
 export type TypistKey =
   | 'ArrowLeft'
   | 'ArrowRight'
+  | 'ArrowUp'
+  | 'ArrowDown'
   | 'Home'
   | 'End'
   | 'Control+Home'
@@ -400,6 +403,230 @@ export const namedScripts: ReadonlyArray<
       key('End'),
       key('Backspace'),
       text('y'),
+    ],
+  },
+  {
+    name: 'ArrowRight from a line join steps over a ZWJ and the emoji after it',
+    script: [
+      ...codePoints('ab👨'),
+      key('Enter'),
+      ...codePoints('‍👩cd'),
+      key('Home'),
+      key('Backspace'),
+      key('ArrowRight'),
+      text('z'),
+    ],
+  },
+  {
+    name: 'Delete at a line join takes a ZWJ and the emoji after it',
+    script: [
+      ...codePoints('ab👨'),
+      key('Enter'),
+      ...codePoints('‍👩cd'),
+      key('Home'),
+      key('Backspace'),
+      key('Delete'),
+      text('z'),
+    ],
+  },
+  {
+    name: 'ArrowRight from a line join steps over a virama and the consonant after it',
+    script: [
+      ...codePoints('abक'),
+      key('Enter'),
+      ...codePoints('्षcd'),
+      key('Home'),
+      key('Backspace'),
+      key('ArrowRight'),
+      text('z'),
+    ],
+  },
+  {
+    name: 'Backspace at the end of a keycap joined to its digit takes the keycap mark alone',
+    script: [
+      text('1'),
+      key('Enter'),
+      ...codePoints('️⃣'),
+      key('Home'),
+      key('Backspace'),
+      key('End'),
+      key('Backspace'),
+      text('z'),
+    ],
+  },
+  {
+    name: 'Backspace at a line join takes the last jamo of the line above',
+    script: [
+      ...codePoints('ab가'),
+      key('Enter'),
+      ...codePoints('ᆨcd'),
+      key('Home'),
+      key('Backspace'),
+      key('Backspace'),
+      text('z'),
+    ],
+  },
+  {
+    name: 'Backspace at a line join takes the ZWJ the line above ends with',
+    script: [
+      ...codePoints('ab👨‍'),
+      key('Enter'),
+      ...codePoints('👩cd'),
+      key('Home'),
+      key('Backspace'),
+      key('Backspace'),
+      text('z'),
+    ],
+  },
+  {
+    name: 'Backspace takes the last jamo of a syllable',
+    script: [...codePoints('ab가'), key('Backspace'), text('z')],
+  },
+  {
+    name: 'Backspace takes the last consonant of a conjunct',
+    script: [...codePoints('abक्ष'), key('Backspace'), text('z')],
+  },
+  {
+    name: 'Backspace takes a trailing ZWJ alone',
+    script: [...codePoints('e‍'), key('Backspace'), text('z')],
+  },
+  {
+    name: 'Backspace takes a skin tone off a heart',
+    script: [...codePoints('❤🏽'), key('Backspace'), text('z')],
+  },
+  {
+    name: 'Backspace takes a skin tone off a combining mark',
+    script: [...codePoints('á🏽'), key('Backspace'), text('z')],
+  },
+  {
+    name: 'ArrowLeft steps over a leading ZWJ and the flag letter after it',
+    script: [...codePoints('‍🇵'), key('ArrowLeft'), text('z')],
+  },
+  {
+    name: 'ArrowRight does not move a caret that inserted text left before a ZWJ',
+    script: [
+      ...codePoints('‍🇵'),
+      key('Home'),
+      text('👍'),
+      key('ArrowRight'),
+      text('z'),
+    ],
+  },
+  {
+    name: 'Delete after a ZWJ inserted before the last flag letter does nothing',
+    script: [text('🇸'), key('ArrowLeft'), text(ZWJ), key('Delete'), text('z')],
+  },
+  {
+    name: 'End moves a caret that a ZWJ inserted before a flag letter left inside it',
+    script: [text('🇺'), key('ArrowLeft'), text(ZWJ), key('End'), text('z')],
+  },
+  {
+    name: 'a virama typed before a consonant sticks to it',
+    script: [text('ष'), key('ArrowLeft'), text('्'), text('z')],
+  },
+  {
+    name: 'ArrowUp then ArrowDown from a line join inside é comes back to the join',
+    script: [
+      text('q'),
+      text('q'),
+      key('Enter'),
+      text('e'),
+      key('Enter'),
+      text('́'),
+      key('ArrowLeft'),
+      key('Backspace'),
+      key('ArrowUp'),
+      key('ArrowDown'),
+      text('z'),
+    ],
+  },
+  {
+    name: 'ArrowUp then ArrowDown from a line join inside a flag comes back to the join',
+    script: [
+      ...codePoints('qqqq'),
+      key('Enter'),
+      text('🇵'),
+      key('Enter'),
+      text('🇸'),
+      key('ArrowLeft'),
+      key('Backspace'),
+      key('ArrowUp'),
+      key('ArrowDown'),
+      text('z'),
+    ],
+  },
+  {
+    name: 'Delete joining two lines keeps the column ArrowDown aims for',
+    script: [
+      ...codePoints('abc'),
+      key('Enter'),
+      ...codePoints('defgh'),
+      key('Enter'),
+      ...codePoints('0123456789'),
+      key('ArrowUp'),
+      key('ArrowUp'),
+      key('Delete'),
+      key('ArrowDown'),
+      text('z'),
+    ],
+  },
+  {
+    name: 'Backspace keeps the column ArrowDown aims for',
+    script: [
+      ...codePoints('abcd'),
+      key('Enter'),
+      ...codePoints('defgh'),
+      key('Enter'),
+      ...codePoints('0123456789'),
+      key('ArrowUp'),
+      key('ArrowUp'),
+      key('Backspace'),
+      key('ArrowDown'),
+      key('ArrowDown'),
+      text('z'),
+    ],
+  },
+  {
+    name: 'End at the line end keeps the column ArrowDown aims for',
+    script: [
+      ...codePoints('abc'),
+      key('Enter'),
+      ...codePoints('defgh'),
+      key('Enter'),
+      ...codePoints('0123456789'),
+      key('ArrowUp'),
+      key('End'),
+      key('ArrowDown'),
+      text('z'),
+    ],
+  },
+  {
+    name: 'ArrowUp on the first line goes to its start, and ArrowDown comes back to the column',
+    script: [
+      ...codePoints('abcdef'),
+      key('Enter'),
+      ...codePoints('0123456789'),
+      key('Control+Home'),
+      key('ArrowRight'),
+      key('ArrowRight'),
+      key('ArrowRight'),
+      key('ArrowUp'),
+      key('ArrowDown'),
+      text('z'),
+    ],
+  },
+  {
+    name: 'ArrowDown on the last line goes to its end, and ArrowUp comes back to the column',
+    script: [
+      ...codePoints('0123456789'),
+      key('Enter'),
+      ...codePoints('abcdef'),
+      key('Home'),
+      key('ArrowRight'),
+      key('ArrowRight'),
+      key('ArrowDown'),
+      key('ArrowUp'),
+      text('z'),
     ],
   },
 ]

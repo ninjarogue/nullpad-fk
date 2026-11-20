@@ -50,7 +50,7 @@ test.describe('clicks', () => {
     expect(after.status.column).toBe((screen.rows[1]?.start ?? 0) + 11)
   })
 
-  test('a click past the end of a wrapped row lands on its last cell, not the next row', async ({
+  test('a click past the end of a wrapped row puts the cursor at the end of that row, as a textarea does', async ({
     nullpad,
   }) => {
     const screen = await nullpad.screen()
@@ -62,8 +62,13 @@ test.describe('clicks', () => {
     const cursor = await nullpad.cursor()
     expect({ row: cursor?.row, cell: cursor?.cell }).toEqual({
       row: 0,
-      cell: (first?.text.length ?? 0) - 1,
+      cell: first?.text.length,
     })
+    await nullpad.type('Z')
+    expect(
+      (await nullpad.text()).slice(0, (first?.text.length ?? 0) + 1),
+      'Z lands after the last character of the row',
+    ).toBe(`${first?.text ?? ''}Z`)
   })
 
   test('a click right of the text, out to the window edge, puts the cursor at the line end', async ({
@@ -105,16 +110,19 @@ test.describe('clicks', () => {
     }
   })
 
-  test('a click below the text puts the cursor on the last row', async ({
+  test('a click below the text puts the cursor at the end of the text, as a textarea does', async ({
     nullpad,
   }) => {
     const screen = await nullpad.screen()
-    await nullpad.press('Control+Home')
-    await nullpad.click(
-      screen.area.left + 200,
-      (screen.rows.at(-1)?.bottom ?? 0) + 200,
-    )
-    expect((await nullpad.status()).line).toBe(2)
+    for (const x of [screen.area.left + 1, screen.area.left + 200]) {
+      await nullpad.press('Control+Home')
+      await nullpad.click(x, (screen.rows.at(-1)?.bottom ?? 0) + 200)
+      expect(await nullpad.status(), `click at x=${Math.round(x)}`).toEqual({
+        line: 2,
+        column: 6,
+        lineCount: 2,
+      })
+    }
   })
 
   test('after clicks on the text and on the status line, typing still lands', async ({
@@ -233,3 +241,52 @@ test('wheel turns under one row never scroll, and turns add up to exactly one ro
     ).toBe(top)
   }
 })
+
+test('a click on the right half of the last character of a wrapped row puts the cursor at the row end', async ({
+  nullpad,
+}) => {
+  await nullpad.paste('x'.repeat(100))
+  await nullpad.press('Control+Home')
+  const screen = await nullpad.screen()
+  const first = screen.rows[0]
+  await nullpad.click(
+    (first?.left ?? 0) + 75.6 * screen.cell,
+    ((first?.top ?? 0) + (first?.bottom ?? 0)) / 2,
+  )
+  const cursor = await nullpad.cursor()
+  expect({ row: cursor?.row, cell: cursor?.cell }).toEqual({ row: 0, cell: 76 })
+  await nullpad.type('Z')
+  expect(await nullpad.text()).toBe(`${'x'.repeat(76)}Z${'x'.repeat(24)}`)
+})
+
+const joinedLine = async (nullpad: Nullpad, upper: string, lower: string) => {
+  await nullpad.paste(`top\n${upper}\n${lower}`)
+  await nullpad.press('Home')
+  await nullpad.press('Backspace')
+}
+
+for (const { name, upper, lower, cell, joined } of [
+  { name: 'a flag', upper: 'ab🇵', lower: '🇸cd', cell: 3.5, joined: 'ab🇵Z🇸cd' },
+  {
+    name: 'é',
+    upper: 'abe',
+    lower: '\u0301cd',
+    cell: 2.7,
+    joined: 'abeZ\u0301cd',
+  },
+]) {
+  test(`a click on the right half of the character before a line join inside ${name} puts the cursor at the join, as a textarea does`, async ({
+    nullpad,
+  }) => {
+    await joinedLine(nullpad, upper, lower)
+    await nullpad.press('Control+Home')
+    const screen = await nullpad.screen()
+    const row = screen.rows[1]
+    await nullpad.click(
+      (row?.left ?? 0) + cell * screen.cell,
+      ((row?.top ?? 0) + (row?.bottom ?? 0)) / 2,
+    )
+    await nullpad.type('Z')
+    expect(await nullpad.text()).toBe(`top\n${joined}`)
+  })
+}

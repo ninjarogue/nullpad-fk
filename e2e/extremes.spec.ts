@@ -143,15 +143,15 @@ for (const { name, grapheme, count } of longLines) {
       'Z lands after the last character',
     ).toBe(true)
     expect(typeMs, 'one keystroke on the long line, in ms').toBeLessThan(1_000)
-    await nullpad.press('Home')
+    await nullpad.press('Control+Home')
     const home = await nullpad.screen()
     expect(home.status.column).toBe(1)
-    expect(home.cursor?.row, 'Home shows the first row').toBe(0)
+    expect(home.cursor?.row, 'Ctrl+Home shows the first row').toBe(0)
     expect(home.rows[0]?.number).toBe('1')
     expectRowsFit(home, 'at the start')
     await nullpad.press('Backspace')
     await nullpad.press('Delete')
-    await nullpad.press('End')
+    await nullpad.press('Control+End')
     expect(
       (await nullpad.screen()).status.column,
       'Delete at the start took one character',

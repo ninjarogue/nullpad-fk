@@ -141,7 +141,62 @@ test('Korean syllables take two cells each, like CJK, for the wrap and the curso
     'the Korean line wraps the same',
   ).toEqual(cjk)
   expectRowsFit(screen, 'the Korean line')
+  await nullpad.press('ArrowUp')
   await nullpad.press('Home')
   await nullpad.press('ArrowRight', 3)
   expect((await nullpad.cursor())?.cell, 'three syllables of two cells').toBe(6)
+})
+
+test('a keycap emoji takes two cells and wraps whole to the next row', async ({
+  nullpad,
+}) => {
+  await nullpad.page.keyboard.insertText('1️⃣abc')
+  expect(
+    (await nullpad.cursor())?.cell,
+    'cursor after a two-cell keycap and three letters',
+  ).toBe(5)
+  await nullpad.press('Home')
+  await nullpad.page.keyboard.insertText('x'.repeat(75))
+  await nullpad.press('Control+End')
+  const screen = await nullpad.screen()
+  expect(
+    screen.rows.map(row => row.text),
+    'the keycap does not fit after 75 cells, so it starts the next row',
+  ).toEqual(['x'.repeat(75), '1️⃣abc'])
+  expectRowsFit(screen, 'keycap at the wrap edge')
+})
+
+test('ArrowDown from after a keycap keeps the column its two cells give', async ({
+  nullpad,
+}) => {
+  await nullpad.page.keyboard.insertText('1️⃣abc')
+  await nullpad.press('Enter')
+  await nullpad.type('0123456')
+  await nullpad.press('ArrowUp')
+  await nullpad.press('Home')
+  await nullpad.press('ArrowRight', 2)
+  await nullpad.press('ArrowDown')
+  expect(await nullpad.status()).toEqual({ line: 2, column: 4, lineCount: 2 })
+})
+
+test('every emoji of a ZWJ sequence the font has no single glyph for is drawn', async ({
+  nullpad,
+}) => {
+  await nullpad.page.keyboard.insertText('👩')
+  await nullpad.press('Enter')
+  await nullpad.page.keyboard.insertText('👨‍👩')
+  await nullpad.press('Enter')
+  const screen = await nullpad.screen()
+  const cellBox = (row: number, from: number, cells: number) => ({
+    x: (screen.rows[row]?.left ?? 0) + from * screen.cell,
+    y: screen.rows[row]?.top ?? 0,
+    width: cells * screen.cell,
+    height: screen.rowHeight,
+  })
+  const alone = await nullpad.inkIn(cellBox(0, 0, 2))
+  expect(alone, 'a lone woman emoji is drawn').toBeGreaterThan(50)
+  expect(
+    await nullpad.inkIn(cellBox(1, 2, 2)),
+    'the woman after man and ZWJ is drawn in the two cells after the man',
+  ).toBeGreaterThan(alone / 2)
 })

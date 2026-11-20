@@ -373,3 +373,61 @@ test('Ctrl+End from a short line lands at the end of the last line', async ({
   await nullpad.type('!')
   expect(await nullpad.text()).toBe('ab\nthe longer last line!')
 })
+
+test('ArrowDown onto a wrapped row shorter than the column puts the cursor at that row end, as a textarea does', async ({
+  nullpad,
+}) => {
+  await nullpad.paste(`${'a'.repeat(76)}\n${'b'.repeat(200)}`)
+  await nullpad.press('Control+Home')
+  await nullpad.press('End')
+  await nullpad.press('ArrowDown')
+  const cursor = await nullpad.cursor()
+  expect({ row: cursor?.row, cell: cursor?.cell }).toEqual({ row: 1, cell: 76 })
+  await nullpad.type('Z')
+  expect(await nullpad.text()).toBe(
+    `${'a'.repeat(76)}\n${'b'.repeat(76)}Z${'b'.repeat(124)}`,
+  )
+})
+
+test('ArrowUp onto a word-wrapped row lands after its trailing space, as a textarea does', async ({
+  nullpad,
+}) => {
+  const words = 'word '.repeat(30)
+  await nullpad.paste(`${words}\n${'a'.repeat(76)}`)
+  await nullpad.press('ArrowUp')
+  await nullpad.press('ArrowUp')
+  const cursor = await nullpad.cursor()
+  expect({ row: cursor?.row, cell: cursor?.cell }).toEqual({ row: 0, cell: 75 })
+  await nullpad.type('Z')
+  expect((await nullpad.text()).split('\n')[0]).toBe(
+    `${'word '.repeat(15)}Z${'word '.repeat(15)}`,
+  )
+})
+
+test('Home and End on a wrapped line go to the start and end of the row the cursor is on, as a textarea does', async ({
+  nullpad,
+}) => {
+  await nullpad.paste('x'.repeat(100))
+  await nullpad.press('Home')
+  const home = await nullpad.screen()
+  expect(
+    { row: home.cursor?.row, cell: home.cursor?.cell, at: home.status.column },
+    'Home on the second row',
+  ).toEqual({ row: 1, cell: 0, at: 77 })
+  await nullpad.press('ArrowUp')
+  await nullpad.press('ArrowRight', 3)
+  await nullpad.press('End')
+  const end = await nullpad.screen()
+  expect(
+    { row: end.cursor?.row, cell: end.cursor?.cell, at: end.status.column },
+    'End on the first row',
+  ).toEqual({ row: 0, cell: 76, at: 77 })
+  await nullpad.press('Home')
+  expect(
+    (await nullpad.screen()).status.column,
+    'Home from the end of the first row',
+  ).toBe(1)
+  await nullpad.press('End')
+  await nullpad.type('Z')
+  expect(await nullpad.text()).toBe(`${'x'.repeat(76)}Z${'x'.repeat(24)}`)
+})

@@ -22,7 +22,6 @@ type DrawnRow = Readonly<{
   top: number
   bottom: number
   text: string
-  continues: boolean
   boundaries: ReadonlyArray<Boundary>
 }>
 
@@ -40,7 +39,7 @@ const tieZone = 4
 test.describe.configure({ mode: 'parallel' })
 
 for (let band = 0; band < bands; band++) {
-  test(`click sweep, band ${band + 1} of ${bands}: every click lands the cursor on the nearest drawn boundary of the row under it`, async ({
+  test(`click sweep, band ${band + 1} of ${bands}: every click lands the cursor on the nearest drawn boundary of the row under it, or at the end of the text below it`, async ({
     nullpad,
   }) => {
     test.setTimeout(120_000)
@@ -51,7 +50,7 @@ for (let band = 0; band < bands; band++) {
         granularity: 'grapheme',
       })
       const rows = [...document.querySelectorAll<HTMLElement>('[data-line-id]')]
-      return rows.map((row, index) => {
+      return rows.map(row => {
         const texts: Array<{ node: Text; from: number }> = []
         let text = ''
         const walk = (node: Node) => {
@@ -106,8 +105,6 @@ for (let band = 0; band < bands; band++) {
           top: rect.top,
           bottom: rect.bottom,
           text,
-          continues:
-            rows[index + 1]?.dataset['lineId'] === row.dataset['lineId'],
           boundaries,
         }
       })
@@ -158,9 +155,8 @@ for (let band = 0; band < bands; band++) {
       if (row === undefined) {
         continue
       }
-      const reachable = row.continues
-        ? row.boundaries.slice(0, -1)
-        : row.boundaries
+      const below = y > lastBottom
+      const reachable = below ? row.boundaries.slice(-1) : row.boundaries
       for (const x of xs) {
         const nearest = reachable.reduce((best, boundary) =>
           Math.abs(boundary.x - x) < Math.abs(best.x - x) ? boundary : best,

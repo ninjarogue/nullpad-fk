@@ -21,6 +21,12 @@ module.exports = {
       to: { path: 'node_modules/@effect/platform-browser/' },
     },
     {
+      name: 'shell-imports-core-internals',
+      severity: 'error',
+      from: { path: '^src/', pathNot: core },
+      to: { path: core, pathNot: '^src/core/(editor|input)[.]ts$' },
+    },
+    {
       name: 'not-to-unresolvable',
       severity: 'error',
       from: {},

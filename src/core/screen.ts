@@ -491,21 +491,22 @@ const orderTop: Order.Order<Top> = Order.combine(
   Order.mapInput(Order.Number, (top: Top) => top.row),
 )
 
-const walk = (
+/** The row `delta` rows from `from`, stopped at the first or last row, and how many rows short of `delta` it is. */
+const walkBy = (
   buffer: Buffer,
   layoutOf: (line: number) => Layout,
   from: Top,
   delta: number,
-): Top => {
+): Readonly<{ top: Top; short: number }> => {
   let { line, row } = from
   let left = delta
   while (left > 0) {
     const last = rowCount(layoutOf(line)) - 1
     if (left <= last - row) {
-      return { line, row: row + left }
+      return { top: { line, row: row + left }, short: 0 }
     }
     if (line >= buffer.lines.length - 1) {
-      return { line, row: last }
+      return { top: { line, row: last }, short: left - (last - row) }
     }
     left -= last - row + 1
     line += 1
@@ -513,17 +514,24 @@ const walk = (
   }
   while (left < 0) {
     if (-left <= row) {
-      return { line, row: row + left }
+      return { top: { line, row: row + left }, short: 0 }
     }
     if (line === 0) {
-      return { line: 0, row: 0 }
+      return { top: { line: 0, row: 0 }, short: -left - row }
     }
     left += row + 1
     line -= 1
     row = rowCount(layoutOf(line)) - 1
   }
-  return { line, row }
+  return { top: { line, row }, short: 0 }
 }
+
+const walk = (
+  buffer: Buffer,
+  layoutOf: (line: number) => Layout,
+  from: Top,
+  delta: number,
+): Top => walkBy(buffer, layoutOf, from, delta).top
 
 /** Puts a top that edits left behind back inside the text. */
 const clampTop = (
@@ -816,6 +824,40 @@ export const rowEdge = (
 
 type CellSearch = Readonly<{ width: number; found: Option.Option<number> }>
 
+/** Where a caret aiming at `goal` cells lands on a row: before the first grapheme that ends past it, else the row end. */
+const atCell = (
+  lineLayout: Layout,
+  line: number,
+  row: number,
+  goal: number,
+): Landing => {
+  const initial: CellSearch = { width: 0, found: Option.none() }
+  const { found } = Array.reduce(
+    rowGlyphs(lineLayout, row),
+    initial,
+    (search, glyph) =>
+      Option.isSome(search.found) || search.width + glyph.cells <= goal
+        ? { ...search, width: search.width + glyph.cells }
+        : { ...search, found: Option.some(glyph.index) },
+  )
+  return Option.match(found, {
+    onNone: () => rowEnd(lineLayout, line, row),
+    onSome: column => ({ caret: { line, column }, atRowEnd: false }),
+  })
+}
+
+/** The start of the text, or its end. */
+const textEdge = (buffer: Buffer, edge: 'Start' | 'End'): Landing => {
+  const lastLine = buffer.lines.length - 1
+  return {
+    caret:
+      edge === 'Start'
+        ? { line: 0, column: 0 }
+        : { line: lastLine, column: lineAt(buffer, lastLine).text.length },
+    atRowEnd: false,
+  }
+}
+
 /**
  * Where the caret lands `rows` visual rows away, holding `goalCell`. Past the first row it lands at the text start,
  * past the last at the text end. A goal past a row's text lands at the row end.
@@ -829,28 +871,46 @@ export const rowTarget = (
   const from = caretTop(buffer, layoutOf, '', view.caretAtRowEnd)
   const to = walk(buffer, layoutOf, from, rows)
   if (orderTop(from, to) === 0) {
-    const lastLine = buffer.lines.length - 1
-    return {
-      caret:
-        rows < 0
-          ? { line: 0, column: 0 }
-          : { line: lastLine, column: lineAt(buffer, lastLine).text.length },
-      atRowEnd: false,
-    }
+    return textEdge(buffer, rows < 0 ? 'Start' : 'End')
   }
   const goal = Option.getOrElse(view.goalCell, () => caretCell(buffer, view))
-  const lineLayout = layoutOf(to.line)
-  const initial: CellSearch = { width: 0, found: Option.none() }
-  const { found } = Array.reduce(
-    rowGlyphs(lineLayout, to.row),
-    initial,
-    (search, glyph) =>
-      Option.isSome(search.found) || search.width + glyph.cells <= goal
-        ? { ...search, width: search.width + glyph.cells }
-        : { ...search, found: Option.some(glyph.index) },
+  return atCell(layoutOf(to.line), to.line, to.row, goal)
+}
+
+/** Rows a page moves: seven eighths of the screen, as Chrome pages a text field, and at least one. */
+export const pageRows = (size: Size): number =>
+  Math.max(1, Math.floor((size.rows * 7) / 8))
+
+/**
+ * Page Up and Page Down, as in a Chrome text field: the caret moves a page of rows at the cell it is drawn on,
+ * whatever the goal cell, and when fewer rows than a page are left it goes to the start or the end of the text.
+ */
+export const pageTarget = (
+  buffer: Buffer,
+  view: View,
+  direction: -1 | 1,
+): Landing => {
+  const layoutOf = lineLayouts(buffer, '', textColumns(buffer, view.size))
+  const from = caretTop(buffer, layoutOf, '', view.caretAtRowEnd)
+  const { top: to, short } = walkBy(
+    buffer,
+    layoutOf,
+    from,
+    direction * pageRows(view.size),
   )
-  return Option.match(found, {
-    onNone: () => rowEnd(lineLayout, to.line, to.row),
-    onSome: column => ({ caret: { line: to.line, column }, atRowEnd: false }),
-  })
+  return short > 0
+    ? textEdge(buffer, direction < 0 ? 'Start' : 'End')
+    : atCell(layoutOf(to.line), to.line, to.row, caretCell(buffer, view))
+}
+
+/** Scrolls so the caret row is the first row on screen, or as near it as the end of the text allows. */
+export const caretRowFirst = (buffer: Buffer, view: View): View => {
+  const layoutOf = lineLayouts(buffer, '', textColumns(buffer, view.size))
+  return {
+    ...view,
+    top: Order.min(orderTop)(
+      caretTop(buffer, layoutOf, '', view.caretAtRowEnd),
+      lastTop(buffer, layoutOf, view.size),
+    ),
+  }
 }

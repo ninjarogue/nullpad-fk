@@ -141,7 +141,7 @@ const moveToRowEdge =
   }
 
 const moveRows =
-  (rowsOf: (view: Screen.View) => number) =>
+  (rows: number) =>
   (editor: Editor): Editor => {
     const { buffer, view } = settled(editor)
     const aimed = {
@@ -150,13 +150,35 @@ const moveRows =
         Option.getOrElse(view.goalCell, () => Screen.caretCell(buffer, view)),
       ),
     }
-    const { caret, atRowEnd } = Screen.rowTarget(buffer, aimed, rowsOf(view))
+    const { caret, atRowEnd } = Screen.rowTarget(buffer, aimed, rows)
     const moved = Buffer.moveTo(buffer, caret)
     return show(
       editor,
       samePosition(moved.caret, buffer.caret) ? editor.buffer : moved,
       { ...aimed, caretAtRowEnd: atRowEnd },
     )
+  }
+
+/**
+ * Page Up and Page Down move the caret a page of rows at the cell it is drawn on, then scroll its row to the top of
+ * the screen, as far as the end of the text allows. Like Chrome, they forget the goal cell.
+ */
+const page =
+  (direction: -1 | 1) =>
+  (editor: Editor): Editor => {
+    const { buffer, view } = settled(editor)
+    const { caret, atRowEnd } = Screen.pageTarget(buffer, view, direction)
+    const moved = Buffer.moveTo(buffer, caret)
+    const next = samePosition(moved.caret, buffer.caret) ? editor.buffer : moved
+    return {
+      ...editor,
+      buffer: next,
+      view: Screen.caretRowFirst(next, {
+        ...view,
+        goalCell: Option.none(),
+        caretAtRowEnd: atRowEnd,
+      }),
+    }
   }
 
 const plainKeys: Readonly<
@@ -169,14 +191,14 @@ const plainKeys: Readonly<
   Delete: eraseTo('Right'),
   ArrowLeft: step('Left'),
   ArrowRight: step('Right'),
-  ArrowUp: moveRows(() => -1),
-  ArrowDown: moveRows(() => 1),
+  ArrowUp: moveRows(-1),
+  ArrowDown: moveRows(1),
   Home: (editor, { ctrl }) =>
     ctrl ? moveBy('DocumentStart')(editor) : moveToRowEdge('Start')(editor),
   End: (editor, { ctrl }) =>
     ctrl ? moveBy('DocumentEnd')(editor) : moveToRowEdge('End')(editor),
-  PageUp: moveRows(view => 1 - view.size.rows),
-  PageDown: moveRows(view => view.size.rows - 1),
+  PageUp: page(-1),
+  PageDown: page(1),
 }
 
 /**

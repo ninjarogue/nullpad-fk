@@ -84,6 +84,28 @@ test('every space at a row end hangs, and Home, End and the arrows step through 
   ])
 })
 
+test('a space typed by a key where the line then wraps leaves the cursor at the end of the upper row, and the same space from an IME at the start of the lower row, as in a textarea', async ({
+  nullpad,
+}) => {
+  await nullpad.type(`${'x'.repeat(74)}yy`)
+  await nullpad.press('ArrowLeft', 2)
+  await nullpad.type(' ')
+  const typed = await nullpad.screen()
+  expect(rowTexts(typed)).toEqual([`${'x'.repeat(74)} `, 'yy'])
+  expect(caretAt(typed), 'typed by a key').toEqual({
+    row: 0,
+    cell: 75,
+    column: 76,
+  })
+  await nullpad.press('Backspace')
+  await nullpad.page.keyboard.insertText(' ')
+  expect(caretAt(await nullpad.screen()), 'inserted by an IME').toEqual({
+    row: 1,
+    cell: 0,
+    column: 76,
+  })
+})
+
 test('a line of spaces longer than a row hangs whole, and the next word starts the next row', async ({
   nullpad,
 }) => {

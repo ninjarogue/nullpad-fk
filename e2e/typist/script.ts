@@ -728,6 +728,33 @@ export const namedScripts: ReadonlyArray<
       text('z'),
     ],
   },
+  {
+    name: 'Enter inside a line keeps the column ArrowUp aimed at, and ArrowDown aims at it again',
+    script: [
+      ...codePoints('wait!  ok... _italic_  the '),
+      key('Enter'),
+      ...codePoints('notes {x}y  '),
+      key('ArrowUp'),
+      key('Enter'),
+      key('ArrowDown'),
+    ],
+  },
+  {
+    name: 'Enter at a line end forgets the column ArrowDown aimed at',
+    script: [
+      ...codePoints('abcdefghijkl'),
+      key('Enter'),
+      ...codePoints('xy'),
+      key('Enter'),
+      ...codePoints('abcdefghijkl'),
+      key('Control+Home'),
+      key('End'),
+      key('ArrowDown'),
+      key('Enter'),
+      key('ArrowDown'),
+      text('z'),
+    ],
+  },
 ]
 
 type Difference = Readonly<{ name: string; pattern: RegExp }>

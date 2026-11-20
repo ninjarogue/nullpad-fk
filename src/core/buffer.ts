@@ -157,7 +157,7 @@ export const insert = (buffer: Buffer, text: string): Buffer => {
 const isBefore = (a: Position, b: Position): boolean =>
   a.line < b.line || (a.line === b.line && a.column < b.column)
 
-/** Removes the text between two positions, in either order. The caret ends at the earlier one, or before the grapheme the removal joined. */
+/** Removes the text between two positions, in either order. The caret ends at the earlier one, or after the grapheme the removal joined. */
 export const erase = (buffer: Buffer, from: Position, to: Position): Buffer => {
   const [start, end] = isBefore(to, from) ? [to, from] : [from, to]
   const first = lineAt(buffer, start.line)
@@ -172,7 +172,7 @@ export const erase = (buffer: Buffer, from: Position, to: Position): Buffer => {
     lines: replaceLines(buffer, start.line, end.line, [joined]),
     caret: {
       line: start.line,
-      column: boundaryAtOrBefore(joined.text, start.column),
+      column: boundaryAtOrAfter(joined.text, start.column),
     },
   }
 }

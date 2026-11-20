@@ -102,7 +102,6 @@ type Layout = Readonly<{
 
 const isAscii = /^[\x00-\x7f]*$/
 
-/** Calls `place` with each grapheme's column and cells from `from` on, until it returns true. */
 const eachGlyph = (
   text: string,
   from: number,
@@ -323,7 +322,6 @@ export const gutterWidth = (buffer: Buffer): number =>
 
 const maxTextColumns = 76
 
-/** The wrap width: what the gutter leaves of the screen, at most a comfortable reading width. */
 const textColumns = (buffer: Buffer, size: Size): number =>
   Math.max(1, Math.min(maxTextColumns, size.columns - gutterWidth(buffer)))
 
@@ -353,7 +351,6 @@ const orderTop: Order.Order<Top> = Order.combine(
   Order.mapInput(Order.Number, (top: Top) => top.row),
 )
 
-/** Moves `delta` visual rows from `from`, stopping at the first and last row of the text. */
 const walk = (
   buffer: Buffer,
   layoutOf: (line: number) => Layout,
@@ -445,7 +442,6 @@ const mergeInto = (
         : Array.append(spans, span),
   })
 
-/** Rows `from` up to `to` of one line, cut from its layout only for those rows. */
 const lineRows = (
   buffer: Buffer,
   line: number,

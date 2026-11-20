@@ -226,24 +226,23 @@ export const feed = (editor: Editor, input: Input): Editor =>
   })
 
 /**
- * The pointer chose a place. An unknown line id returns the same Editor. The column is clamped.
- * `atRowEnd` says the pointer was past the end of the row the column ends, rather than on the row it starts.
+ * The pointer pressed `row` rows down the screen and `cell` cells from its left edge, the gutter included.
+ * The place is read against this Editor, so a click lands where it would after every input fed before it.
  */
-export const click = (
-  editor: Editor,
-  lineId: number,
-  column: number,
-  atRowEnd: boolean,
-): Editor =>
-  Option.match(Buffer.indexOf(editor.buffer, lineId), {
-    onNone: () => editor,
-    onSome: line =>
-      show(editor, Buffer.moveTo(editor.buffer, { line, column }), {
-        ...editor.view,
-        goalCell: Option.none(),
-        caretAtRowEnd: atRowEnd,
-      }),
+export const click = (editor: Editor, row: number, cell: number): Editor => {
+  const { caret, atRowEnd } = Screen.pointAt(
+    editor.buffer,
+    editor.view,
+    editor.preedit,
+    row,
+    cell,
+  )
+  return show(editor, Buffer.moveTo(editor.buffer, caret), {
+    ...editor.view,
+    goalCell: Option.none(),
+    caretAtRowEnd: atRowEnd,
   })
+}
 
 /** The wheel moved the screen by whole rows. The caret may leave the screen until a `feed` that follows it. */
 export const scroll = (editor: Editor, rows: number): Editor =>

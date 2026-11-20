@@ -914,3 +914,71 @@ export const caretRowFirst = (buffer: Buffer, view: View): View => {
     ),
   }
 }
+
+/** The grapheme boundary nearest `cell` on a row, or the row end past its text. Spaces that hang take no room. */
+const nearestOnRow = (
+  lineLayout: Layout,
+  line: number,
+  row: number,
+  cell: number,
+): Landing => {
+  const initial: CellSearch = { width: 0, found: Option.none() }
+  const { found } = Array.reduce(
+    rowGlyphs(lineLayout, row),
+    initial,
+    (search, glyph) => {
+      const glyphCells = search.width >= lineLayout.columns ? 0 : glyph.cells
+      return Option.isSome(search.found) ||
+        cell >= search.width + glyphCells / 2
+        ? { ...search, width: search.width + glyphCells }
+        : { ...search, found: Option.some(glyph.index) }
+    },
+  )
+  return Option.match(found, {
+    onNone: () => rowEnd(lineLayout, line, row),
+    onSome: column => ({ caret: { line, column }, atRowEnd: false }),
+  })
+}
+
+/**
+ * The place a click lands on: `row` rows down the screen and `cell` cells from the left of the gutter, both measured
+ * by the shell. It is read against the text and scroll the editor has when the click is applied, after every input
+ * before it, as Chrome hit-tests a click against the layout of every keystroke before it. Left of the text is the
+ * row start, past its end the row end, and below the text, when it ends on screen, the text end.
+ */
+export const pointAt = (
+  buffer: Buffer,
+  view: View,
+  preedit: string,
+  row: number,
+  cell: number,
+): Landing => {
+  const layoutOf = lineLayouts(buffer, preedit, textColumns(buffer, view.size))
+  const top = clampTop(buffer, layoutOf, view.top)
+  const { top: to, short } = walkBy(
+    buffer,
+    layoutOf,
+    top,
+    Math.max(0, Math.min(view.size.rows - 1, Math.floor(row))),
+  )
+  if (short > 0) {
+    return textEdge(buffer, 'End')
+  }
+  const landing = nearestOnRow(
+    layoutOf(to.line),
+    to.line,
+    to.row,
+    cell - gutterWidth(buffer),
+  )
+  const { line, column } = buffer.caret
+  const inPreedit = landing.caret.line === line && preedit !== ''
+  return inPreedit && landing.caret.column > column
+    ? {
+        caret: {
+          line,
+          column: Math.max(column, landing.caret.column - preedit.length),
+        },
+        atRowEnd: landing.atRowEnd,
+      }
+    : landing
+}

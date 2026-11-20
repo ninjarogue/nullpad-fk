@@ -17,7 +17,7 @@ subtree_prompted: false
 The editor works like a terminal program. The core owns the text, the caret, the line wrap and the scroll position, and paints only the rows on screen.
 
 - `src/keyboard.ts` turns every key, text, IME and paste event of one hidden, always-focused textarea into an `Input`. `update` passes it to `Editor.feed` in `src/core/editor.ts`. A keypress crosses only these three files.
-- `src/surface.ts` draws the rows of `Editor.paint` and reports clicks, wheel turns and the screen size in cells.
+- `src/surface.ts` draws the rows of `Editor.paint` and reports clicks, wheel turns and the screen size in cells. A click is a place in rows and cells, and `Editor.click` reads it against the text after every input before it, so a click right after a keystroke lands where the keystroke left the text.
 - A new key binding goes in `plainKeys` in `src/core/editor.ts`.
 - `script()` in `src/core/input.ts` and `Editor.dump` run the editor without a browser and print a screen as text. Bundle a file that calls them with `pnpm dlx rolldown@1.2.19 <file>.ts --platform node -o <file>.mjs`, then run it with `node`.
 

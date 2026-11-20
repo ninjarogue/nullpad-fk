@@ -1,0 +1,180 @@
+import {
+  type Nullpad,
+  type Screen,
+  expect,
+  expectNumberedLinesIntact,
+  linesOf,
+  numberedLines,
+  test,
+} from './nullpad'
+
+const words = Array.from(
+  { length: 40 },
+  (_, i) => `w${String(i).padStart(2, '0')}`,
+).join(' ')
+
+/** A point a quarter into cell `cell` of drawn row `row`, nearest the boundary before that cell. */
+const pointIn = (screen: Screen, row: number, cell: number) => {
+  const drawn = screen.rows[row]
+  if (drawn === undefined) {
+    throw new Error(`no row ${row} on screen`)
+  }
+  return {
+    x: drawn.left + (cell + 0.25) * screen.cell,
+    y: (drawn.top + drawn.bottom) / 2,
+  }
+}
+
+const clickAt = async (nullpad: Nullpad, point: { x: number; y: number }) =>
+  nullpad.click(point.x, point.y)
+
+test.describe('clicks', () => {
+  test.beforeEach(async ({ nullpad }) => {
+    await nullpad.paste(`${words}\nshort`)
+  })
+
+  test('a click on a character of a wrapped row puts the cursor on that cell', async ({
+    nullpad,
+  }) => {
+    const screen = await nullpad.screen()
+    expect(
+      screen.rows.slice(0, 3).map(row => row.lineId),
+      'the long line wraps to three rows',
+    ).toEqual(Array(3).fill(screen.rows[0]?.lineId))
+    await clickAt(nullpad, pointIn(screen, 1, 10))
+    const after = await nullpad.screen()
+    expect({ row: after.cursor?.row, cell: after.cursor?.cell }).toEqual({
+      row: 1,
+      cell: 10,
+    })
+    expect(after.status.column).toBe((screen.rows[1]?.start ?? 0) + 11)
+  })
+
+  test('a click past the end of a wrapped row lands on its last cell, not the next row', async ({
+    nullpad,
+  }) => {
+    const screen = await nullpad.screen()
+    const first = screen.rows[0]
+    await nullpad.click(
+      (first?.inkRight ?? 0) + 4,
+      ((first?.top ?? 0) + (first?.bottom ?? 0)) / 2,
+    )
+    const cursor = await nullpad.cursor()
+    expect({ row: cursor?.row, cell: cursor?.cell }).toEqual({
+      row: 0,
+      cell: (first?.text.length ?? 0) - 1,
+    })
+  })
+
+  test('a click right of the text, out to the window edge, puts the cursor at the line end', async ({
+    nullpad,
+  }) => {
+    const screen = await nullpad.screen()
+    const short = screen.rows[3]
+    const y = ((short?.top ?? 0) + (short?.bottom ?? 0)) / 2
+    const width = nullpad.page.viewportSize()?.width ?? 0
+    for (const x of [(short?.inkRight ?? 0) + 4, width / 2, width - 3]) {
+      await nullpad.press('Control+Home')
+      await nullpad.click(x, y)
+      expect(await nullpad.status(), `click at x=${Math.round(x)}`).toEqual({
+        line: 2,
+        column: 6,
+        lineCount: 2,
+      })
+    }
+  })
+
+  test('a click in the line number gutter, out to the window edge, puts the cursor at the row start', async ({
+    nullpad,
+  }) => {
+    const screen = await nullpad.screen()
+    const row = screen.rows[1]
+    const y = ((row?.top ?? 0) + (row?.bottom ?? 0)) / 2
+    for (const x of [(row?.left ?? 0) - 20, 2]) {
+      await nullpad.press('Control+End')
+      await nullpad.click(x, y)
+      const after = await nullpad.screen()
+      expect(
+        { line: after.status.line, column: after.status.column },
+        `click at x=${Math.round(x)}`,
+      ).toEqual({
+        line: 1,
+        column: (row?.start ?? 0) + 1,
+      })
+      expect(after.cursor?.row).toBe(1)
+    }
+  })
+
+  test('a click below the text puts the cursor on the last row', async ({
+    nullpad,
+  }) => {
+    const screen = await nullpad.screen()
+    await nullpad.press('Control+Home')
+    await nullpad.click(
+      screen.area.left + 200,
+      (screen.rows.at(-1)?.bottom ?? 0) + 200,
+    )
+    expect((await nullpad.status()).line).toBe(2)
+  })
+
+  test('after clicks on the text and on the status line, typing still lands', async ({
+    nullpad,
+  }) => {
+    const screen = await nullpad.screen()
+    await clickAt(nullpad, pointIn(screen, 3, 0))
+    const status = await nullpad.page.locator('.status').boundingBox()
+    await nullpad.click(
+      (status?.x ?? 0) + 300,
+      (status?.y ?? 0) + (status?.height ?? 0) / 2,
+    )
+    await nullpad.type('Z')
+    expect(linesOf(await nullpad.screen()).at(-1)).toBe('Zshort')
+  })
+})
+
+test('the wheel scrolls by whole rows, may leave the cursor off screen, stops at the last line, and typing brings the cursor back', async ({
+  nullpad,
+}) => {
+  await nullpad.paste(numberedLines(200))
+  await nullpad.press('Control+Home')
+  const start = await nullpad.screen()
+  await nullpad.page.mouse.move(400, 300)
+  await nullpad.wheel(start.rowHeight * 5)
+  const down = await nullpad.screen()
+  expect(down.rows[0]?.number, 'five rows down').toBe('6')
+  expect(down.cursor, 'cursor scrolled off screen').toBeNull()
+  await nullpad.wheel(-start.rowHeight * 2)
+  expect((await nullpad.screen()).rows[0]?.number, 'two rows back up').toBe('4')
+  await nullpad.wheel(start.rowHeight * 1000)
+  const bottom = await nullpad.screen()
+  expect(
+    bottom.rows.at(-1)?.number,
+    'the last line sits on the bottom row',
+  ).toBe('200')
+  expect(bottom.rows.length).toBe(start.rows.length)
+  await nullpad.type('x')
+  const typed = await nullpad.screen()
+  expect(typed.cursor?.inside, 'typing brings the cursor back').toBe(true)
+  expect(linesOf(typed)[0]).toBe('xline 1')
+})
+
+test('one huge wheel turn on a 20,000-line note scrolls without a crash and keeps the text intact', async ({
+  nullpad,
+  pageErrors,
+}) => {
+  await nullpad.paste(numberedLines(20_000))
+  await nullpad.press('Control+Home')
+  const { rowHeight } = await nullpad.screen()
+  await nullpad.page.mouse.move(400, 300)
+  await nullpad.wheel(rowHeight * 6000)
+  const down = await nullpad.screen()
+  expect(down.rows[0]?.number, '6,000 rows down').toBe('6001')
+  expectNumberedLinesIntact(down, '6,000 rows down')
+  expect(down.status.lineCount).toBe(20_000)
+  await nullpad.wheel(-rowHeight * 6000)
+  const back = await nullpad.screen()
+  expect(back.rows[0]?.number, 'back at the top').toBe('1')
+  expectNumberedLinesIntact(back, 'back at the top')
+  expect(back.status.lineCount).toBe(20_000)
+  expect(pageErrors).toEqual([])
+})

@@ -4,7 +4,7 @@ import * as Buffer from './buffer'
 import { Input, type Modifiers, type NamedKey } from './input'
 import * as Screen from './screen'
 
-export type { Row, Span, SpanKind, Width } from './screen'
+export type { Row, Span, SpanKind } from './screen'
 
 /** Vim adds Normal, Insert and Visual here. Plain is the default typing mode. */
 export const Mode = Schema.Literals(['Plain'])
@@ -36,6 +36,7 @@ export const open = (text: string): Editor => ({
     size: { columns: 80, rows: 24 },
     top: { line: 0, row: 0 },
     goalCell: Option.none(),
+    caretAtRowEnd: false,
   },
   mode: 'Plain',
   preedit: '',
@@ -43,78 +44,133 @@ export const open = (text: string): Editor => ({
 
 export const text = (editor: Editor): string => Buffer.toText(editor.buffer)
 
-const edit = (editor: Editor, buffer: Buffer.Buffer): Editor => ({
+const show = (
+  editor: Editor,
+  buffer: Buffer.Buffer,
+  view: Screen.View,
+): Editor => ({
   ...editor,
   buffer,
-  view: Screen.follow(
-    buffer,
-    { ...editor.view, goalCell: Option.none() },
-    editor.preedit,
-  ),
+  view: Screen.follow(buffer, view, editor.preedit),
 })
+
+/**
+ * Chrome starts every command from the next boundary at or after a caret that inserted text left inside a grapheme,
+ * but a command that then does nothing leaves the caret where it was.
+ */
+const settled = (editor: Editor): Editor => ({
+  ...editor,
+  buffer: Buffer.settle(editor.buffer),
+})
+
+const samePosition = (a: Buffer.Position, b: Buffer.Position): boolean =>
+  a.line === b.line && a.column === b.column
 
 const insertText =
   (text: string) =>
-  (editor: Editor): Editor =>
-    edit(editor, Buffer.insert(editor.buffer, text))
+  (editor: Editor): Editor => {
+    const { buffer, view } = settled(editor)
+    return show(editor, Buffer.insert(buffer, text), {
+      ...view,
+      goalCell: Option.none(),
+      caretAtRowEnd: false,
+    })
+  }
+
+/** Text typed by a key, after which Chrome moves the caret past a grapheme the text joined (z before ZWJ 🇵). */
+const typeText =
+  (text: string) =>
+  (editor: Editor): Editor => {
+    const inserted = insertText(text)(editor)
+    return { ...inserted, buffer: Buffer.settle(inserted.buffer) }
+  }
+
+const eraseTo =
+  (motion: Buffer.Motion) =>
+  (editor: Editor): Editor => {
+    const { buffer, view } = settled(editor)
+    const target = Buffer.target(buffer, motion)
+    return samePosition(target, buffer.caret)
+      ? show(editor, editor.buffer, editor.view)
+      : show(editor, Buffer.erase(buffer, buffer.caret, target), {
+          ...view,
+          caretAtRowEnd: false,
+        })
+  }
+
+/** A move that leaves the caret where it was keeps the goal cell, as Chrome does; one that moves it clears it. */
+const land = (editor: Editor, { caret, atRowEnd }: Screen.Landing): Editor => {
+  const moved = Buffer.moveTo(editor.buffer, caret)
+  return samePosition(moved.caret, editor.buffer.caret) &&
+    atRowEnd === editor.view.caretAtRowEnd
+    ? show(editor, editor.buffer, editor.view)
+    : show(editor, moved, {
+        ...editor.view,
+        goalCell: Option.none(),
+        caretAtRowEnd: atRowEnd,
+      })
+}
 
 const moveBy =
   (motion: Buffer.Motion) =>
   (editor: Editor): Editor =>
-    edit(
-      editor,
-      Buffer.moveTo(editor.buffer, Buffer.target(editor.buffer, motion)),
-    )
+    land(editor, {
+      caret: Buffer.target(settled(editor).buffer, motion),
+      atRowEnd: false,
+    })
 
-const eraseTo =
+/** ArrowLeft and ArrowRight: at either end of the text they do nothing, even to a caret inside a grapheme. */
+const step =
   (motion: Buffer.Motion) =>
-  (editor: Editor): Editor =>
-    edit(
-      editor,
-      Buffer.erase(
-        editor.buffer,
-        editor.buffer.caret,
-        Buffer.target(editor.buffer, motion),
-      ),
-    )
+  (editor: Editor): Editor => {
+    const { buffer } = settled(editor)
+    return samePosition(Buffer.target(buffer, motion), buffer.caret)
+      ? show(editor, editor.buffer, editor.view)
+      : moveBy(motion)(editor)
+  }
+
+const moveToRowEdge =
+  (edge: 'Start' | 'End') =>
+  (editor: Editor): Editor => {
+    const { buffer, view } = settled(editor)
+    return land(editor, Screen.rowEdge(buffer, view, edge))
+  }
 
 const moveRows =
   (rowsOf: (view: Screen.View) => number) =>
   (editor: Editor): Editor => {
-    const view = {
-      ...editor.view,
+    const { buffer, view } = settled(editor)
+    const aimed = {
+      ...view,
       goalCell: Option.some(
-        Option.getOrElse(editor.view.goalCell, () =>
-          Screen.caretCell(editor.buffer, editor.view),
-        ),
+        Option.getOrElse(view.goalCell, () => Screen.caretCell(buffer, view)),
       ),
     }
-    const buffer = Buffer.moveTo(
-      editor.buffer,
-      Screen.rowTarget(editor.buffer, view, rowsOf(view)),
+    const { caret, atRowEnd } = Screen.rowTarget(buffer, aimed, rowsOf(view))
+    const moved = Buffer.moveTo(buffer, caret)
+    return show(
+      editor,
+      samePosition(moved.caret, buffer.caret) ? editor.buffer : moved,
+      { ...aimed, caretAtRowEnd: atRowEnd },
     )
-    return {
-      ...editor,
-      buffer,
-      view: Screen.follow(buffer, view, editor.preedit),
-    }
   }
 
 const plainKeys: Readonly<
   Record<NamedKey, (editor: Editor, modifiers: Modifiers) => Editor>
 > = {
   Escape: editor => editor,
-  Enter: insertText('\n'),
-  Tab: insertText('  '),
+  Enter: typeText('\n'),
+  Tab: typeText('  '),
   Backspace: eraseTo('BackspaceStart'),
   Delete: eraseTo('Right'),
-  ArrowLeft: moveBy('Left'),
-  ArrowRight: moveBy('Right'),
+  ArrowLeft: step('Left'),
+  ArrowRight: step('Right'),
   ArrowUp: moveRows(() => -1),
   ArrowDown: moveRows(() => 1),
   Home: (editor, { ctrl }) =>
-    moveBy(ctrl ? 'DocumentStart' : 'LineStart')(editor),
-  End: (editor, { ctrl }) => moveBy(ctrl ? 'DocumentEnd' : 'LineEnd')(editor),
+    ctrl ? moveBy('DocumentStart')(editor) : moveToRowEdge('Start')(editor),
+  End: (editor, { ctrl }) =>
+    ctrl ? moveBy('DocumentEnd')(editor) : moveToRowEdge('End')(editor),
   PageUp: moveRows(view => 1 - view.size.rows),
   PageDown: moveRows(view => view.size.rows - 1),
 }
@@ -128,22 +184,39 @@ export const feed = (editor: Editor, input: Input): Editor =>
   Input.match(input, {
     Key: ({ key, modifiers }) => plainKeys[key](editor, modifiers),
     Chord: () => editor,
-    Text: ({ text }) => insertText(text)(editor),
+    Text: ({ text, byKey }) =>
+      byKey ? typeText(text)(editor) : insertText(text)(editor),
     Paste: ({ text }) => insertText(text)(editor),
-    Preedit: ({ text }) => ({
-      ...editor,
-      preedit: text,
-      view: Screen.follow(editor.buffer, editor.view, text),
-    }),
+    Preedit: ({ text }) => {
+      const { buffer } = settled(editor)
+      return {
+        ...editor,
+        buffer,
+        preedit: text,
+        view: Screen.follow(buffer, editor.view, text),
+      }
+    },
     Commit: ({ text }) => insertText(text)({ ...editor, preedit: '' }),
   })
 
-/** The pointer chose a place. An unknown line id returns the same Editor. The column is clamped. */
-export const click = (editor: Editor, lineId: number, column: number): Editor =>
+/**
+ * The pointer chose a place. An unknown line id returns the same Editor. The column is clamped.
+ * `atRowEnd` says the pointer was past the end of the row the column ends, rather than on the row it starts.
+ */
+export const click = (
+  editor: Editor,
+  lineId: number,
+  column: number,
+  atRowEnd: boolean,
+): Editor =>
   Option.match(Buffer.indexOf(editor.buffer, lineId), {
     onNone: () => editor,
     onSome: line =>
-      edit(editor, Buffer.moveTo(editor.buffer, { line, column })),
+      show(editor, Buffer.moveTo(editor.buffer, { line, column }), {
+        ...editor.view,
+        goalCell: Option.none(),
+        caretAtRowEnd: atRowEnd,
+      }),
   })
 
 /** The wheel moved the screen by whole rows. The caret may leave the screen until a `feed` that follows it. */

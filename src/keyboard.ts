@@ -63,10 +63,18 @@ const fromKeyDown = (event: KeyboardEvent): Option.Option<Input> => {
     : Option.none()
 }
 
-/** A cancelable beforeinput as an Input. Only insertText carries one. */
-const fromBeforeInput = (event: InputEvent): Option.Option<Input> =>
+/** A cancelable beforeinput as an Input. Only insertText carries one. `keyed` is the key of the keydown just before. */
+const fromBeforeInput = (
+  event: InputEvent,
+  keyed: Option.Option<string>,
+): Option.Option<Input> =>
   event.inputType === 'insertText' && event.data !== null && event.data !== ''
-    ? Option.some(Input.cases.Text.make({ text: event.data }))
+    ? Option.some(
+        Input.cases.Text.make({
+          text: event.data,
+          byKey: Option.contains(keyed, event.data),
+        }),
+      )
     : Option.none()
 
 type KeyboardMessage =
@@ -87,10 +95,12 @@ const listen = (port: HTMLTextAreaElement): Stream.Stream<KeyboardMessage> =>
               Queue.offerUnsafe(queue, Message.ReceivedInput({ input })),
           })
         const keepFocus = () => port.focus({ preventScroll: true })
+        const lastKey: { key: Option.Option<string> } = { key: Option.none() }
 
         port.addEventListener(
           'keydown',
           event => {
+            lastKey.key = Option.some(event.key)
             if (offerInput(fromKeyDown(event))) {
               event.preventDefault()
             }
@@ -102,8 +112,9 @@ const listen = (port: HTMLTextAreaElement): Stream.Stream<KeyboardMessage> =>
           event => {
             if (event.cancelable) {
               event.preventDefault()
-              offerInput(fromBeforeInput(event))
+              offerInput(fromBeforeInput(event, lastKey.key))
             }
+            lastKey.key = Option.none()
           },
           { signal },
         )

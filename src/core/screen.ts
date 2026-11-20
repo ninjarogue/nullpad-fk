@@ -3,7 +3,9 @@ import { Array, Option, Order, Schema } from 'effect'
 import {
   type Buffer,
   type Grapheme,
+  type Line,
   type LineId,
+  type Position,
   graphemes,
   segmenter,
 } from './buffer'
@@ -21,12 +23,16 @@ export type Top = typeof Top.Type
 /**
  * `top` names the first row on screen: visual row `row` of line `line`.
  * Anchoring on a line keeps every function here O(size.rows). None of them wraps the whole text.
- * `goalCell` is the cell column that vertical motion aims for. Any other caret move clears it.
+ * `goalCell` is the cell column that vertical motion aims for. As in Chrome, typing, a click or a caret move
+ * that lands elsewhere clears it; Backspace, Delete and a move that stays put keep it.
+ * `caretAtRowEnd` draws a caret that sits where a line wraps at the end of the upper row, as Chrome's
+ * upstream caret after End, a click past a row end, or a vertical move onto one. Any other move clears it.
  */
 export const View = Schema.Struct({
   size: Size,
   top: Top,
   goalCell: Schema.Option(Schema.Number),
+  caretAtRowEnd: Schema.Boolean,
 })
 export type View = typeof View.Type
 
@@ -39,11 +45,16 @@ export const SpanKind = Schema.Literals([
 ])
 export type SpanKind = typeof SpanKind.Type
 
-/** A Wide span is one grapheme that takes two cells. The shell boxes it so a fallback font cannot shift the row. */
-export const Width = Schema.Literals(['Narrow', 'Wide'])
-export type Width = typeof Width.Type
-
-export type Span = Readonly<{ text: string; kind: SpanKind; width: Width }>
+/**
+ * A span with a `box` is one grapheme the shell draws in a box that many cells wide: a grapheme wider than one cell,
+ * so a fallback font cannot shift the row, or the first grapheme after a line join, so it is shaped apart from the
+ * text before it, the way Chrome hit-tests the two sides of a join.
+ */
+export type Span = Readonly<{
+  text: string
+  kind: SpanKind
+  box: Option.Option<number>
+}>
 
 /**
  * One visual row. `start` is the column of its first character in line `lineId`.
@@ -78,8 +89,26 @@ const eastAsianWide: ReadonlyArray<readonly [number, number]> = [
 
 const emoji = /\p{Emoji_Presentation}|\p{Extended_Pictographic}️/u
 
-/** Cells a grapheme takes: 2 for East Asian wide characters and emoji, otherwise 1. */
-const cells = (grapheme: string): 1 | 2 => {
+const rgiEmoji = new RegExp('^\\p{RGI_Emoji}$', 'v')
+
+const zwj = '\u200d'
+
+/**
+ * Cells a grapheme takes: 2 for East Asian wide characters and emoji, 1 otherwise. A ZWJ sequence that is not
+ * a recommended emoji has no single glyph, so it takes the cells of the emoji it is made of, side by side.
+ */
+const cells = (grapheme: string): number => {
+  if (rgiEmoji.test(grapheme)) {
+    return 2
+  }
+  if (grapheme.length > 1 && grapheme.includes(zwj)) {
+    return Math.max(
+      1,
+      Array.reduce(grapheme.split(zwj), 0, (sum, part) =>
+        part === '' ? sum : sum + cells(part),
+      ),
+    )
+  }
   const code = grapheme.codePointAt(0) ?? 0
   return emoji.test(grapheme) ||
     Array.some(eastAsianWide, ([from, to]) => code >= from && code <= to)
@@ -87,7 +116,8 @@ const cells = (grapheme: string): 1 | 2 => {
     : 1
 }
 
-type Glyph = Grapheme & Readonly<{ cells: 1 | 2 }>
+/** `opensPiece` marks the first grapheme after a line join. */
+type Glyph = Grapheme & Readonly<{ cells: number; opensPiece: boolean }>
 
 /**
  * A line cut into visual rows: row `r` begins at column `starts[r]`, after `counts[r]` graphemes.
@@ -95,6 +125,7 @@ type Glyph = Grapheme & Readonly<{ cells: 1 | 2 }>
  */
 type Layout = Readonly<{
   text: string
+  joins: ReadonlyArray<number>
   columns: number
   starts: Array.NonEmptyReadonlyArray<number>
   counts: Array.NonEmptyReadonlyArray<number>
@@ -102,10 +133,21 @@ type Layout = Readonly<{
 
 const isAscii = /^[\x00-\x7f]*$/
 
+/** The stretches of `[from, to)` between joins. A grapheme never spans one, on screen as in editing. */
+const pieces = (
+  joins: ReadonlyArray<number>,
+  from: number,
+  to: number,
+): ReadonlyArray<readonly [number, number]> => {
+  const inside = Array.filter(joins, join => join > from && join < to)
+  return Array.zip([from, ...inside], [...inside, to])
+}
+
 const eachGlyph = (
   text: string,
+  joins: ReadonlyArray<number>,
   from: number,
-  place: (index: number, cells: 1 | 2, isSpace: boolean) => boolean,
+  place: (index: number, cells: number, isSpace: boolean) => boolean,
 ): void => {
   const rest = text.slice(from)
   if (isAscii.test(rest)) {
@@ -116,9 +158,13 @@ const eachGlyph = (
     }
     return
   }
-  for (const { index, segment } of segmenter.segment(rest)) {
-    if (place(from + index, cells(segment), segment === ' ')) {
-      return
+  for (const [start, end] of pieces(joins, from, text.length)) {
+    for (const { index, segment } of segmenter.segment(
+      text.slice(start, end),
+    )) {
+      if (place(start + index, cells(segment), segment === ' ')) {
+        return
+      }
     }
   }
 }
@@ -141,6 +187,7 @@ type Tail = Readonly<{
  */
 const wrap = (
   text: string,
+  joins: ReadonlyArray<number>,
   columns: number,
   from: number,
   before: number,
@@ -162,7 +209,7 @@ const wrap = (
     rowStart = at
     tail = tailAt(at, graphemesBefore)
   }
-  eachGlyph(text, from, (at, glyphCells, isSpace) => {
+  eachGlyph(text, joins, from, (at, glyphCells, isSpace) => {
     if (width + glyphCells > columns && at > rowStart) {
       if (breakAt > rowStart) {
         startRow(breakAt, breakCount)
@@ -228,7 +275,11 @@ const sharedSuffix = (a: string, b: string, prefix: number): number => {
  * the edit keep their starts. From the first row start in the unchanged tail that lines up
  * with an old one, the old rows repeat, moved by the edit's length.
  */
-const rewrap = (known: Layout, text: string): Layout => {
+const rewrap = (
+  known: Layout,
+  text: string,
+  joins: ReadonlyArray<number>,
+): Layout => {
   const { columns } = known
   const prefix = sharedPrefix(known.text, text)
   const tailFrom = text.length - sharedSuffix(known.text, text, prefix)
@@ -249,6 +300,7 @@ const rewrap = (known: Layout, text: string): Layout => {
   }
   const rows = wrap(
     text,
+    joins,
     columns,
     rowColumn(known, resume),
     known.counts[resume] ?? 0,
@@ -256,6 +308,7 @@ const rewrap = (known: Layout, text: string): Layout => {
   )
   return {
     text,
+    joins,
     columns,
     starts: Array.prependAll(rows.starts, known.starts.slice(0, resume)),
     counts: Array.prependAll(rows.counts, known.counts.slice(0, resume)),
@@ -264,19 +317,33 @@ const rewrap = (known: Layout, text: string): Layout => {
 
 const layouts = new Map<LineId, Layout>()
 
+const sameJoins = (a: ReadonlyArray<number>, b: ReadonlyArray<number>) =>
+  a.length === b.length && Array.every(a, (join, index) => join === b[index])
+
 /** The wrap of one line, remembered by line id. An edit wraps again only near the change. */
-const layout = (id: LineId, text: string, columns: number): Layout => {
+const layout = (
+  id: LineId,
+  text: string,
+  joins: ReadonlyArray<number>,
+  columns: number,
+): Layout => {
   if (text.length * 2 <= columns) {
-    return { text, columns, starts: [0], counts: [0] }
+    return { text, joins, columns, starts: [0], counts: [0] }
   }
   const known = layouts.get(id)
-  if (known !== undefined && known.text === text && known.columns === columns) {
+  const sameText = known !== undefined && known.text === text
+  if (sameText && known.columns === columns && sameJoins(known.joins, joins)) {
     return known
   }
   const wrapped =
-    known !== undefined && known.columns === columns
-      ? rewrap(known, text)
-      : { text, columns, ...wrap(text, columns, 0, 0, () => Option.none()) }
+    known !== undefined && known.columns === columns && !sameText
+      ? rewrap(known, text, joins)
+      : {
+          text,
+          joins,
+          columns,
+          ...wrap(text, joins, columns, 0, 0, () => Option.none()),
+        }
   if (layouts.size >= 256) {
     layouts.clear()
   }
@@ -289,17 +356,21 @@ const rowCount = (lineLayout: Layout): number => lineLayout.starts.length
 const rowColumn = (lineLayout: Layout, row: number): number =>
   lineLayout.starts[row] ?? lineLayout.text.length
 
-const rowGlyphs = (lineLayout: Layout, row: number): ReadonlyArray<Glyph> => {
-  const start = rowColumn(lineLayout, row)
-  return Array.map(
-    graphemes(lineLayout.text.slice(start, rowColumn(lineLayout, row + 1))),
-    ({ index, segment }) => ({
-      index: start + index,
-      segment,
-      cells: cells(segment),
-    }),
+const rowGlyphs = (lineLayout: Layout, row: number): ReadonlyArray<Glyph> =>
+  Array.flatMap(
+    pieces(
+      lineLayout.joins,
+      rowColumn(lineLayout, row),
+      rowColumn(lineLayout, row + 1),
+    ),
+    ([start, end]) =>
+      Array.map(graphemes(lineLayout.text, start, end), grapheme => ({
+        ...grapheme,
+        cells: cells(grapheme.segment),
+        opensPiece:
+          grapheme.index === start && lineLayout.joins.includes(start),
+      })),
   )
-}
 
 /** The row of a column. A column on a break belongs to the row it starts. */
 const rowOfColumn = (lineLayout: Layout, column: number): number => {
@@ -325,26 +396,26 @@ const maxTextColumns = 76
 const textColumns = (buffer: Buffer, size: Size): number =>
   Math.max(1, Math.min(maxTextColumns, size.columns - gutterWidth(buffer)))
 
-const lineText = (buffer: Buffer, line: number): string =>
-  buffer.lines[line]?.text ?? ''
+const lineAt = (buffer: Buffer, line: number): Line =>
+  buffer.lines[line] ?? buffer.lines[0]
 
-/** The caret line shows the preedit at the caret, so it wraps with it inside. */
-const displayText = (buffer: Buffer, line: number, preedit: string): string => {
-  const text = lineText(buffer, line)
-  const { column } = buffer.caret
-  return line === buffer.caret.line
-    ? text.slice(0, column) + preedit + text.slice(column)
-    : text
-}
-
+/** The caret line shows the preedit at the caret, so it wraps with it inside, before a join there. */
 const lineLayouts =
   (buffer: Buffer, preedit: string, columns: number) =>
-  (line: number): Layout =>
-    layout(
-      buffer.lines[line]?.id ?? buffer.lines[0].id,
-      displayText(buffer, line, preedit),
-      columns,
-    )
+  (line: number): Layout => {
+    const { id, text, joins } = lineAt(buffer, line)
+    const { column } = buffer.caret
+    return line === buffer.caret.line && preedit !== ''
+      ? layout(
+          id,
+          text.slice(0, column) + preedit + text.slice(column),
+          Array.map(joins, join =>
+            join >= column ? join + preedit.length : join,
+          ),
+          columns,
+        )
+      : layout(id, text, joins, columns)
+  }
 
 const orderTop: Order.Order<Top> = Order.combine(
   Order.mapInput(Order.Number, (top: Top) => top.line),
@@ -398,15 +469,29 @@ const clampTop = (
   }
 }
 
+/** The caret's row. A caret on a wrap that `atRowEnd` puts at the end of the upper row belongs to that row. */
+const caretRow = (
+  lineLayout: Layout,
+  column: number,
+  atRowEnd: boolean,
+): number => {
+  const row = rowOfColumn(lineLayout, column)
+  return atRowEnd && row > 0 && rowColumn(lineLayout, row) === column
+    ? row - 1
+    : row
+}
+
 const caretTop = (
   buffer: Buffer,
   layoutOf: (line: number) => Layout,
   preedit: string,
+  atRowEnd: boolean,
 ): Top => ({
   line: buffer.caret.line,
-  row: rowOfColumn(
+  row: caretRow(
     layoutOf(buffer.caret.line),
     buffer.caret.column + preedit.length,
+    atRowEnd && preedit === '',
   ),
 })
 
@@ -433,8 +518,8 @@ const mergeInto = (
     onSome: previous =>
       previous.kind === span.kind &&
       span.kind !== 'Caret' &&
-      previous.width === 'Narrow' &&
-      span.width === 'Narrow'
+      Option.isNone(previous.box) &&
+      Option.isNone(span.box)
         ? Array.append(spans.slice(0, -1), {
             ...previous,
             text: previous.text + span.text,
@@ -446,6 +531,7 @@ const lineRows = (
   buffer: Buffer,
   line: number,
   preedit: string,
+  atRowEnd: boolean,
   lineLayout: Layout,
   from: number,
   to: number,
@@ -453,8 +539,16 @@ const lineRows = (
   const isCaretLine = line === buffer.caret.line
   const caretColumn = buffer.caret.column
   const ghost = isCaretLine ? preedit.length : 0
-  const caretAt = isCaretLine ? caretColumn + ghost : -1
   const lastRow = rowCount(lineLayout) - 1
+  const caretAtRowEnd =
+    isCaretLine &&
+    caretRow(lineLayout, caretColumn + ghost, atRowEnd && ghost === 0) !==
+      rowOfColumn(lineLayout, caretColumn + ghost)
+  const caretAt = isCaretLine && !caretAtRowEnd ? caretColumn + ghost : -1
+  const endsWithCaret = (row: number): boolean =>
+    caretAtRowEnd
+      ? rowColumn(lineLayout, row + 1) === caretColumn
+      : row === lastRow && caretAt === lineLayout.text.length
   const lineColumn = (at: number): number =>
     at <= caretColumn ? at : at < caretColumn + ghost ? caretColumn : at - ghost
   const kindOf = ({ index, segment }: Glyph): SpanKind =>
@@ -472,10 +566,12 @@ const lineRows = (
         mergeInto(spans, {
           text: glyph.segment,
           kind: kindOf(glyph),
-          width: glyph.cells === 2 ? 'Wide' : 'Narrow',
+          box:
+            glyph.cells > 1 || glyph.opensPiece
+              ? Option.some(glyph.cells)
+              : Option.none(),
         }),
     )
-    const caretPastEnd = row === lastRow && caretAt === lineLayout.text.length
     return {
       key: `${id}:${row}`,
       lineId: id,
@@ -483,11 +579,11 @@ const lineRows = (
         ? lineColumn(rowColumn(lineLayout, row))
         : rowColumn(lineLayout, row),
       lineNumber: row === 0 ? Option.some(line + 1) : Option.none(),
-      spans: caretPastEnd
+      spans: endsWithCaret(row)
         ? Array.append(spans, {
             text: ' ',
             kind: 'CaretPastEnd',
-            width: 'Narrow',
+            box: Option.none(),
           })
         : spans,
     }
@@ -513,6 +609,7 @@ export const rows = (
         buffer,
         line,
         preedit,
+        view.caretAtRowEnd,
         layoutOf(line),
         skip,
         skip + view.size.rows - screen.length,
@@ -527,7 +624,7 @@ export const rows = (
 export const follow = (buffer: Buffer, view: View, preedit: string): View => {
   const layoutOf = lineLayouts(buffer, preedit, textColumns(buffer, view.size))
   const top = clampTop(buffer, layoutOf, view.top)
-  const caret = caretTop(buffer, layoutOf, preedit)
+  const caret = caretTop(buffer, layoutOf, preedit, view.caretAtRowEnd)
   const bottom = walk(buffer, layoutOf, top, view.size.rows - 1)
   const nextTop = Order.isLessThan(orderTop)(caret, top)
     ? caret
@@ -561,72 +658,112 @@ export const settle = (buffer: Buffer, view: View): View => {
   }
 }
 
-/** Graphemes before the caret on its line, counted from the line's layout rather than the whole line. */
+/**
+ * Graphemes before the caret on its line, as Intl.Segmenter counts the line's text, joins or not. Counted from the
+ * line's layout rather than the whole line, unless a join could make the layout's graphemes differ.
+ */
 export const caretGrapheme = (
   buffer: Buffer,
   view: View,
   preedit: string,
 ): number => {
+  const { line, column } = buffer.caret
+  const { text, joins } = lineAt(buffer, line)
+  if (joins.length > 0) {
+    return graphemes(text, 0, column).length
+  }
   const lineLayout = lineLayouts(
     buffer,
     preedit,
     textColumns(buffer, view.size),
-  )(buffer.caret.line)
-  const row = rowOfColumn(lineLayout, buffer.caret.column)
+  )(line)
+  const row = rowOfColumn(lineLayout, column)
   return (
     (lineLayout.counts[row] ?? 0) +
-    Array.filter(
-      rowGlyphs(lineLayout, row),
-      glyph => glyph.index < buffer.caret.column,
-    ).length
+    Array.filter(rowGlyphs(lineLayout, row), glyph => glyph.index < column)
+      .length
   )
 }
 
+const caretLayout = (buffer: Buffer, view: View): Layout =>
+  lineLayouts(buffer, '', textColumns(buffer, view.size))(buffer.caret.line)
+
 export const caretCell = (buffer: Buffer, view: View): number => {
-  const lineLayout = lineLayouts(
-    buffer,
-    '',
-    textColumns(buffer, view.size),
-  )(buffer.caret.line)
+  const lineLayout = caretLayout(buffer, view)
   return Array.reduce(
-    rowGlyphs(lineLayout, rowOfColumn(lineLayout, buffer.caret.column)),
+    rowGlyphs(
+      lineLayout,
+      caretRow(lineLayout, buffer.caret.column, view.caretAtRowEnd),
+    ),
     0,
     (sum, glyph) =>
       glyph.index < buffer.caret.column ? sum + glyph.cells : sum,
   )
 }
 
+/** A caret position and whether it shows at the end of the upper row when it sits where the line wraps. */
+export type Landing = Readonly<{ caret: Position; atRowEnd: boolean }>
+
+/** The end of a row: the line end on its last row, else where the next row starts, shown at this row's end. */
+const rowEnd = (lineLayout: Layout, line: number, row: number): Landing =>
+  row === rowCount(lineLayout) - 1
+    ? { caret: { line, column: lineLayout.text.length }, atRowEnd: false }
+    : {
+        caret: { line, column: rowColumn(lineLayout, row + 1) },
+        atRowEnd: true,
+      }
+
+/** Home and End: the start or the end of the row the caret is on. */
+export const rowEdge = (
+  buffer: Buffer,
+  view: View,
+  edge: 'Start' | 'End',
+): Landing => {
+  const lineLayout = caretLayout(buffer, view)
+  const { line, column } = buffer.caret
+  const row = caretRow(lineLayout, column, view.caretAtRowEnd)
+  return edge === 'Start'
+    ? { caret: { line, column: rowColumn(lineLayout, row) }, atRowEnd: false }
+    : rowEnd(lineLayout, line, row)
+}
+
 type CellSearch = Readonly<{ width: number; found: Option.Option<number> }>
 
-/** Where the caret lands `rows` visual rows away, holding `goalCell`. */
+/**
+ * Where the caret lands `rows` visual rows away, holding `goalCell`. Past the first row it lands at the text start,
+ * past the last at the text end. A goal past a row's text lands at the row end.
+ */
 export const rowTarget = (
   buffer: Buffer,
   view: View,
   rows: number,
-): Buffer['caret'] => {
+): Landing => {
   const layoutOf = lineLayouts(buffer, '', textColumns(buffer, view.size))
-  const from = caretTop(buffer, layoutOf, '')
+  const from = caretTop(buffer, layoutOf, '', view.caretAtRowEnd)
   const to = walk(buffer, layoutOf, from, rows)
   if (orderTop(from, to) === 0) {
-    return buffer.caret
+    const lastLine = buffer.lines.length - 1
+    return {
+      caret:
+        rows < 0
+          ? { line: 0, column: 0 }
+          : { line: lastLine, column: lineAt(buffer, lastLine).text.length },
+      atRowEnd: false,
+    }
   }
   const goal = Option.getOrElse(view.goalCell, () => caretCell(buffer, view))
   const lineLayout = layoutOf(to.line)
-  const glyphs = rowGlyphs(lineLayout, to.row)
   const initial: CellSearch = { width: 0, found: Option.none() }
-  const { found } = Array.reduce(glyphs, initial, (search, glyph) =>
-    Option.isSome(search.found) || search.width + glyph.cells <= goal
-      ? { ...search, width: search.width + glyph.cells }
-      : { ...search, found: Option.some(glyph.index) },
+  const { found } = Array.reduce(
+    rowGlyphs(lineLayout, to.row),
+    initial,
+    (search, glyph) =>
+      Option.isSome(search.found) || search.width + glyph.cells <= goal
+        ? { ...search, width: search.width + glyph.cells }
+        : { ...search, found: Option.some(glyph.index) },
   )
-  const rowEnd = Option.match(Array.last(glyphs), {
-    onNone: () => rowColumn(lineLayout, to.row),
-    onSome: ({ index }) => index,
+  return Option.match(found, {
+    onNone: () => rowEnd(lineLayout, to.line, to.row),
+    onSome: column => ({ caret: { line: to.line, column }, atRowEnd: false }),
   })
-  return {
-    line: to.line,
-    column: Option.getOrElse(found, () =>
-      to.row === rowCount(lineLayout) - 1 ? lineLayout.text.length : rowEnd,
-    ),
-  }
 }

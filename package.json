@@ -18,7 +18,7 @@
     "test:e2e": "playwright test",
     "test:sweep": "playwright test e2e/sweep.spec.ts",
     "test:typist": "playwright test typist",
-    "test:typist:long": "TYPIST_SEQUENCES=3000 playwright test typist",
+    "test:scout": "TYPIST_SCOUT_MINUTES=5 playwright test typist",
     "postinstall": "effect-tsgo patch --no-typescript --oxlint",
     "prepare": "test -e .git && git config core.hooksPath .githooks || true"
   },

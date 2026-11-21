@@ -1,6 +1,6 @@
 import { Array, Option, Schema } from 'effect'
 
-export const LineId = Schema.Number.pipe(Schema.brand('LineId'))
+export const LineId = Schema.Int.pipe(Schema.brand('LineId'))
 export type LineId = typeof LineId.Type
 
 /**
@@ -11,7 +11,7 @@ export type LineId = typeof LineId.Type
 export const Line = Schema.Struct({
   id: LineId,
   text: Schema.String,
-  joins: Schema.Array(Schema.Number),
+  joins: Schema.Array(Schema.Int),
 })
 export type Line = typeof Line.Type
 
@@ -21,8 +21,8 @@ export type Line = typeof Line.Type
  * command runs.
  */
 export const Position = Schema.Struct({
-  line: Schema.Number,
-  column: Schema.Number,
+  line: Schema.Int,
+  column: Schema.Int,
 })
 export type Position = typeof Position.Type
 
@@ -34,7 +34,7 @@ export type Position = typeof Position.Type
 export const Buffer = Schema.Struct({
   lines: Schema.NonEmptyArray(Line),
   caret: Position,
-  nextLineId: Schema.Number,
+  nextLineId: Schema.Int,
 })
 export type Buffer = typeof Buffer.Type
 

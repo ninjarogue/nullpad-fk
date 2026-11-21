@@ -6,9 +6,9 @@ import { Input } from './core/input'
 
 export const Message = defineMessageUnion({
   ReceivedInput: { input: Input },
-  ClickedText: { x: Schema.Number, y: Schema.Number },
-  ScrolledSurface: { top: Schema.Number },
-  ResizedScreen: { rows: Schema.Number },
+  ClickedText: { x: Schema.Finite, y: Schema.Finite },
+  ScrolledSurface: { top: Schema.Int },
+  ResizedScreen: { rows: Schema.Int },
   CompletedLocate: { answer: Answer },
   CompletedRevealCaret: {},
   FocusedKeyboard: {},

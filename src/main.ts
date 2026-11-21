@@ -23,7 +23,7 @@ export const init: Runtime.ApplicationInit<Model, Message> = () => ({
 
 /** Answers the editor's query from the screen, once the screen shows every input before it. */
 const Locate = Command.define('Locate', {
-  args: { query: Editor.Query, revision: Schema.Number },
+  args: { query: Editor.Query, revision: Schema.Int },
   messages: [Message.CompletedLocate],
   execute: ({ query, revision }) =>
     locate(query, revision).pipe(

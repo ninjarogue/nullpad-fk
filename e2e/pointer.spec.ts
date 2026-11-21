@@ -188,6 +188,45 @@ test('one huge wheel turn on a 20,000-line note scrolls without a crash and keep
   expect(pageErrors).toEqual([])
 })
 
+const rowKey = (row: Screen['rows'][number]) => `${row.lineId}:${row.start}`
+
+/** How far the text moved up between two screens, read from a row both show. */
+const textMoved = (before: Screen, after: Screen): number => {
+  const shared = before.rows.find(row =>
+    after.rows.some(other => rowKey(other) === rowKey(row)),
+  )
+  const same = after.rows.find(
+    row => shared !== undefined && rowKey(row) === rowKey(shared),
+  )
+  if (shared === undefined || same === undefined) {
+    throw new Error('no row is on screen both before and after the turn')
+  }
+  return shared.top - same.top
+}
+
+test('wheel turns over a note whose wrapped lines scroll out of the drawn lines move the text as far as the wheel asked, down and back up', async ({
+  nullpad,
+}) => {
+  await nullpad.paste(
+    Array.from({ length: 300 }, (_, index) =>
+      index % 7 === 0 ? 'x'.repeat(150) : `line ${index + 1}`,
+    ).join('\n'),
+  )
+  await nullpad.press('Control+Home')
+  await nullpad.page.mouse.move(400, 300)
+  for (const delta of [100, -100]) {
+    let moved = 0
+    let before = await nullpad.screen()
+    for (let turn = 0; turn < 60; turn++) {
+      await nullpad.wheel(delta)
+      const after = await nullpad.screen()
+      moved += textMoved(before, after)
+      before = after
+    }
+    expect(moved, `60 turns of ${delta} px`).toBe(60 * delta)
+  }
+})
+
 test('after another element on the page takes the keyboard, a click on the text gives it back', async ({
   nullpad,
 }) => {

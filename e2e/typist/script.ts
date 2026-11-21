@@ -801,6 +801,29 @@ export const namedScripts: ReadonlyArray<
       key('ArrowUp'),
     ],
   },
+  {
+    name: 'ArrowUp from after 👨 aims from the whole pixel before the caret, so it lands before ❤️',
+    script: [
+      text('ë'),
+      text('❤'),
+      text('️'),
+      key('Enter'),
+      text('👨'),
+      key('ArrowUp'),
+    ],
+  },
+  {
+    name: 'Enter at the row end that ArrowUp landed on forgets the column it aimed at',
+    script: [
+      insert(
+        'so…**bold** a,b   #tag wait!   and/or editor well-knownhttps://example.com/path/to/page?x=1&y=2 ',
+      ),
+      text('     '),
+      key('ArrowUp'),
+      key('Enter'),
+      key('ArrowUp'),
+    ],
+  },
 ]
 
 type Difference = Readonly<{ name: string; pattern: RegExp }>

@@ -4,7 +4,7 @@ import type { Document, HtmlBuilder } from 'foldkit/html'
 import { modifyFields } from 'foldkit/struct'
 
 import * as Editor from './core/editor'
-import { Keyboard, keyboardPort } from './keyboard'
+import { Keyboard, browserUnsupportedNotice, keyboardPort } from './keyboard'
 import { Message } from './message'
 import { locate, revealCaret, statusLine, surface } from './surface'
 
@@ -80,6 +80,9 @@ export const update = (model: Model, message: Message) =>
     BlurredKeyboard: () => ({
       model: modifyFields(model, { keyboard: () => 'Blurred' }),
     }),
+    FoundBrowserUnsupported: () => ({
+      model: modifyFields(model, { keyboard: () => 'Unsupported' }),
+    }),
   })
 
 export const view = (model: Model, h: HtmlBuilder<Message>): Document => {
@@ -89,8 +92,12 @@ export const view = (model: Model, h: HtmlBuilder<Message>): Document => {
     body: h.main(
       [h.Class('app')],
       [
-        surface(frame, model.keyboard, h),
-        statusLine(frame.status, model.path, h),
+        ...(model.keyboard === 'Unsupported'
+          ? [browserUnsupportedNotice(h)]
+          : [
+              surface(frame, model.keyboard, h),
+              statusLine(frame.status, model.path, h),
+            ]),
         keyboardPort(frame.surrounding, h),
       ],
     ),

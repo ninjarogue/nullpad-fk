@@ -5,8 +5,8 @@ import type { Html, HtmlBuilder } from 'foldkit/html'
 import { Input, type Modifiers, NamedKey } from './core/input'
 import { Message } from './message'
 
-/** Whether the app's one text input has focus, which decides how the caret is drawn. */
-export const Keyboard = Schema.Literals(['Focused', 'Blurred'])
+/** Whether the app's one text input has focus, which decides how the caret is drawn, or this browser cannot type into it. */
+export const Keyboard = Schema.Literals(['Focused', 'Blurred', 'Unsupported'])
 export type Keyboard = typeof Keyboard.Type
 
 /** The part of the EditContext API nullpad uses. TypeScript's DOM library does not declare it yet. */
@@ -100,6 +100,7 @@ type KeyboardMessage =
   | typeof Message.ReceivedInput.Type
   | typeof Message.FocusedKeyboard.Type
   | typeof Message.BlurredKeyboard.Type
+  | typeof Message.FoundBrowserUnsupported.Type
 
 const drawnRect = (selector: string): Option.Option<DOMRect> =>
   Option.map(Option.fromNullishOr(document.querySelector(selector)), element =>
@@ -375,10 +376,11 @@ export const KeyboardPort = Mount.defineStream('KeyboardPort', {
     Message.ReceivedInput,
     Message.FocusedKeyboard,
     Message.BlurredKeyboard,
+    Message.FoundBrowserUnsupported,
   ],
   execute: ({ element, viewStateChanges }) =>
     Option.match(makeEditContext(), {
-      onNone: () => Stream.never,
+      onNone: () => Stream.make(Message.FoundBrowserUnsupported()),
       onSome: context =>
         element instanceof HTMLElement
           ? viewStateChanges.pipe(
@@ -404,3 +406,18 @@ export const keyboardPort = (
     h.DataAttribute('caret', String(surrounding.caret)),
     h.OnMount(KeyboardPort()),
   ])
+
+/** Shown in place of the editor in a browser without an EditContext, where typing would go nowhere. */
+export const browserUnsupportedNotice = (h: HtmlBuilder<Message>): Html =>
+  h.div(
+    [h.Class('unsupported'), h.Role('alert')],
+    [
+      h.p([h.Class('headline')], ['nullpad needs Chrome or Edge']),
+      h.p(
+        [],
+        [
+          "It types through EditContext, which Firefox and Safari don't have yet.",
+        ],
+      ),
+    ],
+  )

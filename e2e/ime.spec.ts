@@ -181,3 +181,27 @@ test('an IME that converts a word before the caret, not next to it, replaces tha
     lineCount: 1,
   })
 })
+
+test('a click while composing commits the composition where it was composed and moves the cursor to the click', async ({
+  nullpad,
+}) => {
+  await nullpad.paste('hello world')
+  await nullpad.press('Control+Home')
+  await nullpad.compose('か')
+  expect(await nullpad.preedit(), 'preedit drawn').toBe('か')
+  const screen = await nullpad.screen()
+  const row = screen.rows[0]
+  await nullpad.click(
+    (row?.inkRight ?? 0) + 3 * screen.cell,
+    ((row?.top ?? 0) + (row?.bottom ?? 0)) / 2,
+  )
+  expect(await nullpad.preedit(), 'no preedit left').toBe('')
+  expect(await nullpad.text(), 'the composition committed in place').toBe(
+    'かhello world',
+  )
+  expect(await nullpad.status(), 'cursor at the click').toEqual({
+    line: 1,
+    column: 13,
+    lineCount: 1,
+  })
+})

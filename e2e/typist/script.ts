@@ -256,6 +256,17 @@ export const namedScripts: ReadonlyArray<
     ],
   },
   {
+    name: 'Backspace after a mark on a flag, with a letter after it',
+    script: [
+      text('a'),
+      key('Home'),
+      text('🇺'),
+      text('🇸'),
+      text('\u0308'),
+      key('Backspace'),
+    ],
+  },
+  {
     name: 'Backspace after a flag letter joins its pair',
     script: [text('🇸'), key('Home'), text('🇺'), key('Backspace'), text('y')],
   },
@@ -799,6 +810,10 @@ type Difference = Readonly<{ name: string; pattern: RegExp }>
  * does not: where a caret left inside a grapheme settles after inserted text, and how much Backspace takes. A mismatch
  * counts as accepted only when the text around it holds one of these, in a named script as in a random one.
  */
+/** A flag letter followed by a mark, a ZWJ or a skin tone, which no flag has. */
+export const markOnFlagLetter =
+  /\p{Regional_Indicator}[\p{M}‍\u{1f3fb}-\u{1f3ff}]/u
+
 export const acceptedDifferences: ReadonlyArray<Difference> = [
   {
     name: 'ZWJ next to a non-pictograph',
@@ -807,7 +822,7 @@ export const acceptedDifferences: ReadonlyArray<Difference> = [
   },
   {
     name: 'mark, ZWJ or skin tone on a flag letter',
-    pattern: /\p{Regional_Indicator}[\p{M}‍\u{1f3fb}-\u{1f3ff}]/u,
+    pattern: markOnFlagLetter,
   },
   {
     name: 'skin tone after a non-base',

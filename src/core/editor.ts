@@ -165,8 +165,12 @@ const redraw = (editor: Editor, drawn: Drawn): Editor => {
     : { ...next, revision: editor.revision + 1 }
 }
 
-/** Lines drawn on each side of the screen, so Up, Down and paging find their target drawn. */
-const margin = (editor: Editor): number => editor.rows
+/**
+ * Lines drawn past each edge of the screen. Up, Down and paging find their target among a screen of them. A fast wheel
+ * scrolls the screen before nullpad hears of it and draws, so 125 lines, about 2,750 pixels, are drawn ahead of it.
+ * The shell reuses the view of every line that did not change, so typing costs what it did with one screen drawn.
+ */
+const margin = (editor: Editor): number => Math.max(editor.rows, 125)
 
 const drawnLines = (
   editor: Editor,
@@ -596,29 +600,50 @@ const gutterWidth = (buffer: Buffer.Buffer): number =>
 const caretGrapheme = (text: string, column: number): number =>
   Array.fromIterable(Buffer.segmenter.segment(text.slice(0, column))).length
 
-/** The line split at its joins, and at the caret when a preedit is drawn there. */
-const partsOf = (
+const cutAt = (
   line: Buffer.Line,
-  preedit: Option.Option<Readonly<{ column: number; text: string }>>,
-): ReadonlyArray<Part> => {
-  const column = Option.match(preedit, {
-    onNone: () => [],
-    onSome: ({ column }) => [column],
-  })
+  extra: ReadonlyArray<number>,
+): ReadonlyArray<
+  Readonly<{ from: number; text: string; isPreedit: boolean }>
+> => {
   const cuts = Array.dedupeAdjacent(
-    Array.sort([0, ...line.joins, ...column, line.text.length], Order.Number),
+    Array.sort([0, ...line.joins, ...extra, line.text.length], Order.Number),
   )
   const texts = Array.map(Array.zip(cuts, cuts.slice(1)), ([from, to]) => ({
     from,
     text: line.text.slice(from, to),
     isPreedit: false,
   }))
-  const pieces = Array.isArrayNonEmpty(texts)
+  return Array.isArrayNonEmpty(texts)
     ? texts
     : [{ from: 0, text: '', isPreedit: false }]
-  return Option.match(preedit, {
-    onNone: () => pieces,
+}
+
+/**
+ * Each line's pieces, kept while the line is unchanged. An edit replaces a Line object, so a paint returns the same
+ * parts array for every other line and the shell can tell at once that its view is unchanged.
+ */
+const piecesOfLine = new WeakMap<Buffer.Line, ReadonlyArray<Part>>()
+
+const piecesOf = (line: Buffer.Line): ReadonlyArray<Part> => {
+  const known = piecesOfLine.get(line)
+  if (known !== undefined) {
+    return known
+  }
+  const pieces = cutAt(line, [])
+  piecesOfLine.set(line, pieces)
+  return pieces
+}
+
+/** The line split at its joins, and at the caret when a preedit is drawn there. */
+const partsOf = (
+  line: Buffer.Line,
+  preedit: Option.Option<Readonly<{ column: number; text: string }>>,
+): ReadonlyArray<Part> =>
+  Option.match(preedit, {
+    onNone: () => piecesOf(line),
     onSome: ({ column, text }) => {
+      const pieces = cutAt(line, [column])
       const at = Option.getOrElse(
         Array.findFirstIndex(pieces, piece => piece.from >= column),
         () => pieces.length,
@@ -630,7 +655,6 @@ const partsOf = (
       ]
     },
   })
-}
 
 export const paint = (editor: Editor): Frame => {
   const { buffer } = editor

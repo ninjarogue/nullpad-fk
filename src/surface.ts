@@ -1,6 +1,6 @@
 import { Array, Effect, Option, Queue, Stream } from 'effect'
 import { Mount, Render } from 'foldkit'
-import type { Html, HtmlBuilder } from 'foldkit/html'
+import { type Html, type HtmlBuilder, createKeyedLazy } from 'foldkit/html'
 
 import {
   type Answer,
@@ -722,24 +722,33 @@ export const SurfacePort = Mount.defineStream('SurfacePort', {
 })
 
 const lineView = (
-  line: PaintedLine,
+  id: PaintedLine['id'],
+  index: number,
+  number: number,
+  parts: PaintedLine['parts'],
   isCaretLine: boolean,
   h: HtmlBuilder<Message>,
 ): Html =>
   h.keyed('div')(
-    String(line.id),
+    String(id),
     [
       h.Class(isCaretLine ? 'line cl' : 'line'),
-      h.DataAttribute('line-id', String(line.id)),
-      h.DataAttribute('index', String(line.index)),
-      h.DataAttribute('n', String(line.number)),
+      h.DataAttribute('line-id', String(id)),
+      h.DataAttribute('index', String(index)),
+      h.DataAttribute('n', String(number)),
     ],
-    Array.map(line.parts, part =>
+    Array.map(parts, part =>
       part.isPreedit
         ? h.span([h.Class('pre'), h.DataAttribute('ghost', '')], [part.text])
         : part.text,
     ),
   )
+
+/**
+ * The view of each drawn line, rebuilt only when its parts, place or caret change. The core keeps a line's parts while
+ * the line is unchanged, so a keypress rebuilds one line however many are drawn.
+ */
+const lazyLine = createKeyedLazy()
 
 const spacer = (lines: number, h: HtmlBuilder<Message>): Html =>
   h.div([h.Class('spacer'), h.Style({ '--lines': String(lines) })])
@@ -768,7 +777,14 @@ export const surface = (
     [
       spacer(frame.above, h),
       ...Array.map(frame.lines, line =>
-        lineView(line, line.index === frame.caret.line, h),
+        lazyLine(line.id, lineView, [
+          line.id,
+          line.index,
+          line.number,
+          line.parts,
+          line.index === frame.caret.line,
+          h,
+        ]),
       ),
       spacer(frame.below, h),
       h.div([h.Id('caret'), h.Class('cur'), h.AriaHidden(true)]),

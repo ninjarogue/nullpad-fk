@@ -10,8 +10,8 @@ export type Mode = typeof Mode.Type
 /**
  * What the core asks the browser, which alone knows where the text it drew wraps and where a pixel falls in it.
  * `at` is the caret the move starts from and `atRowEnd` the row it is drawn on where its line wraps.
- * Step is one grapheme along the line, as the browser moves its own caret. Point is a click: `x` in client pixels and
- * `textY` in pixels down the scrolled text, so a scroll before the answer leaves it on the line it was made on.
+ * Step is one grapheme along the line, as the browser moves its own caret. Point is a click on `line`: `x` in client
+ * pixels and `y` in pixels below the line's top, so no scroll before the answer moves it off the line it was made on.
  */
 export const Query = Schema.TaggedUnion({
   Step: {
@@ -34,7 +34,7 @@ export const Query = Schema.TaggedUnion({
     atRowEnd: Schema.Boolean,
     direction: Schema.Literals([-1, 1]),
   },
-  Point: { x: Schema.Number, textY: Schema.Number },
+  Point: { x: Schema.Number, line: Schema.Number, y: Schema.Number },
 })
 export type Query = typeof Query.Type
 
@@ -53,7 +53,7 @@ export type Answer = typeof Answer.Type
 
 const Queued = Schema.TaggedUnion({
   Fed: { input: Input },
-  Clicked: { x: Schema.Number, textY: Schema.Number },
+  Clicked: { x: Schema.Number, line: Schema.Number, y: Schema.Number },
 })
 type Queued = typeof Queued.Type
 
@@ -68,7 +68,7 @@ const Locating = Schema.Struct({ cause: Queued, queued: Schema.Array(Queued) })
  * `caretAtRowEnd` draws a caret where its line wraps at the end of the upper row, as Chrome's upstream caret after
  * End, a click past a row end or a vertical move onto one. `top` is the line the shell reports at the top of the
  * screen and `rows` how many rows the screen holds. `revision` counts changes to the drawn text, so the shell answers
- * a query only from a screen that shows every input before it.
+ * a query only from a screen that shows every input before it. `revealing` counts the reveals the shell has yet to run.
  */
 export const Editor = Schema.Struct({
   buffer: Buffer.Buffer,
@@ -80,6 +80,7 @@ export const Editor = Schema.Struct({
   rows: Schema.Number,
   revision: Schema.Number,
   locating: Schema.Option(Locating),
+  revealing: Schema.Number,
 })
 export type Editor = typeof Editor.Type
 
@@ -137,6 +138,7 @@ export const open = (text: string): Editor => ({
   rows: 24,
   revision: 0,
   locating: Option.none(),
+  revealing: 0,
 })
 
 export const text = (editor: Editor): string => Buffer.toText(editor.buffer)
@@ -177,16 +179,24 @@ const drawnLines = (
   }
 }
 
-/** A caret that left the drawn lines brings them along, so the shell can scroll it on screen. */
-const withCaretDrawn = (editor: Editor): Editor => {
+const isDrawn = (editor: Editor, line: number): boolean => {
   const { first, last } = drawnLines(editor)
-  const { line } = editor.buffer.caret
   return line >= first && line <= last
+}
+
+/** A line outside the drawn lines brings them along, so the shell can read it and scroll it on screen. */
+const withLineDrawn = (editor: Editor, line: number): Editor =>
+  isDrawn(editor, line)
     ? editor
     : redraw(editor, {
-        top: line < first ? line : Math.max(0, line - editor.rows + 1),
+        top:
+          line < drawnLines(editor).first
+            ? line
+            : Math.max(0, line - editor.rows + 1),
       })
-}
+
+const withCaretDrawn = (editor: Editor): Editor =>
+  withLineDrawn(editor, editor.buffer.caret.line)
 
 const done = (editor: Editor, reveal: Reveal = 'Nearest'): Outcome => ({
   editor: reveal === 'None' ? editor : withCaretDrawn(editor),
@@ -486,40 +496,41 @@ const inputPlan = (editor: Editor, input: Input): Plan =>
     Commit: ({ text }) => now(insertText(text)({ ...editor, preedit: '' })),
   })
 
-const clickPlan = (editor: Editor, x: number, textY: number): Plan =>
-  ask(Query.cases.Point.make({ x, textY }), ({ landing }) =>
-    done(
-      Option.match(landingPosition(editor, landing), {
-        onNone: () => editor,
-        onSome: ({ caret, atRowEnd }) => moveTo(editor, caret, atRowEnd),
-      }),
-    ),
-  )
+/** A click below the last line is the end of the text. */
+const clickPlan = (editor: Editor, x: number, line: number, y: number): Plan =>
+  line >= editor.buffer.lines.length
+    ? documentEdge(editor, 'End')
+    : ask(Query.cases.Point.make({ x, line, y }), landMove(editor))
 
 const planOf = (editor: Editor, queued: Queued): Plan =>
   Queued.match(queued, {
     Fed: ({ input }) => inputPlan(editor, input),
-    Clicked: ({ x, textY }) => clickPlan(editor, x, textY),
+    Clicked: ({ x, line, y }) => clickPlan(editor, x, line, y),
   })
 
 /**
- * Runs an input, or asks the browser what it needs first. A key whose caret left the drawn lines draws them again and
- * scrolls the caret on screen in the frame that draws them. Waiting for the answer would leave a frame in which the
- * browser, keeping the lines on screen still as the drawn lines change, reports the old place as a scroll.
+ * Runs an input, or asks the browser what it needs first, with the line the query is about drawn: the clicked line, or
+ * the caret's. A key whose caret left the drawn lines scrolls the caret on screen in the frame that draws them again.
+ * Waiting for the answer would leave a frame in which the browser, keeping the lines on screen still as the drawn lines
+ * change, reports the old place as a scroll.
  */
 const run = (editor: Editor, queued: Queued): Outcome => {
   const plan = planOf(editor, queued)
   if (plan._tag === 'Done') {
     return plan.outcome
   }
-  const drawn = plan.query._tag === 'Point' ? editor : withCaretDrawn(editor)
+  const drawn =
+    plan.query._tag === 'Point'
+      ? withLineDrawn(editor, plan.query.line)
+      : withCaretDrawn(editor)
   return {
     editor: {
       ...drawn,
       locating: Option.some({ cause: queued, queued: [] }),
     },
     locate: Option.some({ query: plan.query, revision: drawn.revision }),
-    reveal: drawn === editor ? 'None' : 'Nearest',
+    reveal:
+      plan.query._tag === 'Point' || drawn === editor ? 'None' : 'Nearest',
   }
 }
 
@@ -552,20 +563,42 @@ const replay = (start: Outcome, queued: ReadonlyArray<Queued>): Outcome =>
     }
   })
 
+/** An outcome that asks for a reveal counts it, until the shell says it ran. */
+const owed = (outcome: Outcome): Outcome =>
+  outcome.reveal === 'None'
+    ? outcome
+    : {
+        ...outcome,
+        editor: {
+          ...outcome.editor,
+          revealing: outcome.editor.revealing + 1,
+        },
+      }
+
+/** The shell ran a reveal. */
+export const revealed = (editor: Editor): Editor => ({
+  ...editor,
+  revealing: Math.max(0, editor.revealing - 1),
+})
+
 /**
  * The one way the keyboard changes the editor. An Input the mode has no use for (Escape, a Chord) changes nothing
  * and scrolls nothing. Every other Input puts the caret on screen, even a motion that cannot move the caret.
  * An Input that arrives while the browser has a query to answer waits for the answer.
  */
 export const feed = (editor: Editor, input: Input): Outcome =>
-  enqueue(editor, Queued.cases.Fed.make({ input }))
+  owed(enqueue(editor, Queued.cases.Fed.make({ input })))
 
 /**
- * The pointer pressed at client x, `textY` pixels down the scrolled text. It lands where it would after every input fed
- * before it.
+ * The pointer pressed on `line`, at client x and `y` pixels below the line's top. It lands where it would after every
+ * input fed before it.
  */
-export const click = (editor: Editor, x: number, textY: number): Outcome =>
-  enqueue(editor, Queued.cases.Clicked.make({ x, textY }))
+export const click = (
+  editor: Editor,
+  x: number,
+  line: number,
+  y: number,
+): Outcome => owed(enqueue(editor, Queued.cases.Clicked.make({ x, line, y })))
 
 /** The browser answered the query the editor is waiting on. The caret lands, then the held inputs run. */
 export const located = (editor: Editor, answer: Answer): Outcome =>
@@ -575,33 +608,52 @@ export const located = (editor: Editor, answer: Answer): Outcome =>
       const asked = { ...editor, locating: Option.none() }
       const plan = planOf(asked, cause)
       const landed = plan._tag === 'Ask' ? plan.land(answer) : plan.outcome
-      return replay(landed, queued)
+      return owed(replay(landed, queued))
     },
   })
 
+/** The line the shell has yet to read or reveal: a clicked line, or the caret's for a key's query or a reveal. */
+const awaitedLine = (editor: Editor): Option.Option<number> =>
+  Option.match(editor.locating, {
+    onNone: () =>
+      editor.revealing > 0
+        ? Option.some(editor.buffer.caret.line)
+        : Option.none(),
+    onSome: ({ cause }) =>
+      Option.some(
+        Queued.match(cause, {
+          Fed: () => editor.buffer.caret.line,
+          Clicked: ({ line }) => line,
+        }),
+      ),
+  })
+
 /**
- * The screen shows `top` as its first line. The caret may leave the screen until an input brings it back, but its line
- * stays drawn while the browser has yet to answer a key's query about it: a scroll reported then can come from a frame
- * drawn before that key, and the answer reads the caret's line from the screen.
+ * The screen shows `top` as its first line. The caret may leave the screen until an input brings it back. A report
+ * that would undraw the line the shell has yet to read or reveal is left out: it can come from a scroll made before
+ * the input, and the shell reads that line from the screen.
  */
 export const scrolled = (editor: Editor, top: number): Editor => {
   if (top === editor.top) {
     return editor
   }
   const moved = redraw(editor, { top })
-  const { first, last } = drawnLines(moved)
-  const { line } = editor.buffer.caret
-  const asksAboutCaret = Option.exists(
-    editor.locating,
-    ({ cause }) => cause._tag === 'Fed',
+  return Option.exists(
+    awaitedLine(editor),
+    line => isDrawn(editor, line) && !isDrawn(moved, line),
   )
-  return asksAboutCaret && (line < first || line > last) ? editor : moved
+    ? editor
+    : moved
 }
 
-/** The screen holds this many rows now. The same size returns the same Editor. */
-export const resized = (editor: Editor, rows: number): Editor => {
+/** The screen holds this many rows now, and shows the caret if its line is drawn. */
+export const resized = (editor: Editor, rows: number): Outcome => {
   const size = Math.max(1, Math.floor(rows))
-  return size === editor.rows ? editor : redraw(editor, { rows: size })
+  return owed({
+    editor: size === editor.rows ? editor : redraw(editor, { rows: size }),
+    locate: Option.none(),
+    reveal: 'Nearest',
+  })
 }
 
 /** Cells left of the text: the largest line number, at least four digits, then two blank cells. */

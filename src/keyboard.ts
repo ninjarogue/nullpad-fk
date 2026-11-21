@@ -209,11 +209,10 @@ const listen = (
             Queue.offerUnsafe(queue, Message.ReceivedInput({ input }))
           const keepFocus = () => port.focus({ preventScroll: true })
           /**
-           * A click commits the composition where it was composed, as in a text box, before the click lands: taking the
-           * EditContext off the port makes Chrome end the composition then and there, with a compositionend.
+           * A click commits the composition where it was composed, as in a text box, before the click lands: giving the
+           * port its EditContext again makes Chrome end the composition then and there, with a compositionend.
            */
           const commitComposition = () => {
-            Reflect.set(port, 'editContext', null)
             Reflect.set(port, 'editContext', context)
           }
           const state: {

@@ -295,17 +295,39 @@ const landAt = (
   return { _tag: 'At', line: indexOf(line), column, atRowEnd: upper }
 }
 
+/** How far the app has scrolled on its own, for a key or a click, that the screen has yet to show. */
+const unshown = { pixels: 0 }
+
+/**
+ * Runs a scroll the app makes on its own and returns how far it went. The distance counts as unshown until the scroll
+ * is on screen: Chrome draws it in its next frame, and that frame reaches the screen a frame later.
+ */
+const scrollUnshown = (surface: HTMLElement, scroll: () => void): number => {
+  const before = surface.scrollTop
+  scroll()
+  const distance = surface.scrollTop - before
+  if (distance !== 0) {
+    unshown.pixels += distance
+    requestAnimationFrame(() =>
+      requestAnimationFrame(() => {
+        unshown.pixels -= distance
+      }),
+    )
+  }
+  return distance
+}
+
 /** Scrolls the least that brings viewport y on screen, and returns where that y is drawn now. */
 const bringOnScreen = (sheet: Sheet, y: number): number => {
   const below = y - (sheet.viewBottom - 1)
   const above = sheet.viewTop + 1 - y
   const delta = below > 0 ? below : above > 0 ? -above : 0
-  if (delta !== 0) {
-    const before = sheet.surface.scrollTop
-    sheet.surface.scrollTop = before + delta
-    return y - (sheet.surface.scrollTop - before)
-  }
-  return y
+  return delta === 0
+    ? y
+    : y -
+        scrollUnshown(sheet.surface, () => {
+          sheet.surface.scrollTop += delta
+        })
 }
 
 const stay = (aim: number): Answer => ({ landing: { _tag: 'Stay' }, aim })
@@ -436,35 +458,60 @@ const rowEdgeAnswer = (
 }
 
 /**
- * A click, `textY` pixels down the scrolled text: the text column catches every x, a point below the last line is the
- * end of the text. A screen scrolled since the click scrolls back to show the point.
+ * The line at viewport y and the pixels from its top down to y. An undrawn line counts as one row, as the spacers draw
+ * it, and so does each row below the last line of the text.
  */
-const pointAnswer = (sheet: Sheet, x: number, textY: number): Answer => {
-  const y = textY + sheet.viewTop - sheet.surface.scrollTop
-  const lines = sheet.surface.querySelectorAll<HTMLElement>('.line')
-  const last = lines[lines.length - 1]
-  if (
-    last !== undefined &&
-    indexOf(last) === lastLineIndex(sheet.surface) &&
-    y >= last.getBoundingClientRect().bottom
-  ) {
-    return { landing: { _tag: 'TextEnd' }, aim: 0 }
-  }
-  const row = bringOnScreen(sheet, y)
-  const hit = Array.findFirst(Array.fromIterable(lines), line => {
+const lineAt = (
+  sheet: Sheet,
+  y: number,
+): Readonly<{ line: number; y: number }> => {
+  const lines = Array.fromIterable(
+    sheet.surface.querySelectorAll<HTMLElement>('.line'),
+  )
+  const inUndrawnRow = (line: number) => ({ line, y: sheet.rowHeight / 2 })
+  const hit = Array.findFirst(lines, line => {
     const box = line.getBoundingClientRect()
-    return row >= box.top && row < box.bottom
+    return y >= box.top && y < box.bottom
   })
-  return Option.match(hit, {
+  if (Option.isSome(hit)) {
+    return {
+      line: indexOf(hit.value),
+      y: y - hit.value.getBoundingClientRect().top,
+    }
+  }
+  const first = lines[0]
+  const last = lines[lines.length - 1]
+  if (first === undefined || last === undefined) {
+    return inUndrawnRow(0)
+  }
+  const top = first.getBoundingClientRect().top
+  if (y < top) {
+    const rowsAbove = Math.ceil((top - y) / sheet.rowHeight)
+    return inUndrawnRow(Math.max(0, indexOf(first) - rowsAbove))
+  }
+  const rowsBelow = Math.floor(
+    (y - last.getBoundingClientRect().bottom) / sheet.rowHeight,
+  )
+  return inUndrawnRow(indexOf(last) + 1 + rowsBelow)
+}
+
+/**
+ * A click on a line, `y` pixels below its top: the text column catches every x. A line scrolled off screen since the
+ * click scrolls back to show the point.
+ */
+const pointAnswer = (
+  sheet: Sheet,
+  line: HTMLElement,
+  x: number,
+  y: number,
+): Answer => {
+  const box = line.getBoundingClientRect()
+  const row = bringOnScreen(sheet, box.top + Math.min(y, box.height - 1))
+  const edges = textEdges(line)
+  const clampedX = Math.min(edges.right - 0.5, Math.max(edges.left, x))
+  return Option.match(pointAt(clampedX, row), {
     onNone: () => stay(0),
-    onSome: line => {
-      const edges = textEdges(line)
-      const clampedX = Math.min(edges.right - 0.5, Math.max(edges.left, x))
-      return Option.match(pointAt(clampedX, row), {
-        onNone: () => stay(0),
-        onSome: found => ({ landing: landAt(found, row), aim: 0 }),
-      })
-    },
+    onSome: found => ({ landing: landAt(found, row), aim: 0 }),
   })
 }
 
@@ -477,7 +524,11 @@ const pageDistance = (sheet: Sheet): number => {
 
 const answer = (sheet: Sheet, query: Query): Answer =>
   Query.match(query, {
-    Point: ({ x, textY }) => pointAnswer(sheet, x, textY),
+    Point: ({ x, line, y }) =>
+      Option.match(lineElement(sheet.surface, line), {
+        onNone: () => stay(0),
+        onSome: element => pointAnswer(sheet, element, x, y),
+      }),
     Step: ({ at: from, direction }) =>
       Option.match(lineElement(sheet.surface, from.line), {
         onNone: () => stay(0),
@@ -579,20 +630,24 @@ const drawCaret = (surface: HTMLElement): void => {
   })
 }
 
-/** When the caret was last scrolled on screen, on the clock of `Event.timeStamp`. */
-const lastReveal = { at: 0 }
+/** When an input last asked for the caret on screen, on the clock of `Event.timeStamp`. */
+const lastReveal = { askedAt: 0 }
 
 /** Scrolls the drawn caret on screen once the screen shows it: as little as it takes, or its row to the top. */
 export const revealCaret = (align: 'Nearest' | 'Top'): Effect.Effect<void> =>
-  Render.afterCommit.pipe(
+  Effect.sync(() => {
+    lastReveal.askedAt = performance.now()
+  }).pipe(
+    Effect.andThen(Render.afterCommit),
     Effect.map(() =>
       Option.map(findSurface(), surface => {
         drawCaret(surface)
-        surface.querySelector('#caret')?.scrollIntoView({
-          block: align === 'Top' ? 'start' : 'nearest',
-          inline: 'nearest',
-        })
-        lastReveal.at = performance.now()
+        scrollUnshown(surface, () =>
+          surface.querySelector('#caret')?.scrollIntoView({
+            block: align === 'Top' ? 'start' : 'nearest',
+            inline: 'nearest',
+          }),
+        )
       }),
     ),
   )
@@ -682,19 +737,8 @@ const observe = (surface: HTMLElement): Stream.Stream<SurfaceMessage> =>
           const resizes = new ResizeObserver(measure)
           resizes.observe(surface)
           const wheel = { pending: 0, turnedAt: 0 }
-          /**
-           * The scroll offset of the frame on screen, which a click is made on. A scroll reaches the screen a frame
-           * after Chrome draws it, and Chrome draws it in the frame that fires its scroll event.
-           */
-          const shown = { scrollTop: surface.scrollTop }
-          const showAfterNextFrame = (scrollTop: number) =>
-            requestAnimationFrame(() =>
-              requestAnimationFrame(() => {
-                shown.scrollTop = scrollTop
-              }),
-            )
           const dropTurnsBeforeReveal = () => {
-            if (wheel.turnedAt < lastReveal.at) {
+            if (wheel.turnedAt < lastReveal.askedAt) {
               wheel.pending = 0
             }
           }
@@ -707,8 +751,8 @@ const observe = (surface: HTMLElement): Stream.Stream<SurfaceMessage> =>
            * scrolls. Chrome scrolls a wheel turn on its compositor, ahead of the drawn lines, and paints blank screen
            * until they arrive; scrolled here, every painted frame shows drawn lines. A patch that still does not cover
            * the place drops the turn, so it never scrolls after a later key. Chrome hands over a wheel turn at the next
-           * frame, after keys pressed later than it, so a turn made before the caret was last revealed is dropped too:
-           * the reveal is the later scroll.
+           * frame, after keys pressed later than it, so a turn made before an input last asked for the caret on screen
+           * is dropped too: that input's reveal is the later scroll.
            */
           const scrollPending = (whenUndrawn: 'AskCore' | 'Drop') => {
             dropTurnsBeforeReveal()
@@ -757,14 +801,10 @@ const observe = (surface: HTMLElement): Stream.Stream<SurfaceMessage> =>
               'data-caret-end',
             ],
           })
-          surface.addEventListener(
-            'scroll',
-            () => {
-              showAfterNextFrame(surface.scrollTop)
-              reportTop()
-            },
-            { signal, passive: true },
-          )
+          surface.addEventListener('scroll', reportTop, {
+            signal,
+            passive: true,
+          })
           surface.addEventListener(
             'wheel',
             event => {
@@ -795,7 +835,7 @@ const observe = (surface: HTMLElement): Stream.Stream<SurfaceMessage> =>
                 queue,
                 Message.ClickedText({
                   x: event.clientX,
-                  textY: y - sheet.viewTop + shown.scrollTop,
+                  ...lineAt(sheet, y - unshown.pixels),
                 }),
               )
             },

@@ -502,6 +502,78 @@ test('PageDown on the last row keeps the column ArrowUp aims for, as a textarea 
   expect(await nullpad.status()).toEqual({ line: 1, column: 4, lineCount: 2 })
 })
 
+test('PageUp that reaches the first row goes to the start of the note, as a textarea does', async ({
+  nullpad,
+}) => {
+  await nullpad.paste(numberedLines(200))
+  await nullpad.press('Control+Home')
+  const page = pageRows((await nullpad.screen()).rows.length)
+  await nullpad.press('ArrowDown', page)
+  await nullpad.press('ArrowRight', 3)
+  await nullpad.press('PageUp')
+  expect(await nullpad.status()).toEqual({ line: 1, column: 1, lineCount: 200 })
+})
+
+test('PageDown that reaches the last row goes to the end of the note, as a textarea does', async ({
+  nullpad,
+}) => {
+  const empty = await nullpad.screen()
+  const page = pageRows(
+    Math.floor((empty.area.bottom - empty.area.top) / empty.rowHeight),
+  )
+  await nullpad.paste(numberedLines(page + 1))
+  await nullpad.press('Control+Home')
+  await nullpad.press('ArrowRight', 3)
+  await nullpad.press('PageDown')
+  expect(await nullpad.status()).toEqual({
+    line: page + 1,
+    column: `line ${page + 1}`.length + 1,
+    lineCount: page + 1,
+  })
+})
+
+test('PageUp that lands at the start of a wrapped row puts the cursor at the end of the row above, as a textarea does', async ({
+  nullpad,
+}) => {
+  const empty = await nullpad.screen()
+  const page = pageRows(
+    Math.floor((empty.area.bottom - empty.area.top) / empty.rowHeight),
+  )
+  await nullpad.paste(`${'a'.repeat(200)}\n${numberedLines(page)}`)
+  await nullpad.press('Home')
+  await nullpad.press('PageUp')
+  await nullpad.press('End')
+  expect(
+    await nullpad.status(),
+    'End stays at the end of the second row',
+  ).toEqual({ line: 1, column: 153, lineCount: page + 1 })
+  await nullpad.press('ArrowDown')
+  expect(
+    await nullpad.status(),
+    'Down goes to the end of the third row',
+  ).toEqual({ line: 1, column: 201, lineCount: page + 1 })
+})
+
+test('PageDown that lands at the start of a wrapped row keeps the cursor there, as a textarea does', async ({
+  nullpad,
+}) => {
+  const empty = await nullpad.screen()
+  const page = pageRows(
+    Math.floor((empty.area.bottom - empty.area.top) / empty.rowHeight),
+  )
+  await nullpad.paste(
+    `${numberedLines(page - 1)}\n${'a'.repeat(200)}\n${numberedLines(page)}`,
+  )
+  await nullpad.press('Control+Home')
+  await nullpad.press('PageDown')
+  await nullpad.press('End')
+  expect(await nullpad.status()).toEqual({
+    line: page,
+    column: 153,
+    lineCount: 2 * page,
+  })
+})
+
 test('Ctrl+End from a short line lands at the end of the last line', async ({
   nullpad,
 }) => {
@@ -723,6 +795,32 @@ test('Enter at the start of a line or of a joined piece forgets the cell Up and 
     await nullpad.status(),
     'Enter inside a piece of a joined line, then Down',
   ).toEqual({ line: 12, column: 4, lineCount: 13 })
+})
+
+test('Backspace on an empty line under an empty line keeps the cell Up and Down aim for, as a textarea does', async ({
+  nullpad,
+}) => {
+  await nullpad.paste('ab\n\n\nklmnop')
+  await nullpad.press('ArrowUp')
+  await nullpad.press('Backspace')
+  await nullpad.press('ArrowUp')
+  expect(
+    await nullpad.status(),
+    'Up after the Backspace aims at the cell after "klmnop"',
+  ).toEqual({ line: 1, column: 3, lineCount: 3 })
+})
+
+test('Backspace onto an empty first line from an empty line keeps the cell Up and Down aim for, as a textarea does', async ({
+  nullpad,
+}) => {
+  await nullpad.paste('\n\nab')
+  await nullpad.press('ArrowUp')
+  await nullpad.press('Backspace')
+  await nullpad.press('ArrowDown')
+  expect(
+    await nullpad.status(),
+    'Down after a Backspace onto the empty first line aims at the cell after "ab"',
+  ).toEqual({ line: 2, column: 3, lineCount: 2 })
 })
 
 test('the cursor is drawn where the status line puts it after Backspace joins lines at trailing spaces', async ({

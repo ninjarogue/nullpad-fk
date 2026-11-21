@@ -16,6 +16,7 @@
     "arch:core-ts-only": "bad=$(find src/core -type f ! -name '*.ts' ! -name '*.mts' ! -name '*.cts' ! -name tsconfig.json); test -z \"$bad\" || { echo \"src/core holds only .ts, .mts and .cts files. Found:\"; echo \"$bad\"; exit 1; }",
     "arch:one-keyboard": "sh scripts/one-keyboard.sh",
     "test:e2e": "playwright test",
+    "test:sweep": "playwright test e2e/sweep.spec.ts",
     "test:typist": "playwright test typist",
     "test:typist:long": "TYPIST_SEQUENCES=3000 playwright test typist",
     "postinstall": "effect-tsgo patch --no-typescript --oxlint",

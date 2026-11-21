@@ -22,10 +22,10 @@ export type Step =
 
 export type Script = ReadonlyArray<Step>
 
-const text = (value: string): Step => ({ kind: 'text', text: value })
-const insert = (value: string): Step => ({ kind: 'insert', text: value })
-const key = (name: TypistKey): Step => ({ kind: 'key', key: name })
-const codePoints = (value: string): Script => [...value].map(text)
+export const text = (value: string): Step => ({ kind: 'text', text: value })
+export const insert = (value: string): Step => ({ kind: 'insert', text: value })
+export const key = (name: TypistKey): Step => ({ kind: 'key', key: name })
+export const codePoints = (value: string): Script => [...value].map(text)
 
 export const label = (step: Step): string =>
   step.kind === 'key'

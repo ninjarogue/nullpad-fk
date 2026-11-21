@@ -323,6 +323,21 @@ const rowOf = (
 const lastLineIndex = (surface: HTMLElement): number =>
   Number(surface.dataset['lastLine'])
 
+/** Where a line's text starts, read from its first grapheme as the browser laid it out, or the column's edge. */
+const textStart = (line: HTMLElement): number => {
+  const text = lineText(line)
+  return Option.match(
+    text.length === 0
+      ? Option.none()
+      : rangeRect(line, 0, graphemeAfter(text, 0)),
+    { onNone: () => textEdges(line).left, onSome: rect => rect.left },
+  )
+}
+
+/** Chrome aims Up and Down from the last whole pixel before the caret's boundary, counted from the text's start. */
+const aimFrom = (boundary: number): number =>
+  Math.max(0, Math.ceil(boundary) - 1)
+
 /**
  * Up, Down and paging: from the caret's row, `distance` pixels down (or up) at x `aim` from the text's left edge.
  * The goal holds only while the caret is on `goalRow`, the row of its line the last vertical move landed on, as in
@@ -336,7 +351,7 @@ const verticalAnswer = (
   goal: Option.Option<number>,
   goalRow: Option.Option<number>,
 ): Answer => {
-  const edges = textEdges(line)
+  const start = textStart(line)
   const caret = caretBox(line, from.column, from.atRowEnd)
   const row = rowOf(sheet, line, from.column, from.atRowEnd)
   const heldGoal = Option.filter(goal, () =>
@@ -345,7 +360,7 @@ const verticalAnswer = (
       onSome: goalOn => goalOn === row,
     }),
   )
-  const aim = Option.getOrElse(heldGoal, () => caret.left - edges.left)
+  const aim = Option.getOrElse(heldGoal, () => aimFrom(caret.left - start))
   const target = caret.top + sheet.rowHeight / 2 + distance
   const first = sheet.surface.querySelector<HTMLElement>('.line')
   const lines = sheet.surface.querySelectorAll<HTMLElement>('.line')
@@ -369,7 +384,7 @@ const verticalAnswer = (
     }
   }
   const y = bringOnScreen(sheet, target)
-  return Option.match(pointAt(textEdges(line).left + aim, y), {
+  return Option.match(pointAt(start + aim, y), {
     onNone: () => stay(aim, row),
     onSome: found => {
       const landing = landAt(found, y)

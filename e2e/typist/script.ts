@@ -942,6 +942,17 @@ export const namedScripts: ReadonlyArray<
     ],
   },
   {
+    name: 'Backspace after a ZWJ typed after a letter and before a family',
+    script: [
+      text('👨‍👩‍👧‍👦'),
+      key('Home'),
+      text('ë'),
+      text('ë'),
+      text('\u200D'),
+      key('Backspace'),
+    ],
+  },
+  {
     name: 'Delete on a line join that empties the piece after it keeps the column ArrowDown aims for',
     script: [
       text('ë'),

@@ -1,12 +1,7 @@
 import type { Browser, CDPSession, Page } from '@playwright/test'
 
 import { rowStartsOf, screenOf, textOf, textareaRowStarts } from '../nullpad'
-import {
-  type Script,
-  type Step,
-  acceptedDifference,
-  markOnFlagLetter,
-} from './script'
+import { type Script, type Step, acceptedDifference } from './script'
 
 /** `rows` holds where each line starts its rows, and is left out when nullpad's screen does not show the whole text. */
 export type Snapshot = Readonly<{
@@ -262,7 +257,7 @@ const editContextBackspace = async (
 /**
  * Backspace on the textarea, then as much more of the letter before the caret as a bare EditContext takes from the
  * same text. The textarea keeps its own Backspace where the two agree, so its column for Up and Down survives; where
- * the EditContext takes more, the rest goes as a selection. On a mark after a flag letter, Chrome's textarea deletes
+ * the EditContext takes more, the rest goes as a selection. On an accepted malformed sequence, Chrome's textarea may delete
  * text outside the letter, such as the character after the caret, so there is nothing to finish and the pair is left
  * for `compare` to file under that accepted difference.
  */
@@ -289,7 +284,7 @@ const backspaceAsEditContext = async (pair: Pair) => {
   const { value: taken } = await textareaCaret(pair.textarea)
   const leftInLetter = taken.length - head.length - tail.length
   if (!taken.startsWith(head) || !taken.endsWith(tail) || leftInLetter < 0) {
-    if (markOnFlagLetter.test(value)) {
+    if (acceptedDifference([value]) !== undefined) {
       return
     }
     throw new Error(

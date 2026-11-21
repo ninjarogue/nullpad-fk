@@ -574,6 +574,75 @@ test('PageDown that lands at the start of a wrapped row keeps the cursor there, 
   })
 })
 
+const unbroken = 'abcdefghij'.repeat(600)
+
+const pageLanding = async (nullpad: Nullpad) => {
+  const screen = await nullpad.screen()
+  return {
+    line: screen.status.line,
+    column: screen.status.column,
+    row: screen.cursor?.row,
+    cell: screen.cursor?.cell,
+  }
+}
+
+test('PageDown from the end of a row that lands where the line wraps puts the cursor at the start of the lower row, as a textarea does', async ({
+  nullpad,
+}) => {
+  await nullpad.paste(unbroken)
+  await nullpad.press('Control+Home')
+  const page = pageRows((await nullpad.screen()).rows.length)
+  await nullpad.press('End')
+  await nullpad.press('PageDown')
+  expect(
+    await pageLanding(nullpad),
+    'the lower row starts the screen with the cursor on its first cell',
+  ).toEqual({ line: 1, column: 76 * (page + 1) + 1, row: 0, cell: 0 })
+  await nullpad.press('Home')
+  expect(await nullpad.status(), 'Home stays at the row start').toEqual({
+    line: 1,
+    column: 76 * (page + 1) + 1,
+    lineCount: 1,
+  })
+  await nullpad.press('End')
+  expect(
+    await nullpad.status(),
+    'End goes to the end of the lower row',
+  ).toEqual({ line: 1, column: 76 * (page + 2) + 1, lineCount: 1 })
+})
+
+test('PageDown from the end of a line that fills its row, landing where a line wraps, puts the cursor at the start of the lower row, as a textarea does', async ({
+  nullpad,
+}) => {
+  await nullpad.paste(`${'x'.repeat(76)}\n${unbroken}`)
+  await nullpad.press('Control+Home')
+  const page = pageRows((await nullpad.screen()).rows.length)
+  await nullpad.press('End')
+  await nullpad.press('PageDown')
+  expect(await pageLanding(nullpad)).toEqual({
+    line: 2,
+    column: 76 * page + 1,
+    row: 0,
+    cell: 0,
+  })
+  await nullpad.press('End')
+  expect(
+    await nullpad.status(),
+    'End goes to the end of the lower row',
+  ).toEqual({ line: 2, column: 76 * (page + 1) + 1, lineCount: 2 })
+})
+
+test('PageUp after a PageDown that landed where a line wraps pages from the lower row, as a textarea does', async ({
+  nullpad,
+}) => {
+  await nullpad.paste(unbroken)
+  await nullpad.press('Control+Home')
+  await nullpad.press('End')
+  await nullpad.press('PageDown')
+  await nullpad.press('PageUp')
+  expect(await nullpad.status()).toEqual({ line: 1, column: 77, lineCount: 1 })
+})
+
 test('Ctrl+End from a short line lands at the end of the last line', async ({
   nullpad,
 }) => {

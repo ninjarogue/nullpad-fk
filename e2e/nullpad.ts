@@ -25,7 +25,7 @@ export type ScreenRow = Readonly<{
   inkRight: number
 }>
 
-/** The drawn block cursor. `cell` counts cells from its row's left edge. */
+/** The drawn block cursor, when it is on a row on screen. `cell` counts cells from its row's left edge. */
 export type Cursor = Readonly<{
   row: number
   cell: number
@@ -56,6 +56,10 @@ export const settle = (page: Page): Promise<void> =>
       ),
   )
 
+/**
+ * The rows on screen, read from what the browser drew: each line is one element whose text the browser wraps, so a row
+ * is the text whose boxes share a top. A row partly off screen is not on screen.
+ */
 const readScreen = (page: Page): Promise<Screen> =>
   page.evaluate(() => {
     const surface = document.querySelector<HTMLElement>('.surface')
@@ -70,6 +74,7 @@ const readScreen = (page: Page): Promise<Screen> =>
     }
     context.font = `${style.fontSize} ${style.fontFamily}`
     const cell = context.measureText('0').width
+    const rowHeight = Number.parseFloat(style.lineHeight)
     const box = surface.getBoundingClientRect()
     const area = {
       left: box.left + Number.parseFloat(style.paddingLeft),
@@ -77,49 +82,144 @@ const readScreen = (page: Page): Promise<Screen> =>
       top: box.top + Number.parseFloat(style.paddingTop),
       bottom: box.bottom - Number.parseFloat(style.paddingBottom),
     }
-    const isGhost = (node: Node) =>
-      node instanceof HTMLElement && node.hasAttribute('data-ghost')
+    const segmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' })
     const range = document.createRange()
-    const elements = [
-      ...surface.querySelectorAll<HTMLElement>('[data-line-id]'),
-    ]
-    const rows = elements.map(row => {
-      const rect = row.getBoundingClientRect()
-      let text = ''
-      let inkRight = rect.left
-      for (const node of row.childNodes) {
-        if (!isGhost(node)) {
-          range.selectNode(node)
-          inkRight = Math.max(inkRight, range.getBoundingClientRect().right)
-          text += node.textContent ?? ''
+    type Drawn = {
+      top: number
+      left: number
+      right: number
+      text: string
+      start: number
+      ink: boolean
+    }
+    type Row = {
+      lineId: string
+      start: number
+      number: string | null
+      text: string
+      top: number
+      bottom: number
+      left: number
+      inkRight: number
+      drawn: Array<Drawn>
+    }
+    const allRows: Array<Row> = []
+    for (const line of surface.querySelectorAll<HTMLElement>('.line')) {
+      const lineBox = line.getBoundingClientRect()
+      const left =
+        lineBox.left + Number.parseFloat(getComputedStyle(line).paddingLeft)
+      const rowTop = (top: number) =>
+        lineBox.top +
+        Math.floor((top - lineBox.top + rowHeight / 2) / rowHeight) * rowHeight
+      const drawn: Array<Drawn> = []
+      let column = 0
+      for (const node of line.childNodes) {
+        if (node instanceof Text) {
+          for (const { segment, index } of segmenter.segment(node.data)) {
+            range.setStart(node, index)
+            range.setEnd(node, index + segment.length)
+            const rect = range.getClientRects()[0]
+            if (rect !== undefined) {
+              drawn.push({
+                top: rowTop(rect.top),
+                left: rect.left,
+                right: rect.right,
+                text: segment,
+                start: column + index,
+                ink: /\S/u.test(segment),
+              })
+            }
+          }
+          column += node.length
+        } else if (node instanceof HTMLElement) {
+          for (const rect of node.getClientRects()) {
+            drawn.push({
+              top: rowTop(rect.top),
+              left: rect.left,
+              right: rect.right,
+              text: '',
+              start: column,
+              ink: false,
+            })
+          }
         }
       }
-      return {
-        lineId: row.dataset['lineId'] ?? '',
-        start: Number(row.dataset['start']),
-        number: row.dataset['n'] ?? null,
-        text,
-        top: rect.top,
-        bottom: rect.bottom,
-        left: rect.left,
-        inkRight,
+      const rows: Array<Row> = []
+      for (const item of drawn) {
+        const row = rows.find(
+          candidate => Math.abs(candidate.top - item.top) < rowHeight / 2,
+        )
+        if (row === undefined) {
+          rows.push({
+            lineId: line.dataset['lineId'] ?? '',
+            start: item.start,
+            number: null,
+            text: item.text,
+            top: item.top,
+            bottom: item.top + rowHeight,
+            left,
+            inkRight: item.ink ? item.right : left,
+            drawn: [item],
+          })
+        } else {
+          row.text += item.text
+          row.drawn.push(item)
+          if (item.ink) {
+            row.inkRight = Math.max(row.inkRight, item.right)
+          }
+        }
       }
-    })
+      if (rows.length === 0) {
+        rows.push({
+          lineId: line.dataset['lineId'] ?? '',
+          start: 0,
+          number: null,
+          text: '',
+          top: lineBox.top,
+          bottom: lineBox.top + rowHeight,
+          left,
+          inkRight: left,
+          drawn: [],
+        })
+      }
+      rows.sort((a, b) => a.top - b.top)
+      const [first] = rows
+      if (first !== undefined) {
+        first.number = line.dataset['n'] ?? null
+      }
+      allRows.push(...rows)
+    }
+    const visible = allRows.filter(
+      row => row.top >= area.top - 0.5 && row.bottom <= area.bottom + 0.5,
+    )
     const caret = document.getElementById('caret')
-    const caretRow = caret?.closest<HTMLElement>('[data-line-id]')
+    const caretTop = caret?.getBoundingClientRect().top ?? 0
     const cursor =
-      caret === null || caretRow === null || caretRow === undefined
+      caret === null ||
+      caret.style.display === 'none' ||
+      !visible.some(row => Math.abs(row.top - caretTop) < rowHeight / 2)
         ? null
         : (() => {
             const rect = caret.getBoundingClientRect()
-            const rowLeft = caretRow.getBoundingClientRect().left
+            const rowIndex = visible.findIndex(
+              row => Math.abs(row.top - rect.top) < rowHeight / 2,
+            )
+            const row =
+              visible[rowIndex] ??
+              allRows.find(
+                candidate => Math.abs(candidate.top - rect.top) < rowHeight / 2,
+              )
+            const under = row?.drawn.find(
+              item => item.text !== '' && Math.abs(item.left - rect.left) < 1,
+            )
             return {
-              row: elements.indexOf(caretRow),
-              cell: Math.round((rect.left - rowLeft) / cell),
+              row: rowIndex,
+              cell:
+                Math.round((rect.left - (row?.left ?? area.left)) / cell) || 0,
               left: rect.left,
               top: rect.top,
               width: rect.width,
-              char: caret.textContent ?? '',
+              char: under?.text ?? ' ',
               inside:
                 rect.top >= area.top - 0.5 &&
                 rect.bottom <= box.bottom + 0.5 &&
@@ -132,7 +232,7 @@ const readScreen = (page: Page): Promise<Screen> =>
       throw new Error(`status position reads "${position.textContent}"`)
     }
     return {
-      rows,
+      rows: visible.map(({ drawn: _, ...row }) => row),
       cursor,
       status: {
         line: Number(match[1]),
@@ -140,7 +240,7 @@ const readScreen = (page: Page): Promise<Screen> =>
         lineCount: Number(match[3]),
       },
       cell,
-      rowHeight: elements[0]?.getBoundingClientRect().height ?? 0,
+      rowHeight,
       area,
     }
   })
@@ -221,8 +321,37 @@ const driver = (page: Page, cdp: CDPSession) => {
       await settle(page)
       await settle(page)
     },
+    /** A wheel turn, then the browser's own scroll animation to its `scrollend`, or ten frames when nothing scrolls. */
     wheel: async (deltaY: number) => {
+      const ended = page.evaluate(
+        () =>
+          new Promise<void>(resolve => {
+            const surface = document.querySelector('.surface')
+            const state = { scrolled: false, frames: 0 }
+            surface?.addEventListener(
+              'scroll',
+              () => {
+                state.scrolled = true
+              },
+              { once: true },
+            )
+            surface?.addEventListener('scrollend', () => resolve(), {
+              once: true,
+            })
+            const tick = () => {
+              state.frames += 1
+              if (!state.scrolled && state.frames >= 10) {
+                resolve()
+              } else {
+                requestAnimationFrame(tick)
+              }
+            }
+            requestAnimationFrame(tick)
+          }),
+      )
       await page.mouse.wheel(0, deltaY)
+      await ended
+      await settle(page)
       await settle(page)
     },
     click: async (x: number, y: number) => {

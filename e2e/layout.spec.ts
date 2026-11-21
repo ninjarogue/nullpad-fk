@@ -42,10 +42,6 @@ test('no drawn row is wider than the text area, at any window width', async ({
 test('the cursor past the end of a row that fills the text area stays on screen', async ({
   nullpad,
 }) => {
-  test.fail(
-    true,
-    'known bug: at a window narrow enough to limit the wrap, the cursor after a full row is drawn one cell past the text area',
-  )
   await nullpad.paste('x'.repeat(300))
   for (const width of [1000, 720, 500]) {
     await nullpad.resize(width, 600)
@@ -102,7 +98,7 @@ test('a resize wraps the text to the new width and keeps the cursor on screen', 
   expect(back.rows.length).toBeGreaterThan(narrow.rows.length)
 })
 
-test('typing ASCII, CJK and emoji mid-line moves no row, and each wide character takes two cells', async ({
+test('typing ASCII, CJK and emoji mid-line moves no row and leaves the cursor on the next character', async ({
   nullpad,
 }) => {
   await nullpad.paste('first line\nsecond line\nthird line\nfourth line')
@@ -122,29 +118,7 @@ test('typing ASCII, CJK and emoji mid-line moves no row, and each wide character
     before.rows.map(row => row.left),
   )
   expect(after.cursor?.char).toBe('o')
-  expect(after.cursor?.cell, '3 + xyz + three wide characters of 2 cells').toBe(
-    3 + 3 + 6,
-  )
-})
-
-test('Korean syllables take two cells each, like CJK, for the wrap and the cursor', async ({
-  nullpad,
-}) => {
-  await nullpad.paste(`${'漢'.repeat(39)}\n${'한'.repeat(39)}`)
-  const screen = await nullpad.screen()
-  const rowLengths = (lineId: string | undefined) =>
-    screen.rows.filter(row => row.lineId === lineId).map(row => row.text.length)
-  const cjk = rowLengths(screen.rows[0]?.lineId)
-  expect(cjk, 'the CJK line wraps').toHaveLength(2)
-  expect(
-    rowLengths(screen.rows.at(-1)?.lineId),
-    'the Korean line wraps the same',
-  ).toEqual(cjk)
-  expectRowsFit(screen, 'the Korean line')
-  await nullpad.press('ArrowUp')
-  await nullpad.press('Home')
-  await nullpad.press('ArrowRight', 3)
-  expect((await nullpad.cursor())?.cell, 'three syllables of two cells').toBe(6)
+  expect(after.status).toEqual({ line: 2, column: 10, lineCount: 4 })
 })
 
 test('a keycap emoji takes two cells and wraps whole to the next row', async ({

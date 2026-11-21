@@ -205,6 +205,7 @@ const notes = [
   'We should review the onboarding checklist together and agree on a state-of-the-art plan.',
   '会議のメモ：新しいエディタを来週出荷することに合意しました。最終レビューを待っています。よろしくお願いします。',
   '新的编辑器将在下周发布，“最终评审”之后。请大家（尽快）确认，谢谢！我们会在会议上讨论具体的细节和时间安排。',
+  '회의 메모: 새 편집기를 다음 주에 출시하기로 합의했습니다. 최종 검토를 기다리고 있습니다. 감사합니다! 한글한글한글한글한글한글한글한글',
   'Thanks 👍 for the fix ❤️ it works 😀 now and the team 👨‍👩‍👧 is happy 🎉🎉🎉 about the release today!',
 ]
 
@@ -243,7 +244,7 @@ test('a line breaks where a textarea of the same width breaks it, for each pair 
   await expectRowsLikeTextarea(nullpad, ['a'.repeat(200), ...jointLines(76)])
 })
 
-test('lines of notes in English, Japanese, Chinese and emoji break where a textarea of the same width breaks them', async ({
+test('lines of notes in English, Japanese, Chinese, Korean and emoji break where a textarea of the same width breaks them', async ({
   nullpad,
 }) => {
   await expectRowsLikeTextarea(nullpad, ['a'.repeat(200), ...notes])

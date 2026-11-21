@@ -120,8 +120,22 @@ test("the IME's candidate window sits on the preedit: the editor reports each pr
     return { reported: bounds, drawn: boxes }
   })
   expect(drawn.length, 'four preedit characters drawn').toBe(4)
+  const edges = (box: {
+    left: number
+    top: number
+    width: number
+    height: number
+  }) => [box.left, box.top, box.left + box.width, box.top + box.height]
+  expect(reported.length, 'a box for each preedit character').toBe(4)
   expect(
-    reported.map(box => Object.values(box).map(Math.round)),
-    'the boxes reported to the browser are the drawn ones',
-  ).toEqual(drawn.map(box => Object.values(box).map(Math.round)))
+    reported.flatMap((box, index) => {
+      const want = edges(drawn[index] ?? box)
+      return edges(box).flatMap((edge, side) =>
+        Math.abs(edge - (want[side] ?? 0)) > 1
+          ? [`box ${index} side ${side}: ${edge} for ${want[side]}`]
+          : [],
+      )
+    }),
+    'the boxes reported to the browser are the drawn ones, to the whole pixel the browser keeps',
+  ).toEqual([])
 })

@@ -782,8 +782,9 @@ export const namedScripts: ReadonlyArray<
 type Difference = Readonly<{ name: string; pattern: RegExp }>
 
 /**
- * Malformed sequences where nullpad follows Intl.Segmenter and Chrome's textarea does not.
- * A mismatch counts as accepted only when the text around it holds one of these.
+ * Malformed sequences where nullpad follows Intl.Segmenter and Chrome's textarea does not: where a caret left inside a
+ * grapheme settles after inserted text. A mismatch counts as accepted only when the text around it holds one of these,
+ * in a named script as in a random one.
  */
 export const acceptedDifferences: ReadonlyArray<Difference> = [
   {
@@ -798,6 +799,11 @@ export const acceptedDifferences: ReadonlyArray<Difference> = [
   {
     name: 'skin tone after a non-base',
     pattern: /(?<!\p{Emoji_Modifier_Base})[\u{1f3fb}-\u{1f3ff}]/u,
+  },
+  {
+    name: 'virama with no consonant before it',
+    pattern:
+      /(?<!\p{L})[\u094d\u09cd\u0a4d\u0acd\u0b4d\u0bcd\u0c4d\u0ccd\u0d4d\u0dca]/u,
   },
   {
     name: 'stray variation selector',

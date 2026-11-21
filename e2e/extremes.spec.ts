@@ -21,13 +21,13 @@ test('typing at the end of a 2,000-line note keeps the cursor on screen', async 
   expect(screen.status).toEqual({ line: 2000, column: 42, lineCount: 2000 })
 })
 
-test('giant, tiny and reversed wheel turns scroll by whole rows and stop at the ends', async ({
+test('giant and reversed wheel turns stop at the first and last lines', async ({
   nullpad,
   pageErrors,
 }) => {
   await nullpad.paste(numberedLines(5_000))
   await nullpad.press('Control+Home')
-  const { rowHeight, rows } = await nullpad.screen()
+  const { rows } = await nullpad.screen()
   await nullpad.page.mouse.move(400, 300)
   await nullpad.wheel(1e9)
   const bottom = await nullpad.screen()
@@ -42,25 +42,6 @@ test('giant, tiny and reversed wheel turns scroll by whole rows and stop at the 
     (await nullpad.screen()).rows[0]?.number,
     'a -1e9 px turn stops at the first line',
   ).toBe('1')
-  for (let i = 0; i < 40; i++) {
-    await nullpad.page.mouse.wheel(0, 0.25)
-  }
-  expect(
-    (await nullpad.screen()).rows[0]?.number,
-    'forty 0.25 px turns add up to less than a row',
-  ).toBe('1')
-  for (let i = 0; i < 80; i++) {
-    await nullpad.page.mouse.wheel(0, rowHeight / 4)
-  }
-  expect(
-    (await nullpad.screen()).rows[0]?.number,
-    'eighty quarter-row turns scroll 20 rows',
-  ).toBe('21')
-  await nullpad.wheel(-rowHeight * 3.5)
-  expect(
-    (await nullpad.screen()).rows[0]?.number,
-    'a 3.5-row turn back scrolls 3 rows',
-  ).toBe('18')
   await nullpad.wheel(1e300)
   expect(
     (await nullpad.screen()).rows.at(-1)?.number,

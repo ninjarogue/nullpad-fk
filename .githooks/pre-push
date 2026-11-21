@@ -13,4 +13,5 @@ step lint pnpm lint
 step typecheck pnpm typecheck
 step architecture pnpm arch
 step build pnpm build
+step e2e env NULLPAD_DIST=dist pnpm test:e2e
 echo "pre-push: all steps passed"

@@ -94,15 +94,15 @@ export const nextWordEnd = (
 
 /**
  * Where Ctrl+Left takes the caret, as in Chrome's text field on Linux: the start of the word, or the start of the line.
- * Chrome stays at the start of a line, unless the line is empty: then it goes to the end of the line above. None where
- * it stays.
+ * From the start of a line it goes on to the end of the line above, where Chrome goes only from an empty line: a key
+ * that does nothing reads as broken. None at the start of the text.
  */
 export const previousWordStart = (
   buffer: Buffer.Buffer,
 ): Option.Option<Buffer.Position> => {
   const { line, column } = buffer.caret
   if (column === 0) {
-    return line > 0 && lineText(buffer, line) === ''
+    return line > 0
       ? Option.some({
           line: line - 1,
           column: lineText(buffer, line - 1).length,

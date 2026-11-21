@@ -259,6 +259,13 @@ export const nextLineStart = (buffer: Buffer): Position =>
     ? { line: buffer.caret.line + 1, column: 0 }
     : buffer.caret
 
+/** Whether the caret sits strictly inside a piece of its line: not at the line's start or end, nor on a join. */
+export const isInsidePiece = (buffer: Buffer): boolean => {
+  const { line, column } = buffer.caret
+  const { text, joins } = lineAt(buffer, line)
+  return column > 0 && column < text.length && !joins.includes(column)
+}
+
 export const lineEnd = (buffer: Buffer, line: number): number =>
   lineAt(buffer, line).text.length
 

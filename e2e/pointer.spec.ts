@@ -560,6 +560,32 @@ test('a click sent right after a letter that scrolled the screen far lands on th
   }
 })
 
+test('a click made once a key has brought the cursor back on screen after a wheel turn lands on the line shown where it clicked', async ({
+  nullpad,
+}) => {
+  const start = await longNoteAtEnd(nullpad)
+  for (const [trial, key] of (
+    ['x', 'ArrowLeft', 'ArrowDown', 'x', 'ArrowLeft', 'ArrowDown'] as const
+  ).entries()) {
+    await nullpad.press('Control+End')
+    await nullpad.press('ArrowUp')
+    await turnWheel(nullpad, -start.rowHeight * 90)
+    await nullpad.page.keyboard.press(key)
+    const revealed = await nullpad.screen()
+    expect(
+      revealed.cursor?.inside,
+      `trial ${trial}: ${key} brought the cursor on screen`,
+    ).toBe(true)
+    const target = numberedRow(revealed, 3 + 2 * trial)
+    await nullpad.page.mouse.click(target.x, target.y)
+    const after = await settleScroll(nullpad)
+    expect(
+      after.status.line,
+      `trial ${trial}: the cursor is on the line shown where it clicked`,
+    ).toBe(target.number)
+  }
+})
+
 test('a wheel turn dropped for a key that could not move the cursor stays dropped when the next turn comes', async ({
   nullpad,
 }) => {

@@ -1,4 +1,3 @@
-/** Cluster scripts leave out ArrowUp and ArrowDown: on emoji rows a textarea aims by pixels, nullpad by cells. Prose scripts, whose characters are all one cell wide, press them. */
 export type TypistKey =
   | 'ArrowLeft'
   | 'ArrowRight'
@@ -92,6 +91,8 @@ const clusters = [
 const keys: ReadonlyArray<TypistKey> = [
   'ArrowLeft',
   'ArrowRight',
+  'ArrowUp',
+  'ArrowDown',
   'Home',
   'End',
   'Control+Home',
@@ -172,13 +173,7 @@ const words = [
   '“curly”',
 ]
 const gaps = [' ', ' ', ' ', ' ', '  ', '   ', '']
-const proseKeys: ReadonlyArray<TypistKey> = [
-  ...keys,
-  'ArrowUp',
-  'ArrowDown',
-  'ArrowUp',
-  'ArrowDown',
-]
+const proseKeys: ReadonlyArray<TypistKey> = [...keys, 'ArrowUp', 'ArrowDown']
 
 const phrase = (random: () => number, count: number): string =>
   Array.from(
@@ -584,6 +579,33 @@ export const namedScripts: ReadonlyArray<
   {
     name: 'Backspace takes the last consonant of a conjunct',
     script: [...codePoints('abक्ष'), key('Backspace'), text('z')],
+  },
+  {
+    name: 'Backspace takes stacked combining marks one at a time',
+    script: [...codePoints('ab\u0301\u0302'), key('Backspace'), text('z')],
+  },
+  {
+    name: 'Backspace takes नमस्ते apart one code point at a time',
+    script: [
+      ...codePoints('नमस्ते'),
+      key('Backspace'),
+      key('Backspace'),
+      text('z'),
+    ],
+  },
+  {
+    name: 'Backspace takes the vowel sign off Thai กำ',
+    script: [...codePoints('กำ'), key('Backspace'), text('z')],
+  },
+  {
+    name: 'Backspace takes Arabic harakat one at a time',
+    script: [
+      ...codePoints('مَرْحَبًا'),
+      key('Backspace'),
+      key('Backspace'),
+      key('Backspace'),
+      text('z'),
+    ],
   },
   {
     name: 'Backspace takes a trailing ZWJ alone',

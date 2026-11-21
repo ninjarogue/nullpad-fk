@@ -85,3 +85,43 @@ test('a preedit that wraps the cursor onto a new row below the screen scrolls th
     'cursor on screen after commit',
   ).toBe(true)
 })
+
+test("the IME's candidate window sits on the preedit: the editor reports each preedit character's box to the browser", async ({
+  nullpad,
+}) => {
+  await nullpad.paste(numberedLines(3))
+  await nullpad.press('ArrowUp')
+  await nullpad.compose('にほんご')
+  const { reported, drawn } = await nullpad.page.evaluate(() => {
+    const port = document.getElementById('port')
+    const bounds =
+      port !== null && 'editContext' in port && port.editContext !== null
+        ? (port.editContext as { characterBounds(): ReadonlyArray<DOMRect> })
+            .characterBounds()
+            .map(({ left, top, width, height }) => ({
+              left,
+              top,
+              width,
+              height,
+            }))
+        : []
+    const preedit = document.querySelector('[data-ghost]:not(#caret)')
+    const node = preedit?.firstChild
+    const range = document.createRange()
+    const boxes =
+      node === null || node === undefined
+        ? []
+        : [...(node.textContent ?? '')].map((_, index) => {
+            range.setStart(node, index)
+            range.setEnd(node, index + 1)
+            const { left, top, width, height } = range.getBoundingClientRect()
+            return { left, top, width, height }
+          })
+    return { reported: bounds, drawn: boxes }
+  })
+  expect(drawn.length, 'four preedit characters drawn').toBe(4)
+  expect(
+    reported.map(box => Object.values(box).map(Math.round)),
+    'the boxes reported to the browser are the drawn ones',
+  ).toEqual(drawn.map(box => Object.values(box).map(Math.round)))
+})

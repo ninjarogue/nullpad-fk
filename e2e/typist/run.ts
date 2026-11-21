@@ -120,8 +120,8 @@ const nullpadSnapshot = async (page: Page): Promise<Snapshot> => {
 
 /**
  * The textarea's caret as nullpad's status line shows one: line, then graphemes before it plus one, and where its
- * lines wrap. A line of at most half as many UTF-16 units as the row has cells cannot wrap, as no grapheme takes
- * more than two cells, so text of only such lines is not measured.
+ * lines wrap. A line of at most a third as many UTF-16 units as the row has cells cannot wrap, as no grapheme in
+ * the scripts is wider than three cells per unit, so text of only such lines is not measured.
  */
 const textareaSnapshot = async (
   page: Page,
@@ -144,7 +144,7 @@ const textareaSnapshot = async (
   const lines = caret.text.split('\n')
   return {
     ...caret,
-    rows: lines.some(line => line.length * 2 > columns)
+    rows: lines.some(line => line.length * 3 > columns)
       ? await textareaRowStarts(page, lines, columns, cell)
       : lines.map(() => [0]),
   }

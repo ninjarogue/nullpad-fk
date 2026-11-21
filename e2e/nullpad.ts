@@ -333,14 +333,9 @@ export const expectNumbersClearOfText = async (
 export const numberedLines = (lines: number, suffix = ''): string =>
   Array.from({ length: lines }, (_, i) => `line ${i + 1}${suffix}`).join('\n')
 
-/** A grapheme the terminal grid gives two cells: an East Asian wide character or an emoji. */
-const wideGrapheme =
-  /^(?:\p{Emoji_Presentation}|\p{Extended_Pictographic}\ufe0f|[\u1100-\u115f\u2e80-\u303e\u3041-\u33ff\u3400-\u4dbf\u4e00-\u9fff\ua000-\ua4cf\uac00-\ud7a3\uf900-\ufaff\ufe30-\ufe6f\uff00-\uff60\uffe0-\uffe6])/u
-
 /**
- * Where a textarea of the screen's wrap width breaks each line, in the editor's font and with each wide
- * character two cells wide, as on the terminal grid. A div outside the app takes the textarea's wrap rules
- * (pre-wrap, break-word); a margin pads each non-ASCII character to its cells, which moves no break.
+ * Where a textarea of the screen's wrap width breaks each line, in the editor's font. A div outside the app takes the
+ * textarea's wrap rules (pre-wrap, break-word), which wraps exactly as a textarea does.
  */
 export const textareaRowStarts = (
   page: Page,
@@ -349,8 +344,7 @@ export const textareaRowStarts = (
   cell: number,
 ): Promise<ReadonlyArray<ReadonlyArray<number>>> =>
   page.evaluate(
-    ({ lines, columns, cell, wide }) => {
-      const wideGrapheme = new RegExp(wide, 'u')
+    ({ lines, columns, cell }) => {
       const segmenter = new Intl.Segmenter(undefined, {
         granularity: 'grapheme',
       })
@@ -368,25 +362,16 @@ export const textareaRowStarts = (
       document.body.append(mirror)
       const range = document.createRange()
       const starts = lines.map(line => {
-        mirror.replaceChildren()
-        const pieces: Array<{ node: Node; index: number }> = []
-        for (const { segment, index } of segmenter.segment(line)) {
-          if (/^[\x20-\x7e]$/.test(segment)) {
-            mirror.append(segment)
-            pieces.push({ node: mirror.lastChild ?? mirror, index })
-          } else {
-            const span = document.createElement('span')
-            span.textContent = segment
-            mirror.append(span)
-            const cells = wideGrapheme.test(segment) ? 2 : 1
-            span.style.marginLeft = `${cells * cell - span.getBoundingClientRect().width}px`
-            pieces.push({ node: span, index })
-          }
-        }
+        mirror.textContent = line
+        const node = mirror.firstChild
         const rowStarts = [0]
+        if (node === null) {
+          return rowStarts
+        }
         let top: number | null = null
-        for (const { node, index } of pieces) {
-          range.selectNodeContents(node)
+        for (const { segment, index } of segmenter.segment(line)) {
+          range.setStart(node, index)
+          range.setEnd(node, index + segment.length)
           const rect = range.getClientRects()[0]
           if (rect !== undefined) {
             if (top !== null && rect.top > top + cell && index > 0) {
@@ -400,7 +385,7 @@ export const textareaRowStarts = (
       mirror.remove()
       return starts
     },
-    { lines, columns, cell, wide: wideGrapheme.source },
+    { lines, columns, cell },
   )
 
 /** Where each line on screen starts its rows, as columns of the line. */

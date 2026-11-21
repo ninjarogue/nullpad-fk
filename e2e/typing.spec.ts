@@ -1,4 +1,12 @@
-import { type Nullpad, expect, numberedLines, test, textOf } from './nullpad'
+import {
+  type Nullpad,
+  expect,
+  numberedLines,
+  screenOf,
+  test,
+  textOf,
+} from './nullpad'
+import { openPair } from './typist/run'
 
 const fortyWords = Array.from(
   { length: 40 },
@@ -524,4 +532,116 @@ test('Home and End on a wrapped line go to the start and end of the row the curs
   await nullpad.press('End')
   await nullpad.type('Z')
   expect(await nullpad.text()).toBe(`${'x'.repeat(76)}Z${'x'.repeat(24)}`)
+})
+
+test('a burst of arrows, Home, End, Delete, Backspace and typing sent while the main thread is blocked lands where a textarea puts it', async ({
+  browser,
+  baseURL,
+}) => {
+  const pair = await openPair(browser, baseURL ?? '')
+  const named: Readonly<Record<string, number>> = {
+    Enter: 13,
+    Backspace: 8,
+    Delete: 46,
+    ArrowLeft: 37,
+    ArrowUp: 38,
+    ArrowRight: 39,
+    ArrowDown: 40,
+    Home: 36,
+    End: 35,
+  }
+  const pattern = [
+    'ab',
+    'Enter',
+    'cdefgh',
+    'ArrowUp',
+    'x',
+    'End',
+    'Enter',
+    'ijk',
+    'ArrowLeft',
+    'ArrowLeft',
+    'Delete',
+    'Home',
+    'Backspace',
+    'ArrowDown',
+    'yz',
+    'ArrowRight',
+    'Delete',
+    'ArrowUp',
+    'ArrowUp',
+    'm',
+  ]
+  const steps = Array.from({ length: 6 }, () => pattern)
+    .flat()
+    .flatMap(step => (step in named ? [step] : [...step]))
+  const burst = async (page: typeof pair.nullpad) => {
+    const cdp = await page.context().newCDPSession(page)
+    await page.evaluate(() => {
+      setTimeout(() => {
+        const start = performance.now()
+        while (performance.now() - start < 400) {}
+      }, 0)
+    })
+    await Promise.all(
+      steps.flatMap(step => {
+        const code = named[step]
+        const down =
+          code === undefined
+            ? {
+                type: 'keyDown' as const,
+                key: step,
+                text: step,
+                unmodifiedText: step,
+              }
+            : {
+                type:
+                  step === 'Enter'
+                    ? ('keyDown' as const)
+                    : ('rawKeyDown' as const),
+                key: step,
+                code: step,
+                windowsVirtualKeyCode: code,
+                ...(step === 'Enter'
+                  ? { text: '\r', unmodifiedText: '\r' }
+                  : {}),
+              }
+        return [
+          cdp.send('Input.dispatchKeyEvent', down),
+          cdp.send('Input.dispatchKeyEvent', {
+            type: 'keyUp' as const,
+            key: step,
+          }),
+        ]
+      }),
+    )
+  }
+  await pair.nullpad.goto('/')
+  await pair.nullpad.locator('#caret').waitFor()
+  await pair.textarea.evaluate(() =>
+    document.querySelector('textarea')?.focus(),
+  )
+  await Promise.all([burst(pair.nullpad), burst(pair.textarea)])
+  const expected = await pair.textarea.evaluate(() => {
+    const area = document.querySelector('textarea')
+    const before = area?.value.slice(0, area.selectionStart) ?? ''
+    return {
+      text: area?.value ?? '',
+      line: before.split('\n').length,
+      column: before.length - before.lastIndexOf('\n'),
+    }
+  })
+  const nullpad = {
+    text: async () => textOf(await screenOf(pair.nullpad)),
+    caret: async () => {
+      const { status } = await screenOf(pair.nullpad)
+      return { line: status.line, column: status.column }
+    },
+  }
+  await expect.poll(nullpad.text).toBe(expected.text)
+  expect(await nullpad.caret()).toEqual({
+    line: expected.line,
+    column: expected.column,
+  })
+  await pair.close()
 })

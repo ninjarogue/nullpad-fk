@@ -295,27 +295,39 @@ const landAt = (
   return { _tag: 'At', line: indexOf(line), column, atRowEnd: upper }
 }
 
-/** How far the app has scrolled on its own, for a key or a click, that the screen has yet to show. */
-const unshown = { pixels: 0 }
+type AppScroll = { readonly distance: number; shownAt: number }
+
+/** The scrolls the app made on its own, for a key or a click, that the screen has yet to show or showed in the last second. */
+const appScrolls: { recent: ReadonlyArray<AppScroll> } = { recent: [] }
 
 /**
- * Runs a scroll the app makes on its own and returns how far it went. The distance counts as unshown until the scroll
- * is on screen: Chrome draws it in its next frame, and that frame reaches the screen a frame later.
+ * Runs a scroll the app makes on its own and returns how far it went. The app scrolls after a patch, inside a frame,
+ * and that frame is on screen no sooner than the next frame begins. `shownAt` is that moment on the clock of
+ * `Event.timeStamp`.
  */
-const scrollUnshown = (surface: HTMLElement, scroll: () => void): number => {
+const scrollApp = (surface: HTMLElement, scroll: () => void): number => {
   const before = surface.scrollTop
   scroll()
   const distance = surface.scrollTop - before
   if (distance !== 0) {
-    unshown.pixels += distance
-    requestAnimationFrame(() =>
-      requestAnimationFrame(() => {
-        unshown.pixels -= distance
-      }),
-    )
+    const made: AppScroll = { distance, shownAt: Infinity }
+    appScrolls.recent = [...appScrolls.recent, made]
+    requestAnimationFrame(nextFrame => {
+      made.shownAt = nextFrame
+      appScrolls.recent = Array.filter(
+        appScrolls.recent,
+        ({ shownAt }) => shownAt > nextFrame - 1000,
+      )
+    })
   }
   return distance
 }
+
+/** How far the app had scrolled on its own that the screen did not show yet at `time`. */
+const unshownAt = (time: number): number =>
+  Array.reduce(appScrolls.recent, 0, (pixels, { distance, shownAt }) =>
+    time < shownAt ? pixels + distance : pixels,
+  )
 
 /** Scrolls the least that brings viewport y on screen, and returns where that y is drawn now. */
 const bringOnScreen = (sheet: Sheet, y: number): number => {
@@ -325,7 +337,7 @@ const bringOnScreen = (sheet: Sheet, y: number): number => {
   return delta === 0
     ? y
     : y -
-        scrollUnshown(sheet.surface, () => {
+        scrollApp(sheet.surface, () => {
           sheet.surface.scrollTop += delta
         })
 }
@@ -642,7 +654,7 @@ export const revealCaret = (align: 'Nearest' | 'Top'): Effect.Effect<void> =>
     Effect.map(() =>
       Option.map(findSurface(), surface => {
         drawCaret(surface)
-        scrollUnshown(surface, () =>
+        scrollApp(surface, () =>
           surface.querySelector('#caret')?.scrollIntoView({
             block: align === 'Top' ? 'start' : 'nearest',
             inline: 'nearest',
@@ -835,7 +847,7 @@ const observe = (surface: HTMLElement): Stream.Stream<SurfaceMessage> =>
                 queue,
                 Message.ClickedText({
                   x: event.clientX,
-                  ...lineAt(sheet, y - unshown.pixels),
+                  ...lineAt(sheet, y - unshownAt(event.timeStamp)),
                 }),
               )
             },

@@ -27,6 +27,7 @@ export const Query = Schema.TaggedUnion({
     atRowEnd: Schema.Boolean,
     rows: Schema.Literals([-1, 1]),
     goal: Schema.Option(Schema.Number),
+    goalRow: Schema.Option(Schema.Number),
   },
   Page: {
     at: Buffer.Position,
@@ -46,8 +47,15 @@ export const Landing = Schema.TaggedUnion({
 })
 export type Landing = typeof Landing.Type
 
-/** `aim` is the x, in pixels from the text's left edge, that a vertical move aimed at: the goal it keeps. */
-export const Answer = Schema.Struct({ landing: Landing, aim: Schema.Number })
+/**
+ * `aim` is the x, in pixels from the text's left edge, that a vertical move aimed at: the goal it keeps. `row` is
+ * the row of its line, counted from 0, that a vertical move left the caret on.
+ */
+export const Answer = Schema.Struct({
+  landing: Landing,
+  aim: Schema.Number,
+  row: Schema.Number,
+})
 export type Answer = typeof Answer.Type
 
 const Queued = Schema.TaggedUnion({
@@ -63,6 +71,8 @@ const Locating = Schema.Struct({ cause: Queued, queued: Schema.Array(Queued) })
  * The text, the caret and what is drawn. The core never reads layout: rows, pixels and graphemes on screen are the
  * browser's, and come back as Answers. `goal` is the x that Up and Down aim for. As in Chrome, typing, a click or a
  * move that lands elsewhere clears it; Backspace, Delete, Enter inside a line and a move that stays put keep it.
+ * `goalRow` is the row of its line the last vertical move landed on: the goal holds only while the caret is still
+ * drawn there, so a Backspace that takes the caret to another row forgets it, as in Chrome. Enter lifts the limit.
  * `caretAtRowEnd` draws a caret where its line wraps at the end of the upper row, as Chrome's upstream caret after
  * End, a click past a row end or a vertical move onto one. `top` is the line the shell reports at the top of the
  * screen and `rows` how many rows the screen holds. `revision` counts changes to the drawn text, so the shell answers
@@ -73,6 +83,7 @@ export const Editor = Schema.Struct({
   mode: Mode,
   preedit: Schema.String,
   goal: Schema.Option(Schema.Number),
+  goalRow: Schema.Option(Schema.Number),
   caretAtRowEnd: Schema.Boolean,
   top: Schema.Number,
   rows: Schema.Number,
@@ -125,6 +136,7 @@ export const open = (text: string): Editor => ({
   mode: 'Plain',
   preedit: '',
   goal: Option.none(),
+  goalRow: Option.none(),
   caretAtRowEnd: false,
   top: 0,
   rows: 24,
@@ -239,7 +251,7 @@ const breakLine = (editor: Editor): Editor => {
   const { caret } = settled(editor)
   const typed = typeText('\n')(editor)
   return caret.column < Buffer.lineEnd(editor.buffer, caret.line)
-    ? { ...typed, goal: editor.goal }
+    ? { ...typed, goal: editor.goal, goalRow: Option.none() }
     : typed
 }
 
@@ -376,7 +388,10 @@ const documentEdge = (editor: Editor, edge: 'Start' | 'End'): Plan =>
     ),
   )
 
-/** Up and Down aim at the goal, or at the caret's own x, which becomes the goal even if the caret cannot move. */
+/**
+ * Up and Down aim at the goal while the caret is on its row, or else at the caret's own x, which becomes the goal even
+ * if the caret cannot move.
+ */
 const vertical =
   (rows: -1 | 1) =>
   (editor: Editor): Plan =>
@@ -386,16 +401,17 @@ const vertical =
         atRowEnd: editor.caretAtRowEnd,
         rows,
         goal: editor.goal,
+        goalRow: editor.goalRow,
       }),
-      ({ landing, aim }) => {
-        const goal = Option.some(Option.getOrElse(editor.goal, () => aim))
+      ({ landing, aim, row }) => {
+        const goal = { goal: Option.some(aim), goalRow: Option.some(row) }
         return done(
           Option.match(landingPosition(editor, landing), {
-            onNone: () => ({ ...editor, goal }),
-            onSome: ({ caret, atRowEnd }) => {
-              const moved = moveTo(editor, caret, atRowEnd)
-              return { ...moved, goal }
-            },
+            onNone: () => ({ ...editor, ...goal }),
+            onSome: ({ caret, atRowEnd }) => ({
+              ...moveTo(editor, caret, atRowEnd),
+              ...goal,
+            }),
           }),
         )
       },
@@ -426,8 +442,14 @@ const plainKeys: Readonly<
   Escape: editor => now(editor, 'None'),
   Enter: editor => now(breakLine(editor)),
   Tab: editor => now(typeText('  ')(editor)),
-  Backspace: editor =>
-    now(eraseTo(editor, Buffer.backspaceTarget(settled(editor)))),
+  Backspace: editor => {
+    const erased = eraseTo(editor, Buffer.backspaceTarget(settled(editor)))
+    return now(
+      erased.buffer.caret.line === editor.buffer.caret.line
+        ? erased
+        : { ...erased, goal: Option.none() },
+    )
+  },
   Delete: deleteForward,
   ArrowLeft: step('Backward'),
   ArrowRight: step('Forward'),

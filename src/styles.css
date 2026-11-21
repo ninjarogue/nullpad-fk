@@ -44,48 +44,51 @@ body {
   flex: 1;
   min-height: 0;
   padding: 10px 2ch 0;
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overflow-anchor: auto;
+  scroll-padding-top: 10px;
+  scrollbar-width: none;
   cursor: text;
-  user-select: none;
 }
 
-.row {
+.line {
   position: relative;
-  height: var(--row);
-  margin-left: calc(var(--gutter) * 1ch);
-  white-space: pre;
-  tab-size: 1;
+  box-sizing: border-box;
+  min-height: var(--row);
+  max-width: calc((var(--gutter) + 76) * 1ch);
+  padding-left: calc(var(--gutter) * 1ch);
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
 }
 
-.row[data-n]::before {
+.line::before {
   content: attr(data-n);
   position: absolute;
-  left: calc(var(--gutter) * -1ch);
+  left: 0;
   width: calc((var(--gutter) - 2) * 1ch);
   text-align: right;
   color: var(--number);
+  user-select: none;
 }
 
-.row.cl::before {
+.line.cl::before {
   color: var(--fg);
 }
 
-.w {
-  display: inline-block;
-  width: calc(var(--cells) * 1ch);
-  height: var(--row);
-  overflow: hidden;
-  vertical-align: top;
-}
-
-.hang {
-  font-size: 0;
+.spacer {
+  height: calc(var(--lines) * var(--row));
+  overflow-anchor: none;
 }
 
 .cur {
+  position: absolute;
+  height: var(--row);
   anchor-name: --caret;
   background: var(--cur);
-  color: var(--bg);
+  mix-blend-mode: difference;
+  pointer-events: none;
+  overflow-anchor: none;
 }
 
 .focused .cur {
@@ -94,14 +97,13 @@ body {
 
 .surface:not(.focused) .cur {
   background: transparent;
-  color: inherit;
+  mix-blend-mode: normal;
   box-shadow: inset 0 0 0 1px var(--cur);
 }
 
 @keyframes blink {
   50% {
     background: transparent;
-    color: inherit;
   }
 }
 
@@ -114,15 +116,6 @@ body {
 .pre {
   text-decoration: underline;
   text-underline-offset: 3px;
-}
-
-.probe {
-  position: absolute;
-  top: 0;
-  left: 0;
-  height: var(--row);
-  white-space: pre;
-  visibility: hidden;
 }
 
 .status {
@@ -163,14 +156,8 @@ body {
   left: anchor(left, 0);
   width: 1ch;
   height: var(--row);
-  margin: 0;
-  padding: 0;
   overflow: hidden;
-  border: 0;
   outline: 0;
-  font: inherit;
-  white-space: pre;
-  resize: none;
   opacity: 0;
   pointer-events: none;
 }

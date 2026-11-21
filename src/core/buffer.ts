@@ -38,35 +38,9 @@ export const Buffer = Schema.Struct({
 })
 export type Buffer = typeof Buffer.Type
 
-/** Motions that need no screen. Moving by visual row, Home and End need the wrap width, so they live in screen.ts. */
-export const Motion = Schema.Literals([
-  'Left',
-  'BackspaceStart',
-  'Right',
-  'DocumentStart',
-  'DocumentEnd',
-])
-export type Motion = typeof Motion.Type
-
-export type Grapheme = Readonly<{ index: number; segment: string }>
-
 export const segmenter = new Intl.Segmenter(undefined, {
   granularity: 'grapheme',
 })
-
-/** The graphemes of `text[from, to)`, as Intl.Segmenter draws them, with indexes into `text`. */
-export const graphemes = (
-  text: string,
-  from = 0,
-  to = text.length,
-): ReadonlyArray<Grapheme> =>
-  Array.map(
-    Array.fromIterable(segmenter.segment(text.slice(from, to))),
-    ({ index, segment }) => ({
-      index: from + index,
-      segment,
-    }),
-  )
 
 const isHighSurrogate = (unit: number): boolean =>
   unit >= 0xd800 && unit <= 0xdbff
@@ -81,19 +55,8 @@ const isInsidePair = (text: string, at: number): boolean =>
 const codePointBefore = (text: string, at: number): string =>
   text.slice(isInsidePair(text, at - 1) ? at - 2 : at - 1, at)
 
-const codePointFrom = (text: string, at: number): string =>
-  text.slice(at, isHighSurrogate(text.charCodeAt(at)) ? at + 2 : at + 1)
-
-/** Characters with Indic_Syllabic_Category Virama that Chrome joins to a following letter, found by probing Chrome. */
-const viramas: ReadonlySet<number> = new Set([
-  0x94d, 0x9cd, 0xa4d, 0xacd, 0xb4d, 0xc4d, 0xccd, 0xd4d, 0xdca, 0x1b44, 0xa8c4,
-  0xa9c0, 0x11046, 0x110b9, 0x111c0, 0x11235, 0x1134d, 0x11442, 0x114c2,
-  0x115bf, 0x1163f, 0x116b6, 0x11c3f,
-])
-
 const zwj = '\u200d'
 const isEmoji = /^\p{Emoji}$/u
-const isOtherLetter = /^\p{Lo}$/u
 const isRegionalIndicator = /^\p{Regional_Indicator}$/u
 const isVariationSelector = /^[\ufe00-\ufe0f\u{e0100}-\u{e01ef}]$/u
 const isNonSpacingMark = /^\p{Mn}$/u
@@ -103,32 +66,6 @@ const isKeycapBase = /^[0-9#*]$/
 const isTag = /^[\u{e0020}-\u{e007e}]$/u
 const cancelTag = '\u{e007f}'
 const keycap = '\u20e3'
-
-const pairs = new Map<string, boolean>()
-
-/** Whether Intl.Segmenter keeps two code points, alone in a string, in one grapheme. */
-const segmenterJoins = (before: string, after: string): boolean => {
-  const pair = before + after
-  const known = pairs.get(pair)
-  if (known !== undefined) {
-    return known
-  }
-  const joins = segmenter.segment(pair).containing(before.length)?.index === 0
-  if (pairs.size >= 4096) {
-    pairs.clear()
-  }
-  pairs.set(pair, joins)
-  return joins
-}
-
-/**
- * Chrome's editing rule for one pair of code points: Unicode's rules seen two code points at a time, plus
- * ZWJ before any emoji and a virama before any letter, whatever comes before them.
- */
-const chromeJoins = (before: string, after: string): boolean =>
-  (before === zwj && isEmoji.test(after)) ||
-  (viramas.has(before.codePointAt(0) ?? 0) && isOtherLetter.test(after)) ||
-  segmenterJoins(before, after)
 
 type Piece = Readonly<{ from: number; to: number }>
 
@@ -151,62 +88,6 @@ const pieceAt = (
     () => text.length,
   ),
 })
-
-const regionalIndicatorsBefore = (
-  text: string,
-  from: number,
-  at: number,
-): number => {
-  let count = 0
-  let cursor = at
-  while (
-    cursor > from &&
-    isRegionalIndicator.test(codePointBefore(text, cursor))
-  ) {
-    count += 1
-    cursor -= 2
-  }
-  return count
-}
-
-/** Chrome's grapheme boundaries for editing: they never span a join, and a pair of flag letters counts from the piece start. */
-const isBoundary = (line: Line, column: number): boolean => {
-  const { from, to } = pieceAt(line, column, 'After')
-  if (column <= from || column >= to) {
-    return true
-  }
-  const { text } = line
-  if (isInsidePair(text, column)) {
-    return false
-  }
-  const before = codePointBefore(text, column)
-  const after = codePointFrom(text, column)
-  return isRegionalIndicator.test(before) && isRegionalIndicator.test(after)
-    ? regionalIndicatorsBefore(text, from, column) % 2 === 0
-    : !chromeJoins(before, after)
-}
-
-const nextBoundary = (line: Line, column: number): number => {
-  let at = column
-  do {
-    at += codePointFrom(line.text, at).length || 1
-  } while (at < line.text.length && !isBoundary(line, at))
-  return Math.min(at, line.text.length)
-}
-
-const previousBoundary = (line: Line, column: number): number => {
-  let at = column
-  do {
-    at -= codePointBefore(line.text, at).length || 1
-  } while (at > 0 && !isBoundary(line, at))
-  return Math.max(at, 0)
-}
-
-const boundaryAtOrBefore = (line: Line, column: number): number =>
-  isBoundary(line, column) ? column : previousBoundary(line, column)
-
-const boundaryAtOrAfter = (line: Line, column: number): number =>
-  isBoundary(line, column) ? column : nextBoundary(line, column)
 
 type BackspaceState =
   | 'Start'
@@ -355,16 +236,28 @@ const backspaceUnits = (text: string, from: number, at: number): number => {
   return step.units
 }
 
+/** Where Backspace starts deleting, as Chrome decides it for a text box: what the state machine reads back inside the piece before the caret. */
+const backspaceStart = (line: Line, column: number): number =>
+  column -
+  backspaceUnits(line.text, pieceAt(line, column, 'Before').from, column)
+
 /**
- * Where Backspace starts deleting: one grapheme back, or, when that grapheme is longer than one UTF-16 unit,
- * what the state machine reads back inside the piece before the caret.
+ * The next grapheme boundary at or after `column` inside its piece, as Intl.Segmenter finds them. Only the text near
+ * the column is segmented, so a long line costs nothing.
  */
-const backspaceStart = (line: Line, column: number): number => {
-  const previous = previousBoundary(line, column)
-  return column - previous > 1
-    ? column -
-        backspaceUnits(line.text, pieceAt(line, column, 'Before').from, column)
-    : previous
+const boundaryAtOrAfter = (line: Line, column: number): number => {
+  const { from, to } = pieceAt(line, column, 'After')
+  if (column <= from || column >= to) {
+    return column
+  }
+  const start = Math.max(from, column - 64)
+  const end = Math.min(to, column + 64)
+  const grapheme = segmenter
+    .segment(line.text.slice(start, end))
+    .containing(column - start)
+  return grapheme === undefined || grapheme.index + start === column
+    ? column
+    : Math.min(end, start + grapheme.index + grapheme.segment.length)
 }
 
 const makeLine = (
@@ -494,58 +387,6 @@ export const erase = (buffer: Buffer, from: Position, to: Position): Buffer => {
   }
 }
 
-type MotionContext = Readonly<{
-  buffer: Buffer
-  line: number
-  column: number
-  current: Line
-  lastLine: number
-}>
-
-const left = ({ buffer, line, column, current }: MotionContext): Position => {
-  if (column > 0) {
-    return { line, column: previousBoundary(current, column) }
-  }
-  return line > 0
-    ? { line: line - 1, column: lineAt(buffer, line - 1).text.length }
-    : buffer.caret
-}
-
-const motions: Readonly<Record<Motion, (context: MotionContext) => Position>> =
-  {
-    Left: left,
-    BackspaceStart: context =>
-      context.column > 0
-        ? {
-            line: context.line,
-            column: backspaceStart(context.current, context.column),
-          }
-        : left(context),
-    Right: ({ buffer, line, column, current, lastLine }) => {
-      if (column < current.text.length) {
-        return { line, column: nextBoundary(current, column) }
-      }
-      return line < lastLine ? { line: line + 1, column: 0 } : buffer.caret
-    },
-    DocumentStart: () => ({ line: 0, column: 0 }),
-    DocumentEnd: ({ buffer, lastLine }) => ({
-      line: lastLine,
-      column: lineAt(buffer, lastLine).text.length,
-    }),
-  }
-
-/**
- * Where a motion lands from a settled caret. Backspace is `erase(target(b, 'BackspaceStart'), b.caret)`;
- * vim's `d{motion}` is the same call.
- */
-export const target = (buffer: Buffer, motion: Motion): Position =>
-  motions[motion]({
-    buffer,
-    ...buffer.caret,
-    current: lineAt(buffer, buffer.caret.line),
-    lastLine: buffer.lines.length - 1,
-  })
-
 /** The caret moved to the next boundary at or after it, where Chrome starts every command. */
 export const settle = (buffer: Buffer): Buffer => {
   const { line, column } = buffer.caret
@@ -555,20 +396,43 @@ export const settle = (buffer: Buffer): Buffer => {
     : { ...buffer, caret: { line, column: settled } }
 }
 
-/** Moves the caret, clamped into the text and onto a grapheme boundary. */
+/** Moves the caret, clamped into the text. */
 export const moveTo = (buffer: Buffer, position: Position): Buffer => {
   const line = Math.max(0, Math.min(buffer.lines.length - 1, position.line))
-  const current = lineAt(buffer, line)
-  const column = boundaryAtOrBefore(
-    current,
-    Math.max(0, Math.min(current.text.length, position.column)),
+  const column = Math.max(
+    0,
+    Math.min(lineAt(buffer, line).text.length, position.column),
   )
   return { ...buffer, caret: { line, column } }
 }
 
-/** The index of the line with this id. None when the id is unknown or no longer in the text. */
-export const indexOf = (
-  buffer: Buffer,
-  lineId: number,
-): Option.Option<number> =>
-  Array.findFirstIndex(buffer.lines, line => line.id === lineId)
+/** Where Backspace starts deleting from the caret: back inside the line, or the end of the line above. */
+export const backspaceTarget = (buffer: Buffer): Position => {
+  const { line, column } = buffer.caret
+  if (column > 0) {
+    return { line, column: backspaceStart(lineAt(buffer, line), column) }
+  }
+  return line > 0
+    ? { line: line - 1, column: lineAt(buffer, line - 1).text.length }
+    : buffer.caret
+}
+
+/** The start of the next line, where Delete at a line end erases to, or the caret itself on the last line. */
+export const nextLineStart = (buffer: Buffer): Position =>
+  buffer.caret.line < buffer.lines.length - 1
+    ? { line: buffer.caret.line + 1, column: 0 }
+    : buffer.caret
+
+export const lineEnd = (buffer: Buffer, line: number): number =>
+  lineAt(buffer, line).text.length
+
+export const documentEnd = (buffer: Buffer): Position => {
+  const line = buffer.lines.length - 1
+  return { line, column: lineEnd(buffer, line) }
+}
+
+/** The line's text split at its joins, each piece drawn as its own text node so the browser keeps them apart. */
+export const pieces = ({ text, joins }: Line): ReadonlyArray<string> =>
+  Array.map(Array.zip([0, ...joins], [...joins, text.length]), ([from, to]) =>
+    text.slice(from, to),
+  )

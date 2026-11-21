@@ -1,6 +1,12 @@
 import type { Browser, CDPSession, Page } from '@playwright/test'
 
-import { rowStartsOf, screenOf, textOf, textareaRowStarts } from '../nullpad'
+import {
+  rowStartsOf,
+  screenOf,
+  settle,
+  textOf,
+  textareaRowStarts,
+} from '../nullpad'
 import {
   type Script,
   type Step,
@@ -365,14 +371,21 @@ const same = (a: Snapshot, b: Snapshot) =>
     b.rows === undefined ||
     JSON.stringify(a.rows) === JSON.stringify(b.rows))
 
+const applyToTextarea = (pair: Pair, step: Step) =>
+  step.kind === 'key' && step.key === 'Backspace'
+    ? backspaceAsEditContext(pair)
+    : apply(pair.textarea, step)
+
 /**
  * Types `script` into both from empty and returns the first step after which text, caret or row breaks differ.
  * Backspace on the textarea takes what a bare EditContext takes. The two pages are independent, so each step goes to
- * both at once.
+ * both at once. The steps before `from` are typed back to back, with one wait for nullpad to draw them, and not
+ * compared, for a script whose first steps repeat across many runs.
  */
 export const compare = async (
   pair: Pair,
   script: Script,
+  from = 0,
 ): Promise<Divergence | null> => {
   await Promise.all([
     pair.nullpad.goto('/').then(() => pair.nullpad.locator('#caret').waitFor()),
@@ -384,14 +397,33 @@ export const compare = async (
       }
     }),
   ])
-  let before = ''
-  for (const [at, step] of script.entries()) {
+  const skipped = script.slice(0, from)
+  await Promise.all([
+    (async () => {
+      for (const step of skipped) {
+        await apply(pair.nullpad, step)
+      }
+      await settle(pair.nullpad)
+    })(),
+    (async () => {
+      for (const step of skipped) {
+        await applyToTextarea(pair, step)
+      }
+    })(),
+  ])
+  let before =
+    from === 0
+      ? ''
+      : await pair.textarea.evaluate(
+          () => document.querySelector('textarea')?.value ?? '',
+        )
+  for (const [offset, step] of script.slice(from).entries()) {
+    const at = from + offset
     const [nullpad, textarea] = await Promise.all([
       apply(pair.nullpad, step).then(() => nullpadSnapshot(pair.nullpad)),
-      (step.kind === 'key' && step.key === 'Backspace'
-        ? backspaceAsEditContext(pair)
-        : apply(pair.textarea, step)
-      ).then(() => textareaSnapshot(pair.textarea, pair.measure)),
+      applyToTextarea(pair, step).then(() =>
+        textareaSnapshot(pair.textarea, pair.measure),
+      ),
     ])
     if (!same(nullpad, textarea)) {
       return {

@@ -22,7 +22,10 @@ export type Sweep = Readonly<{
   >
 }>
 
-/** `from` is the index of the first step of the move. */
+/**
+ * `from` is the index of the last step before the move. A row compares there, where its placement left the cursor, and
+ * after every step of the move.
+ */
 export type Row = Readonly<{
   document: string
   placement: string
@@ -39,7 +42,7 @@ export const rowsOf = (sweep: Sweep): ReadonlyArray<Row> =>
         placement: placement.name,
         move,
         script: [...document.setup, ...placement.keys, ...move],
-        from: document.setup.length + placement.keys.length,
+        from: document.setup.length + placement.keys.length - 1,
       })),
     ),
   )

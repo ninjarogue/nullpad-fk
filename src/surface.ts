@@ -75,10 +75,14 @@ const lineText = (line: HTMLElement): string =>
     '',
   )
 
-/** The DOM point of a column, in the text node that holds it, or the end of the one before a join. */
+/**
+ * The DOM point of a column, in the text node that holds it. At a join it is the end of the node before, or with side
+ * `After` the start of the node after, so a range that starts at a join measures the text after it.
+ */
 const domPoint = (
   line: HTMLElement,
   column: number,
+  side: 'Before' | 'After' = 'Before',
 ): Readonly<{ node: Node; offset: number }> => {
   const nodes = textNodes(line)
   const found = Array.reduce(
@@ -87,12 +91,18 @@ const domPoint = (
       rest: column,
       point: Option.none<Readonly<{ node: Node; offset: number }>>(),
     },
-    (search, node) =>
-      Option.isSome(search.point) || search.rest > node.length
-        ? Option.isSome(search.point)
-          ? search
-          : { rest: search.rest - node.length, point: search.point }
-        : { rest: 0, point: Option.some({ node, offset: search.rest }) },
+    (search, node, index) => {
+      if (Option.isSome(search.point)) {
+        return search
+      }
+      const takesNext =
+        side === 'After' && index < nodes.length - 1
+          ? search.rest >= node.length
+          : search.rest > node.length
+      return takesNext
+        ? { rest: search.rest - node.length, point: search.point }
+        : { rest: 0, point: Option.some({ node, offset: search.rest }) }
+    },
   )
   return Option.getOrElse(found.point, () => ({ node: line, offset: 0 }))
 }
@@ -129,7 +139,7 @@ const rangeRect = (
   from: number,
   to: number,
 ): Option.Option<DOMRect> => {
-  const start = domPoint(line, from)
+  const start = domPoint(line, from, 'After')
   const end = domPoint(line, to)
   const range = document.createRange()
   range.setStart(start.node, start.offset)

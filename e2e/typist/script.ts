@@ -777,6 +777,19 @@ export const namedScripts: ReadonlyArray<
       text('z'),
     ],
   },
+  {
+    name: 'Backspace that moves the caret onto another row forgets the column ArrowUp aimed at',
+    script: [
+      insert(
+        '"quoted" $100  editor  <tag>  ok...  internationalizationx-1 - [ ] https://example.com/path/to/page?x=1&y=2   ',
+      ),
+      text('@user word(note) '),
+      text('-1   100%  '),
+      key('ArrowUp'),
+      key('Backspace'),
+      key('ArrowUp'),
+    ],
+  },
 ]
 
 type Difference = Readonly<{ name: string; pattern: RegExp }>

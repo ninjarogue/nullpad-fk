@@ -145,11 +145,11 @@ A row types every step before its last placement step back to back, without comp
 The sweeps today:
 
 - Up or Down, any key, Up or Down lands where a textarea lands. Runs on every push. 6 documents (three short lines, a wrapped line of words, a long word that moved to the next row, one word longer than a row, a full row that ends in spaces, and rows of emoji and accents), 7 placements, and 52 moves in each: Up or Down, then any of 13 keys, then Up or Down. 2,184 rows, about 3 minutes on 4 cores.
-- One Backspace, Delete, Left or Right takes what a textarea takes around emoji, flags and accents. Runs before a merge, as two sweeps. The documents are twelve pieces (a letter, an accent, two flag letters, a thumbs up, a skin tone, a man, a ZWJ, a heart, a variation selector, a Devanagari letter and a virama) in every ordered pair, and five fixed documents (two of Hangul, a keycap, a family, a flag split by an x). Each move is one key and then `y`.
-  - Typed in order: 149 documents, 3 placements (at the end, at the start, one Right from the start). 894 rows.
-  - Met at a line join, or typed one in front of the other: 298 documents, the same 3 placements and where the build left the cursor. 2,980 rows.
+- One Backspace, Delete, Left or Right takes what a textarea takes around emoji, flags and accents. Runs before a merge, as two sweeps. The documents are twelve pieces (a letter, an accent, two flag letters, a thumbs up, a skin tone, a man, a ZWJ, a heart, a variation selector, a Devanagari letter and a virama) in every ordered pair, and seven fixed documents (two of Hangul, a keycap, a family of three, a family of four and a kiss with skin tones, which are letters of 11 and 15 UTF-16 units, and a flag split by an x). Each move is one key and then `y`.
+  - Typed in order: 151 documents, 3 placements (at the end, at the start, one Right from the start). 906 rows.
+  - Met at a line join, or typed one in front of the other: 302 documents, the same 3 placements and where the build left the cursor. 3,020 rows.
 
-The second rule has 52 named scripts on every push, and its sweeps would add about 5 minutes to each push on 4 cores, so they run before a merge. Add a row only for a shape the grid does not reach. When a bug turns up, run the sweep on the broken build first and see the new row fail.
+The second rule has 54 named scripts on every push, and its sweeps would add about 5 minutes to each push on 4 cores, so they run before a merge. Add a row only for a shape the grid does not reach. When a bug turns up, run the sweep on the broken build first and see the new row fail.
 
 1. If the bug fits a sweep's rule, add the document that shows it. If the bug needs a cursor spot or a key the grid lacks, add a placement or a move too. Set `scripts` to the new count.
 2. If the bug breaks another rule, add a sweep to `sweeps` with its own name, documents, placements, `scripts` and `runs`.
@@ -189,7 +189,7 @@ A scout run prints its run seed.
 
 #### Accepted differences
 
-Where a malformed sequence makes Chrome's textarea or EditContext disagree with `Intl.Segmenter`, nullpad follows `Intl.Segmenter`. A mismatch counts as accepted, not failed, only when the text around it holds one of these, listed in `acceptedDifferences` in `e2e/typist/script.ts`:
+Where a malformed sequence makes Chrome's textarea or EditContext disagree with `Intl.Segmenter`, nullpad follows `Intl.Segmenter`. A mismatch counts as accepted, not failed, only when the text before the step, the textarea's text after it, or the piece a Backspace was judged on holds one of these. A piece that starts at a line join can be malformed where the whole line is not, such as a ZWJ that starts one. nullpad's own text after the step does not count, so a bug that leaves a broken letter behind is not excused. They are listed in `acceptedDifferences` in `e2e/typist/script.ts`:
 
 - ZWJ next to a non-pictograph.
 - A mark, ZWJ or skin tone on a flag letter.

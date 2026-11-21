@@ -822,6 +822,23 @@ export const namedScripts: ReadonlyArray<
       key('End'),
     ],
   },
+  {
+    name: 'Backspace after a heart typed after a ZWJ that starts a piece at a line join',
+    script: [
+      text('❤'),
+      key('Enter'),
+      text(ZWJ),
+      key('Home'),
+      key('Backspace'),
+      key('ArrowDown'),
+      text('❤'),
+      key('Backspace'),
+    ],
+  },
+  {
+    name: 'Backspace takes a whole family of four, a letter of 11 UTF-16 units',
+    script: [insert(`👩${ZWJ}👩${ZWJ}👧${ZWJ}👦`), key('Backspace')],
+  },
 ]
 
 type Difference = Readonly<{ name: string; pattern: RegExp }>
@@ -829,7 +846,9 @@ type Difference = Readonly<{ name: string; pattern: RegExp }>
 /**
  * Malformed sequences where nullpad follows Intl.Segmenter and Chrome's textarea, or its EditContext for Backspace,
  * does not: where a caret left inside a grapheme settles after inserted text, and how much Backspace takes. A mismatch
- * counts as accepted only when the text around it holds one of these, in a named script as in a random one.
+ * counts as accepted only when the text before the step, the textarea's text after it or the piece a Backspace was
+ * judged on holds one of these, never by nullpad's own text, so a bug that leaves a malformed sequence behind is not
+ * excused.
  */
 /** A flag letter followed by a mark, a ZWJ or a skin tone, which no flag has. */
 const markOnFlagLetter = /\p{Regional_Indicator}[\p{M}‍\u{1f3fb}-\u{1f3ff}]/u

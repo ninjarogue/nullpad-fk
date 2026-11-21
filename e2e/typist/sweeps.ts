@@ -171,6 +171,16 @@ const parts: ReadonlyArray<Parts> = [
     head: `👨${ZWJ}`,
     tail: `👩${ZWJ}👧`,
   },
+  {
+    name: 'family of four 👩 ZWJ 👩 ZWJ 👧 ZWJ 👦, 11 UTF-16 units',
+    head: `👩${ZWJ}👩${ZWJ}`,
+    tail: `👧${ZWJ}👦`,
+  },
+  {
+    name: 'kiss with skin tones 👩 🏽 ZWJ ❤ U+FE0F ZWJ 💋 ZWJ 👨 🏽, 15 UTF-16 units',
+    head: `👩🏽${ZWJ}❤️${ZWJ}`,
+    tail: `💋${ZWJ}👨🏽`,
+  },
   { name: 'flag letters around an x, 🇺 x 🇸', head: '🇺x', tail: '🇸' },
 ]
 
@@ -244,14 +254,14 @@ export const sweeps: ReadonlyArray<Sweep> = [
   },
   {
     name: `${lettersRule} typed in order`,
-    scripts: 894,
+    scripts: 906,
     runs: 'before a merge',
     documents: documentsOf([typedInOrder]),
     placements: letterPlacements,
   },
   {
     name: `${lettersRule} that met at a line join or were typed one in front of the other`,
-    scripts: 2980,
+    scripts: 3020,
     runs: 'before a merge',
     documents: documentsOf([joinedByBackspace, typedInFront]),
     placements: [

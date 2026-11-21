@@ -302,23 +302,7 @@ const bringOnScreen = (sheet: Sheet, y: number): number => {
   return y
 }
 
-const stay = (aim: number, row = 0): Answer => ({
-  landing: { _tag: 'Stay' },
-  aim,
-  row,
-})
-
-/** Which row of its line, counted from 0, a caret at this column is drawn on. */
-const rowOf = (
-  sheet: Sheet,
-  line: HTMLElement,
-  column: number,
-  atRowEnd: boolean,
-): number =>
-  Math.round(
-    (caretBox(line, column, atRowEnd).top - line.getBoundingClientRect().top) /
-      sheet.rowHeight,
-  )
+const stay = (aim: number): Answer => ({ landing: { _tag: 'Stay' }, aim })
 
 const lastLineIndex = (surface: HTMLElement): number =>
   Number(surface.dataset['lastLine'])
@@ -338,29 +322,17 @@ const textStart = (line: HTMLElement): number => {
 const aimFrom = (boundary: number): number =>
   Math.max(0, Math.ceil(boundary) - 1)
 
-/**
- * Up, Down and paging: from the caret's row, `distance` pixels down (or up) at x `aim` from the text's left edge.
- * The goal holds only while the caret is on `goalRow`, the row of its line the last vertical move landed on, as in
- * Chrome, where a Backspace that takes the caret to another row forgets it.
- */
+/** Up, Down and paging: from the caret's row, `distance` pixels down (or up) at x `aim` from the text's left edge. */
 const verticalAnswer = (
   sheet: Sheet,
   line: HTMLElement,
   from: Readonly<{ column: number; atRowEnd: boolean }>,
   distance: number,
   goal: Option.Option<number>,
-  goalRow: Option.Option<number>,
 ): Answer => {
   const start = textStart(line)
   const caret = caretBox(line, from.column, from.atRowEnd)
-  const row = rowOf(sheet, line, from.column, from.atRowEnd)
-  const heldGoal = Option.filter(goal, () =>
-    Option.match(goalRow, {
-      onNone: () => true,
-      onSome: goalOn => goalOn === row,
-    }),
-  )
-  const aim = Option.getOrElse(heldGoal, () => aimFrom(caret.left - start))
+  const aim = Option.getOrElse(goal, () => aimFrom(caret.left - start))
   const target = caret.top + sheet.rowHeight / 2 + distance
   const first = sheet.surface.querySelector<HTMLElement>('.line')
   const lines = sheet.surface.querySelectorAll<HTMLElement>('.line')
@@ -370,35 +342,19 @@ const verticalAnswer = (
     indexOf(first) === 0 &&
     target < first.getBoundingClientRect().top
   ) {
-    return { landing: { _tag: 'TextStart' }, aim, row: 0 }
+    return { landing: { _tag: 'TextStart' }, aim }
   }
   if (
     last !== undefined &&
     indexOf(last) === lastLineIndex(sheet.surface) &&
     target > last.getBoundingClientRect().bottom
   ) {
-    return {
-      landing: { _tag: 'TextEnd' },
-      aim,
-      row: rowOf(sheet, last, lineText(last).length, false),
-    }
+    return { landing: { _tag: 'TextEnd' }, aim }
   }
   const y = bringOnScreen(sheet, target)
   return Option.match(pointAt(start + aim, y), {
-    onNone: () => stay(aim, row),
-    onSome: found => {
-      const landing = landAt(found, y)
-      return {
-        landing,
-        aim,
-        row: rowOf(
-          sheet,
-          found.line,
-          found.column,
-          landing._tag === 'At' && landing.atRowEnd,
-        ),
-      }
-    },
+    onNone: () => stay(aim),
+    onSome: found => ({ landing: landAt(found, y), aim }),
   })
 }
 
@@ -427,7 +383,6 @@ const selectionMove = (
 const at = (line: HTMLElement, column: number, atRowEnd: boolean): Answer => ({
   landing: { _tag: 'At', line: indexOf(line), column, atRowEnd },
   aim: 0,
-  row: 0,
 })
 
 /** A row edge. A caret drawn at the end of the upper row starts Home from inside that row. */
@@ -469,7 +424,7 @@ const pointAnswer = (sheet: Sheet, x: number, y: number): Answer => {
     indexOf(last) === lastLineIndex(sheet.surface) &&
     y >= last.getBoundingClientRect().bottom
   ) {
-    return { landing: { _tag: 'TextEnd' }, aim: 0, row: 0 }
+    return { landing: { _tag: 'TextEnd' }, aim: 0 }
   }
   const row = Math.min(sheet.viewBottom - 1, Math.max(sheet.viewTop + 1, y))
   const hit = Array.findFirst(Array.fromIterable(lines), line => {
@@ -483,7 +438,7 @@ const pointAnswer = (sheet: Sheet, x: number, y: number): Answer => {
       const clampedX = Math.min(edges.right - 0.5, Math.max(edges.left, x))
       return Option.match(pointAt(clampedX, row), {
         onNone: () => stay(0),
-        onSome: found => ({ landing: landAt(found, row), aim: 0, row: 0 }),
+        onSome: found => ({ landing: landAt(found, row), aim: 0 }),
       })
     },
   })
@@ -521,7 +476,7 @@ const answer = (sheet: Sheet, query: Query): Answer =>
         onNone: () => stay(0),
         onSome: line => rowEdgeAnswer(line, from.column, atRowEnd, edge),
       }),
-    Vertical: ({ at: from, atRowEnd, rows, goal, goalRow }) =>
+    Vertical: ({ at: from, atRowEnd, rows, goal }) =>
       Option.match(lineElement(sheet.surface, from.line), {
         onNone: () => stay(Option.getOrElse(goal, () => 0)),
         onSome: line =>
@@ -531,7 +486,6 @@ const answer = (sheet: Sheet, query: Query): Answer =>
             { column: from.column, atRowEnd },
             rows * sheet.rowHeight,
             goal,
-            goalRow,
           ),
       }),
     Page: ({ at: from, atRowEnd, direction }) =>
@@ -543,7 +497,6 @@ const answer = (sheet: Sheet, query: Query): Answer =>
             line,
             { column: from.column, atRowEnd },
             direction * pageDistance(sheet),
-            Option.none(),
             Option.none(),
           ),
       }),

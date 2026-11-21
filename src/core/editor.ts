@@ -518,6 +518,11 @@ const planOf = (editor: Editor, queued: Queued): Plan =>
     Clicked: ({ x, y }) => clickPlan(editor, x, y),
   })
 
+/**
+ * Runs an input, or asks the browser what it needs first. A key whose caret left the drawn lines draws them again and
+ * scrolls the caret on screen in the frame that draws them. Waiting for the answer would leave a frame in which the
+ * browser, keeping the lines on screen still as the drawn lines change, reports the old place as a scroll.
+ */
 const run = (editor: Editor, queued: Queued): Outcome => {
   const plan = planOf(editor, queued)
   if (plan._tag === 'Done') {
@@ -530,7 +535,7 @@ const run = (editor: Editor, queued: Queued): Outcome => {
       locating: Option.some({ cause: queued, queued: [] }),
     },
     locate: Option.some({ query: plan.query, revision: drawn.revision }),
-    reveal: 'None',
+    reveal: drawn === editor ? 'None' : 'Nearest',
   }
 }
 

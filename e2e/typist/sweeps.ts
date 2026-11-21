@@ -16,6 +16,7 @@ import {
 export type Sweep = Readonly<{
   name: string
   scripts: number
+  runs: 'every push' | 'before a merge'
   documents: ReadonlyArray<Readonly<{ name: string; setup: Script }>>
   placements: ReadonlyArray<
     Readonly<{ name: string; keys: Script; moves: ReadonlyArray<Script> }>
@@ -173,71 +174,90 @@ const parts: ReadonlyArray<Parts> = [
   { name: 'flag letters around an x, 🇺 x 🇸', head: '🇺x', tail: '🇸' },
 ]
 
-const builds: ReadonlyArray<
-  Readonly<{ name: string; setup: (parts: Parts) => Script }>
-> = [
-  {
-    name: 'typed in order',
-    setup: ({ head, tail }) => [...codePoints(head), ...codePoints(tail)],
-  },
-  {
-    name: 'on two lines, joined by Backspace',
-    setup: ({ head, tail }) => [
-      ...codePoints(head),
-      key('Enter'),
-      ...codePoints(tail),
-      key('Home'),
-      key('Backspace'),
-    ],
-  },
-  {
-    name: 'the first part typed in front of the second',
-    setup: ({ head, tail }) => [
-      ...codePoints(tail),
-      key('Home'),
-      ...codePoints(head),
-    ],
-  },
-]
+type Build = Readonly<{ name: string; setup: (parts: Parts) => Script }>
+
+const typedInOrder: Build = {
+  name: 'typed in order',
+  setup: ({ head, tail }) => [...codePoints(head), ...codePoints(tail)],
+}
+
+const joinedByBackspace: Build = {
+  name: 'on two lines, joined by Backspace',
+  setup: ({ head, tail }) => [
+    ...codePoints(head),
+    key('Enter'),
+    ...codePoints(tail),
+    key('Home'),
+    key('Backspace'),
+  ],
+}
+
+const typedInFront: Build = {
+  name: 'the first part typed in front of the second',
+  setup: ({ head, tail }) => [
+    ...codePoints(tail),
+    key('Home'),
+    ...codePoints(head),
+  ],
+}
+
+const documentsOf = (builds: ReadonlyArray<Build>): Sweep['documents'] =>
+  builds.flatMap(build =>
+    parts.map(part => ({
+      name: `${part.name}, ${build.name}`,
+      setup: build.setup(part),
+    })),
+  )
 
 /** Each move types `y` after the key, so the text shows exactly where the cursor stood. */
 const thenY = (...names: ReadonlyArray<TypistKey>): ReadonlyArray<Script> =>
   names.map(name => [key(name), text('y')])
 
+const letterPlacements: Sweep['placements'] = [
+  {
+    name: 'at the end',
+    keys: [key('End')],
+    moves: thenY('Backspace', 'ArrowLeft'),
+  },
+  {
+    name: 'at the start',
+    keys: [key('Home')],
+    moves: thenY('Delete', 'ArrowRight'),
+  },
+  {
+    name: 'one Right from the start',
+    keys: [key('Home'), key('ArrowRight')],
+    moves: thenY('Backspace', 'Delete'),
+  },
+]
+
+const lettersRule =
+  'one Backspace, Delete, Left or Right takes what a textarea takes around emoji, flags and accents'
+
 export const sweeps: ReadonlyArray<Sweep> = [
   {
     name: 'Up or Down, any key, Up or Down lands where a textarea lands',
     scripts: 2184,
+    runs: 'every push',
     documents: verticalDocuments,
     placements: verticalPlacements,
   },
   {
-    name: 'one Backspace, Delete, Left or Right takes what a textarea takes around emoji, flags and accents',
-    scripts: 4470,
-    documents: builds.flatMap(build =>
-      parts.map(part => ({
-        name: `${part.name}, ${build.name}`,
-        setup: build.setup(part),
-      })),
-    ),
+    name: `${lettersRule} typed in order`,
+    scripts: 894,
+    runs: 'before a merge',
+    documents: documentsOf([typedInOrder]),
+    placements: letterPlacements,
+  },
+  {
+    name: `${lettersRule} that met at a line join or were typed one in front of the other`,
+    scripts: 2980,
+    runs: 'before a merge',
+    documents: documentsOf([joinedByBackspace, typedInFront]),
     placements: [
+      ...letterPlacements,
       {
-        name: 'at the end',
-        keys: [key('End')],
-        moves: thenY('Backspace', 'ArrowLeft'),
-      },
-      {
-        name: 'at the start',
-        keys: [key('Home')],
-        moves: thenY('Delete', 'ArrowRight'),
-      },
-      {
-        name: 'one Right from the start',
-        keys: [key('Home'), key('ArrowRight')],
-        moves: thenY('Backspace', 'Delete'),
-      },
-      {
-        name: 'where the build left it',
+        name: 'where the build left the cursor',
         keys: [],
         moves: thenY('Backspace', 'Delete', 'ArrowLeft', 'ArrowRight'),
       },

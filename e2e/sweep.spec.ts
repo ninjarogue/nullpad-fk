@@ -5,6 +5,7 @@ import { show } from './typist/script'
 import { rowsOf, sweeps } from './typist/sweeps'
 
 const shards = Number(process.env['TYPIST_SHARDS'] ?? 8)
+const beforeAMerge = process.env['NULLPAD_READY'] !== undefined
 
 test.describe.configure({ mode: 'parallel' })
 
@@ -24,6 +25,10 @@ for (const sweep of sweeps) {
       browser,
       baseURL,
     }, testInfo) => {
+      test.skip(
+        sweep.runs === 'before a merge' && !beforeAMerge,
+        'runs before a merge, pnpm test:ready',
+      )
       test.setTimeout(60_000 + mine.length * 3_000)
       const pair = await openPair(browser, baseURL ?? '')
       const accepted = new Map<string, number>()

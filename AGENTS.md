@@ -54,10 +54,11 @@ pnpm lint        # oxlint with the Foldkit and Effect presets, read-only
 pnpm typecheck   # the shell (tsconfig.json), the core (src/core/tsconfig.json) and the tests (e2e/tsconfig.json)
 pnpm arch        # import rules and the one-keyboard check
 pnpm build
-pnpm test:e2e    # every end-to-end test in headless Chromium
+pnpm test:e2e    # the end-to-end tests of the push gate, in headless Chromium
+pnpm test:ready  # before a merge: the push gate, every sweep and the scout
 ```
 
-`.githooks/pre-push` runs them in that order and gives the tests the build it just made. `pnpm install` turns the hook on (`prepare` sets `core.hooksPath`) and applies the Effect lint patch to `node_modules` (`postinstall`). `lint` itself changes nothing.
+`.githooks/pre-push` runs all but `test:ready` in that order and gives the tests the build it just made. `pnpm install` turns the hook on (`prepare` sets `core.hooksPath`) and applies the Effect lint patch to `node_modules` (`postinstall`). `lint` itself changes nothing.
 
 Use pnpm, never npm or npx. `package.json` pins its version for corepack. pnpm fails the install when a dependency has a build script it was not told to run, so a dependency that needs one goes under `allowBuilds` in `pnpm-workspace.yaml`.
 
@@ -72,7 +73,8 @@ A bug fix starts with a scenario that fails on the bug. Run it on the broken bui
 ### Run
 
 ```sh
-pnpm test:e2e                       # builds, then runs everything: scenarios, sweeps and named scripts, with no random scripts
+pnpm test:e2e                       # builds, then runs the push gate: scenarios, named scripts and the every-push sweeps
+pnpm test:ready                     # builds, then runs the push gate, every sweep and the scout, before a merge
 pnpm test:e2e -g "huge wheel"       # tests whose name matches
 pnpm test:e2e --trace on            # keeps a trace of each test; open one with pnpm exec playwright show-trace
 NULLPAD_DIST=/path/to/dist pnpm test:e2e   # tests a build made elsewhere, such as an old commit, without building
@@ -91,7 +93,7 @@ On a machine without Playwright's Chromium, install it once with `pnpm exec play
 | `browser-support.spec.ts`                                        | A browser without EditContext shows that nullpad needs Chrome or Edge instead of an editor that takes no typing.                                                                                                                                  |
 | `click-sweep.spec.ts`                                            | Clicks a grid across the whole window and checks that the cursor lands on the nearest drawn character boundary each time.                                                                                                                         |
 | `extremes.spec.ts`                                               | Giant and tiny wheel turns, 120,000-line pastes, line counts crossing 9,999 and 99,999, very long lines, AltGr keys, IME compositions.                                                                                                            |
-| `sweep.spec.ts`, `e2e/typist/sweeps.ts`                          | The sweeps: grids of scripts played on every push, each compared with a textarea.                                                                                                                                                                 |
+| `sweep.spec.ts`, `e2e/typist/sweeps.ts`                          | The sweeps: grids of scripts, each compared with a textarea. Some play on every push, the rest before a merge.                                                                                                                                    |
 | `typist.spec.ts`, `typist-flicker.spec.ts`, `e2e/typist/`        | The named scripts, which run on every push. The scout and the typist flicker checks, which run only with `TYPIST_SCOUT_MINUTES`. `run.ts` holds the comparison, `script.ts` the named scripts and accepted differences, and `scout.ts` the scout. |
 | `e2e/reporters/require-tests.ts`                                 | Fails a run in which no test ran, so a filter or a skip cannot turn the gate green.                                                                                                                                                               |
 
@@ -121,7 +123,7 @@ A script is a list of steps. A `text` step types one code point, or an ASCII run
 
 Backspace is judged against a bare EditContext element in a third browser context, not against the textarea. Before each Backspace the typist reads the textarea's own text nodes over the DevTools protocol, because Chrome keeps the halves of a joined line in separate nodes as nullpad keeps a join. The text node before the cursor goes into the EditContext, with the cursor moved to the next grapheme boundary, and the EditContext takes a real Backspace. The textarea takes its own Backspace too. Where the EditContext took more, the rest of that letter is deleted from the textarea as a selection, so the textarea holds the EditContext's result for the comparison and the steps after it. At a line start the textarea joins the lines itself.
 
-Three kinds of script run. Named scripts and sweeps run on every push. The scout runs before a merge.
+Three kinds of script run. Named scripts and the sweeps marked `every push` run on every push. The other sweeps and the scout run before a merge, with `pnpm test:ready`.
 
 #### Named scripts
 
@@ -131,7 +133,7 @@ Three kinds of script run. Named scripts and sweeps run on every push. The scout
 
 A sweep covers one class of bugs with a grid of scripts. It plays the same scripts on every run, so a failing row fails again until the bug is fixed. `e2e/typist/sweeps.ts` holds the table and `e2e/sweep.spec.ts` plays it.
 
-A sweep has a `name` that states its rule in plain words, and these lists.
+A sweep has a `name` that states its rule in plain words, `runs` that says whether it plays on every push or before a merge, and these lists.
 
 - `documents`. Each has a name and the steps that build it.
 - `placements`. Each has a name, the steps that put the cursor in a document, and its `moves`. A move is a short script, such as one key and then `y`, so the text shows where the cursor stood.
@@ -140,22 +142,24 @@ A row is one document, one placement and one move. Its script is the document's 
 
 A row types every step before its last placement step back to back, without comparing. It then compares after that step, where the placement left the cursor, and after each step of the move. A row passes when nullpad and the textarea agree each time, or when an accepted difference covers the text. A failing row prints as `document | placement | move | differs after step N of M | nullpad L:C textarea L:C | text same: true`. A row that throws prints `threw:` and the error in place of the step. The rows go round-robin to `TYPIST_SHARDS` shards (8 by default), and each shard prints how many rows it checked, how many differ, and how many differences each accepted difference covered.
 
-The two sweeps today:
+The sweeps today:
 
-- Up or Down, any key, Up or Down lands where a textarea lands. 6 documents (three short lines, a wrapped line of words, a long word that moved to the next row, one word longer than a row, a full row that ends in spaces, and rows of emoji and accents), 7 placements, and 52 moves in each: Up or Down, then any of 13 keys, then Up or Down. 2,184 rows.
-- One Backspace, Delete, Left or Right takes what a textarea takes around emoji, flags and accents. 447 documents: twelve pieces (a letter, an accent, two flag letters, a thumbs up, a skin tone, a man, a ZWJ, a heart, a variation selector, a Devanagari letter and a virama) in every ordered pair, and five fixed documents (Hangul, a keycap, a family, a flag split by an x), each built three ways. The builds are typed in order, typed on two lines and joined by Backspace, and the first part typed in front of the second. 4 placements (at the end, at the start, one Right from the start, and where the build left it), and each move is one key and then `y`. 4,470 rows.
+- Up or Down, any key, Up or Down lands where a textarea lands. Runs on every push. 6 documents (three short lines, a wrapped line of words, a long word that moved to the next row, one word longer than a row, a full row that ends in spaces, and rows of emoji and accents), 7 placements, and 52 moves in each: Up or Down, then any of 13 keys, then Up or Down. 2,184 rows, about 3 minutes on 4 cores.
+- One Backspace, Delete, Left or Right takes what a textarea takes around emoji, flags and accents. Runs before a merge, as two sweeps. The documents are twelve pieces (a letter, an accent, two flag letters, a thumbs up, a skin tone, a man, a ZWJ, a heart, a variation selector, a Devanagari letter and a virama) in every ordered pair, and five fixed documents (two of Hangul, a keycap, a family, a flag split by an x). Each move is one key and then `y`.
+  - Typed in order: 149 documents, 3 placements (at the end, at the start, one Right from the start). 894 rows.
+  - Met at a line join, or typed one in front of the other: 298 documents, the same 3 placements and where the build left the cursor. 2,980 rows.
 
-The two sweeps together take about 9 minutes on 4 cores, so add a row only for a shape the grid does not reach. When a bug turns up, run the sweep on the broken build first and see the new row fail.
+The second rule has 52 named scripts on every push, and its sweeps would add about 5 minutes to each push on 4 cores, so they run before a merge. Add a row only for a shape the grid does not reach. When a bug turns up, run the sweep on the broken build first and see the new row fail.
 
 1. If the bug fits a sweep's rule, add the document that shows it. If the bug needs a cursor spot or a key the grid lacks, add a placement or a move too. Set `scripts` to the new count.
-2. If the bug breaks another rule, add a sweep to `sweeps` with its own name, documents, placements and `scripts`.
+2. If the bug breaks another rule, add a sweep to `sweeps` with its own name, documents, placements, `scripts` and `runs`.
 3. Add the shortest failing script to `namedScripts`. The sweep finds the neighbors of the bug, and the named script keeps the bug itself.
 
-`pnpm test:sweep` plays the sweeps alone.
+`pnpm test:sweep` plays every sweep alone, the ones that run before a merge too.
 
 #### The scout
 
-The scout plays random scripts, aimed at the texts the sweeps use. It looks for bugs the grids miss. It does not run on a push. Run it before a merge with `pnpm test:scout`.
+The scout plays random scripts, aimed at the texts the sweeps use. It looks for bugs the grids miss. It does not run on a push. `pnpm test:ready` runs it before a merge, and `pnpm test:scout` runs it alone.
 
 `scoutScript(seed)` in `e2e/typist/scout.ts` makes these draws in order:
 
@@ -171,8 +175,9 @@ Every scout find becomes a sweep row, or a new sweep, and a named script. If a m
 #### Commands
 
 ```sh
-pnpm test:e2e                                           # everything: scenarios, sweeps and named scripts, with no random scripts
-pnpm test:sweep                                         # the sweeps alone
+pnpm test:e2e                                           # the push gate: scenarios, named scripts and the every-push sweeps, with no random scripts
+pnpm test:ready                                         # before a merge: the push gate, every sweep, the scout for 5 minutes and the typist flicker checks
+pnpm test:sweep                                         # every sweep alone
 pnpm test:typist                                        # the named scripts alone
 pnpm test:scout                                         # the scout for 5 minutes, and the typist flicker checks
 TYPIST_SCOUT_MINUTES=1 pnpm test:typist                 # the scout for any number of minutes
@@ -197,5 +202,6 @@ Each sweep shard and each scout shard reports how many mismatches each accepted 
 ## Process
 
 - Tests are end-to-end only. See Testing.
+- Before a PR is ready, `pnpm test:ready` passes on its tip, and the PR body says so.
 - Before a PR is ready, an agent that did not write the change breaks it. It plants bugs, drives the app, and reports what got through.
 - Few comments. Name things better instead. Skip the `// MODEL` section headers that `FOLDKIT.md` suggests.

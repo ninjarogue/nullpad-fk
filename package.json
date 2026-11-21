@@ -16,9 +16,10 @@
     "arch:core-ts-only": "bad=$(find src/core -type f ! -name '*.ts' ! -name '*.mts' ! -name '*.cts' ! -name tsconfig.json); test -z \"$bad\" || { echo \"src/core holds only .ts, .mts and .cts files. Found:\"; echo \"$bad\"; exit 1; }",
     "arch:one-keyboard": "sh scripts/one-keyboard.sh",
     "test:e2e": "playwright test",
-    "test:sweep": "playwright test e2e/sweep.spec.ts",
+    "test:sweep": "NULLPAD_READY=1 playwright test e2e/sweep.spec.ts",
     "test:typist": "playwright test typist",
     "test:scout": "TYPIST_SCOUT_MINUTES=5 playwright test typist",
+    "test:ready": "NULLPAD_READY=1 TYPIST_SCOUT_MINUTES=5 playwright test",
     "postinstall": "effect-tsgo patch --no-typescript --oxlint",
     "prepare": "test -e .git && git config core.hooksPath .githooks || true"
   },

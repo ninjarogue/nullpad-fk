@@ -31,7 +31,7 @@ const describe = (divergence: Divergence): string =>
     `  textarea ${JSON.stringify(divergence.textarea.text)} [${hex(divergence.textarea.text)}] at ${divergence.textarea.line}:${divergence.textarea.column}${rowsOf(divergence.textarea)}`,
   ].join('\n')
 
-test('typist: every named script matches a textarea, but for a known malformed sequence', async ({
+test('typist: every named script matches a textarea, with Backspace as an EditContext takes it, but for a known malformed sequence', async ({
   browser,
   baseURL,
 }) => {

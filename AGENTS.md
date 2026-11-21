@@ -115,6 +115,8 @@ The fixture fails any test whose page logs an error or throws. A known bug that 
 
 The typist types random scripts into nullpad and into a `<textarea>`, each in its own browser context, and compares the text, the caret (line and grapheme column) and where each line breaks into rows after every step. The textarea is in nullpad's font and exactly as wide as nullpad's text column, so it wraps at the same edge. Rows are compared while nullpad's screen shows the whole text.
 
+Backspace is judged against a bare EditContext element in a third browser context, not against the textarea. Before each Backspace the typist reads the textarea's own text nodes over the DevTools protocol, because Chrome keeps the halves of a joined line in separate nodes as nullpad keeps a join. The text node before the caret goes into the EditContext, with the caret moved to the next grapheme boundary, and the EditContext takes a real Backspace. The textarea takes its own Backspace too. Where the EditContext took more, the rest of that letter is deleted from the textarea as a selection, so the textarea holds the EditContext's result for the comparison and the steps after it. At a line start the textarea joins the lines itself.
+
 Half the scripts are cluster scripts. They mix whole emoji, flag and accented clusters typed one code point at a time, lone code points, and the keys Left, Right, Home, End, Ctrl+Home, Ctrl+End, Backspace, Delete and Enter. Up and Down are left out there, because on emoji rows a textarea aims by pixels and nullpad by cells. The other half are prose scripts. They insert a line of 50 to 90 characters at once, as an IME does, so the wrap edge is near, then type one or two words at a time with hyphens, dashes, URLs, markdown, brackets, quotes and punctuation key by key, with gaps of one to three spaces and runs of spaces, and press the same keys plus Up and Down. Every character in them is one cell wide. Page Up, Page Down and Tab are left out of both.
 
 On a mismatch it replays the script from empty, shrinks it to the shortest script that still fails, and prints the sequence seed, the shortest script, and the shortest script as JSON for `namedScripts` in `e2e/typist/script.ts`.
@@ -129,11 +131,12 @@ TYPIST_SEQUENCES=500 pnpm test:typist    # any number
 
 Every run prints its run seed. A script that once broke goes into `namedScripts` so it runs on every push.
 
-Accepted differences. Where a malformed sequence makes Chrome's textarea and `Intl.Segmenter` disagree, nullpad follows `Intl.Segmenter`. A mismatch counts as accepted, not failed, only when the text around it holds one of these, listed in `acceptedDifferences` in `e2e/typist/script.ts`:
+Accepted differences. Where a malformed sequence makes Chrome's textarea or EditContext disagree with `Intl.Segmenter`, nullpad follows `Intl.Segmenter`. A mismatch counts as accepted, not failed, only when the text around it holds one of these, listed in `acceptedDifferences` in `e2e/typist/script.ts`:
 
 - ZWJ next to a non-pictograph.
 - A mark, ZWJ or skin tone on a flag letter.
 - A skin tone after a character that takes none.
+- A virama with no letter before it.
 - A variation selector not after a pictograph.
 
 Each run reports how many mismatches each accepted difference covered.

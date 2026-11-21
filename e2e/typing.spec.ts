@@ -159,20 +159,32 @@ test('a character typed with Ctrl+Alt, as Windows sends AltGr, is left to the br
   expect(await nullpad.text()).toBe('@€{\\|~ł')
 })
 
-test('Backspace after e and a combining acute takes the mark alone, as Chrome does', async ({
+test('Backspace takes the whole letter before the caret, as an EditContext does', async ({
   nullpad,
 }) => {
-  await nullpad.type('e')
-  await nullpad.page.keyboard.insertText('́')
-  expect(await nullpad.text()).toBe('é')
-  expect(
-    (await nullpad.status()).column,
-    'e and its mark are one character',
-  ).toBe(2)
-  await nullpad.press('Backspace')
-  expect(await nullpad.text(), 'the e stays').toBe('e')
-  await nullpad.press('Backspace')
-  expect(await nullpad.text()).toBe('')
+  const letters: ReadonlyArray<
+    Readonly<{ name: string; typed: string; left: string }>
+  > = [
+    { name: 'e and an acute', typed: 'ae\u0301', left: 'a' },
+    { name: 'e and two stacked marks', typed: 'ae\u0301\u0308', left: 'a' },
+    { name: 'the conjunct क्ष', typed: 'aक्ष', left: 'a' },
+    { name: 'स्ते, the last letter of नमस्ते', typed: 'नमस्ते', left: 'नम' },
+    { name: 'Hangul jamo ᄀ ᅡ ᆨ', typed: 'a\u1100\u1161\u11a8', left: 'a' },
+    { name: 'Thai กำ', typed: 'aกำ', left: 'a' },
+    { name: 'Arabic بَ', typed: 'aبَ', left: 'a' },
+  ]
+  for (const { name, typed, left } of letters) {
+    await nullpad.press('Control+Home')
+    await nullpad.press('Delete', 8)
+    for (const point of typed) {
+      await nullpad.page.keyboard.insertText(point)
+    }
+    expect(await nullpad.text(), `${name} typed one code point at a time`).toBe(
+      typed,
+    )
+    await nullpad.press('Backspace')
+    expect(await nullpad.text(), `Backspace after ${name}`).toBe(left)
+  }
 })
 
 test('300 keys sent while the main thread is blocked land in order', async ({

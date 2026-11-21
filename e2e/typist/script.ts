@@ -286,7 +286,7 @@ export const namedScripts: ReadonlyArray<
     ],
   },
   {
-    name: 'Backspace takes a combining mark alone',
+    name: 'Backspace takes e with its combining mark',
     script: [text('e'), text('́'), key('Backspace'), text('y')],
   },
   {
@@ -536,7 +536,7 @@ export const namedScripts: ReadonlyArray<
     ],
   },
   {
-    name: 'Backspace at the end of a keycap joined to its digit takes the keycap mark alone',
+    name: 'Backspace at the end of a keycap joined to its digit takes the variation selector and keycap mark',
     script: [
       text('1'),
       key('Enter'),
@@ -549,7 +549,7 @@ export const namedScripts: ReadonlyArray<
     ],
   },
   {
-    name: 'Backspace at a line join takes the last jamo of the line above',
+    name: 'Backspace at a line join takes the syllable the line above ends with',
     script: [
       ...codePoints('ab가'),
       key('Enter'),
@@ -561,7 +561,7 @@ export const namedScripts: ReadonlyArray<
     ],
   },
   {
-    name: 'Backspace at a line join takes the ZWJ the line above ends with',
+    name: 'Backspace at a line join takes the emoji and ZWJ the line above ends with',
     script: [
       ...codePoints('ab👨‍'),
       key('Enter'),
@@ -573,19 +573,19 @@ export const namedScripts: ReadonlyArray<
     ],
   },
   {
-    name: 'Backspace takes the last jamo of a syllable',
+    name: 'Backspace takes a whole syllable of jamo',
     script: [...codePoints('ab가'), key('Backspace'), text('z')],
   },
   {
-    name: 'Backspace takes the last consonant of a conjunct',
+    name: 'Backspace takes a whole conjunct',
     script: [...codePoints('abक्ष'), key('Backspace'), text('z')],
   },
   {
-    name: 'Backspace takes stacked combining marks one at a time',
+    name: 'Backspace takes a letter with its stacked combining marks',
     script: [...codePoints('ab\u0301\u0302'), key('Backspace'), text('z')],
   },
   {
-    name: 'Backspace takes नमस्ते apart one code point at a time',
+    name: 'Backspace takes नमस्ते apart one letter at a time',
     script: [
       ...codePoints('नमस्ते'),
       key('Backspace'),
@@ -594,11 +594,11 @@ export const namedScripts: ReadonlyArray<
     ],
   },
   {
-    name: 'Backspace takes the vowel sign off Thai กำ',
+    name: 'Backspace takes Thai กำ whole',
     script: [...codePoints('กำ'), key('Backspace'), text('z')],
   },
   {
-    name: 'Backspace takes Arabic harakat one at a time',
+    name: 'Backspace takes Arabic letters with their harakat',
     script: [
       ...codePoints('مَرْحَبًا'),
       key('Backspace'),
@@ -608,15 +608,15 @@ export const namedScripts: ReadonlyArray<
     ],
   },
   {
-    name: 'Backspace takes a trailing ZWJ alone',
+    name: 'Backspace takes a trailing ZWJ with its letter',
     script: [...codePoints('e‍'), key('Backspace'), text('z')],
   },
   {
-    name: 'Backspace takes a skin tone off a heart',
+    name: 'Backspace takes a heart with its skin tone',
     script: [...codePoints('❤🏽'), key('Backspace'), text('z')],
   },
   {
-    name: 'Backspace takes a skin tone off a combining mark',
+    name: 'Backspace takes a letter with its mark and a skin tone',
     script: [...codePoints('á🏽'), key('Backspace'), text('z')],
   },
   {
@@ -795,9 +795,9 @@ export const namedScripts: ReadonlyArray<
 type Difference = Readonly<{ name: string; pattern: RegExp }>
 
 /**
- * Malformed sequences where nullpad follows Intl.Segmenter and Chrome's textarea does not: where a caret left inside a
- * grapheme settles after inserted text. A mismatch counts as accepted only when the text around it holds one of these,
- * in a named script as in a random one.
+ * Malformed sequences where nullpad follows Intl.Segmenter and Chrome's textarea, or its EditContext for Backspace,
+ * does not: where a caret left inside a grapheme settles after inserted text, and how much Backspace takes. A mismatch
+ * counts as accepted only when the text around it holds one of these, in a named script as in a random one.
  */
 export const acceptedDifferences: ReadonlyArray<Difference> = [
   {

@@ -1,44 +1,580 @@
 import { Array, Effect, Option, Queue, Stream } from 'effect'
-import { Mount } from 'foldkit'
-import type { Attribute, Html, HtmlBuilder } from 'foldkit/html'
+import { Mount, Render } from 'foldkit'
+import type { Html, HtmlBuilder } from 'foldkit/html'
 
-import type { Frame, Mode, Row, Span, SpanKind } from './core/editor'
+import {
+  type Answer,
+  type Frame,
+  type Landing,
+  type Mode,
+  type PaintedLine,
+  Query,
+} from './core/editor'
 import type { Keyboard } from './keyboard'
 import { Message } from './message'
 
 type SurfaceMessage =
   | typeof Message.ResizedScreen.Type
-  | typeof Message.ScrolledWheel.Type
+  | typeof Message.ScrolledSurface.Type
   | typeof Message.ClickedText.Type
-
-const probeCells = 100
 
 const pixels = (value: string): number => Number.parseFloat(value) || 0
 
-/**
- * The pointer as rows down from the top of the text area and cells from its left edge, the gutter included.
- * Only the core knows what text is there, and it reads the place against the editor after every input before
- * the click, so a click right after a keystroke lands where the keystroke left the text.
- */
-const pointAt = (
-  surface: HTMLElement,
-  style: CSSStyleDeclaration,
-  cell: Readonly<{ width: number; height: number }>,
-  event: PointerEvent,
-): typeof Message.ClickedText.Type => {
+const segmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' })
+
+type Box = Readonly<{ left: number; top: number; width: number }>
+
+/** JetBrains Mono advances 0.6 em a character: the width of the caret past the end of a line. */
+const monospaceAdvance = 0.6
+
+/** The narrowest the caret gets, at the edge of the text column, where Chrome draws its own caret. */
+const thinnest = 2
+
+/** The drawn geometry the queries read: where the text column sits and how tall a row is. */
+type Sheet = Readonly<{
+  surface: HTMLElement
+  rowHeight: number
+  viewTop: number
+  viewBottom: number
+}>
+
+const sheetOf = (surface: HTMLElement): Sheet => {
+  const style = getComputedStyle(surface)
   const box = surface.getBoundingClientRect()
-  return Message.ClickedText({
-    row: Math.floor(
-      (event.clientY - box.top - pixels(style.paddingTop)) / cell.height,
+  return {
+    surface,
+    rowHeight: pixels(style.lineHeight),
+    viewTop: box.top + pixels(style.paddingTop),
+    viewBottom: box.bottom - pixels(style.paddingBottom),
+  }
+}
+
+const findSurface = (): Option.Option<HTMLElement> =>
+  Option.fromNullishOr(document.querySelector<HTMLElement>('.surface'))
+
+const lineElement = (
+  surface: HTMLElement,
+  line: number,
+): Option.Option<HTMLElement> =>
+  Option.fromNullishOr(
+    surface.querySelector<HTMLElement>(`.line[data-index="${line}"]`),
+  )
+
+const isGhost = (node: Node): boolean =>
+  node instanceof HTMLElement && node.hasAttribute('data-ghost')
+
+const textNodes = (line: HTMLElement): ReadonlyArray<Text> =>
+  Array.filter(
+    Array.fromIterable(line.childNodes),
+    (node): node is Text => node instanceof Text,
+  )
+
+const lineText = (line: HTMLElement): string =>
+  Array.join(
+    Array.map(textNodes(line), node => node.data),
+    '',
+  )
+
+/** The DOM point of a column, in the text node that holds it, or the end of the one before a join. */
+const domPoint = (
+  line: HTMLElement,
+  column: number,
+): Readonly<{ node: Node; offset: number }> => {
+  const nodes = textNodes(line)
+  const found = Array.reduce(
+    nodes,
+    {
+      rest: column,
+      point: Option.none<Readonly<{ node: Node; offset: number }>>(),
+    },
+    (search, node) =>
+      Option.isSome(search.point) || search.rest > node.length
+        ? Option.isSome(search.point)
+          ? search
+          : { rest: search.rest - node.length, point: search.point }
+        : { rest: 0, point: Option.some({ node, offset: search.rest }) },
+  )
+  return Option.getOrElse(found.point, () => ({ node: line, offset: 0 }))
+}
+
+/** The column of a DOM point inside a drawn line. A point inside the preedit is at the caret, where it is drawn. */
+const columnOf = (line: HTMLElement, node: Node, offset: number): number => {
+  const children = Array.fromIterable(line.childNodes)
+  const stop =
+    node === line
+      ? offset
+      : Array.findFirstIndex(
+          children,
+          child => child === node || child.contains(node),
+        ).pipe(Option.getOrElse(() => children.length))
+  const before = Array.reduce(children.slice(0, stop), 0, (sum, child) =>
+    child instanceof Text ? sum + child.length : sum,
+  )
+  return node instanceof Text && node.parentNode === line
+    ? before + offset
+    : before
+}
+
+const lineOfNode = (node: Node): Option.Option<HTMLElement> =>
+  Option.fromNullishOr(
+    (node instanceof Element ? node : node.parentElement)?.closest<HTMLElement>(
+      '.line',
     ),
-    cell: (event.clientX - box.left - pixels(style.paddingLeft)) / cell.width,
+  )
+
+const indexOf = (line: HTMLElement): number => Number(line.dataset['index'])
+
+const rangeRect = (
+  line: HTMLElement,
+  from: number,
+  to: number,
+): Option.Option<DOMRect> => {
+  const start = domPoint(line, from)
+  const end = domPoint(line, to)
+  const range = document.createRange()
+  range.setStart(start.node, start.offset)
+  range.setEnd(end.node, end.offset)
+  const rects = range.getClientRects()
+  return Option.fromNullishOr(rects[0])
+}
+
+const graphemeAfter = (text: string, column: number): number =>
+  Option.match(
+    Option.fromNullishOr(
+      segmenter.segment(text.slice(column, column + 64)).containing(0),
+    ),
+    {
+      onNone: () => column,
+      onSome: ({ segment }) => column + segment.length,
+    },
+  )
+
+const graphemeBefore = (text: string, column: number): number => {
+  const start = Math.max(0, column - 64)
+  return Option.match(
+    Option.fromNullishOr(
+      segmenter
+        .segment(text.slice(start, column))
+        .containing(column - start - 1),
+    ),
+    { onNone: () => column, onSome: ({ index }) => start + index },
+  )
+}
+
+/** The left edge of a line's text and the right edge of its column, in viewport pixels. */
+const textEdges = (
+  line: HTMLElement,
+): Readonly<{ left: number; right: number; top: number }> => {
+  const style = getComputedStyle(line)
+  const box = line.getBoundingClientRect()
+  return {
+    left: box.left + pixels(style.paddingLeft),
+    right: box.right - pixels(style.paddingRight),
+    top: box.top,
+  }
+}
+
+/** Whether the line wraps at this column: the text after it is drawn on a lower row than the text before it. */
+const wrapsAt = (line: HTMLElement, column: number): boolean => {
+  const text = lineText(line)
+  if (column <= 0 || column >= text.length) {
+    return false
+  }
+  return Option.match(
+    Option.all([
+      rangeRect(line, graphemeBefore(text, column), column),
+      rangeRect(line, column, graphemeAfter(text, column)),
+    ]),
+    {
+      onNone: () => false,
+      onSome: ([before, after]) => after.top > before.top + 1,
+    },
+  )
+}
+
+/**
+ * Where the caret is drawn: on the grapheme after it, or after the one before it when it ends its line, or ends its
+ * row and the core asks for the end of the upper row. It never crosses the column's right edge: a caret among spaces
+ * that hang past it, or after a row that fills it, narrows to fit at the edge, where Chrome draws its own.
+ */
+const caretBox = (
+  line: HTMLElement,
+  column: number,
+  atRowEnd: boolean,
+): Box => {
+  const edges = textEdges(line)
+  const style = getComputedStyle(line)
+  const cell = pixels(style.fontSize) * monospaceAdvance
+  const row = pixels(style.lineHeight)
+  const fitted = ({ left, top, width }: Box): Box => {
+    const inside = Math.min(left, edges.right - thinnest)
+    return {
+      left: inside,
+      top: edges.top + Math.floor((top - edges.top + row / 2) / row) * row,
+      width: Math.max(thinnest, Math.min(width, edges.right - inside)),
+    }
+  }
+  const ghost = Array.findFirst(Array.fromIterable(line.childNodes), isGhost)
+  const preeditEnd = Option.flatMap(ghost, element =>
+    element instanceof Element
+      ? Array.last(Array.fromIterable(element.getClientRects()))
+      : Option.none(),
+  )
+  if (Option.isSome(preeditEnd)) {
+    return fitted({
+      left: preeditEnd.value.right,
+      top: preeditEnd.value.top,
+      width: cell,
+    })
+  }
+  const text = lineText(line)
+  const downstream =
+    !(atRowEnd && wrapsAt(line, column)) && column < text.length
+      ? rangeRect(line, column, graphemeAfter(text, column))
+      : Option.none()
+  return fitted(
+    Option.match(downstream, {
+      onSome: rect => ({ left: rect.left, top: rect.top, width: rect.width }),
+      onNone: () =>
+        Option.match(
+          column > 0
+            ? rangeRect(line, graphemeBefore(text, column), column)
+            : Option.none(),
+          {
+            onSome: rect => ({ left: rect.right, top: rect.top, width: cell }),
+            onNone: () => ({ left: edges.left, top: edges.top, width: cell }),
+          },
+        ),
+    }),
+  )
+}
+
+/** The browser's caret position at a viewport point, as a line and column, if the point falls on drawn text. */
+const pointAt = (
+  x: number,
+  y: number,
+): Option.Option<Readonly<{ line: HTMLElement; column: number }>> => {
+  const position = document.caretPositionFromPoint(x, y)
+  if (position === null) {
+    return Option.none()
+  }
+  return Option.map(lineOfNode(position.offsetNode), line => ({
+    line,
+    column: columnOf(line, position.offsetNode, position.offset),
+  }))
+}
+
+/** A landing at a point, drawn at the end of the upper row when it sits where its line wraps and the point is above. */
+const landAt = (
+  found: Readonly<{ line: HTMLElement; column: number }>,
+  y: number,
+): Landing => {
+  const { line, column } = found
+  const upper =
+    wrapsAt(line, column) &&
+    Option.match(
+      rangeRect(line, graphemeBefore(lineText(line), column), column),
+      { onNone: () => false, onSome: rect => y < rect.bottom },
+    )
+  return { _tag: 'At', line: indexOf(line), column, atRowEnd: upper }
+}
+
+/** Scrolls the least that brings viewport y on screen, and returns where that y is drawn now. */
+const bringOnScreen = (sheet: Sheet, y: number): number => {
+  const below = y - (sheet.viewBottom - 1)
+  const above = sheet.viewTop + 1 - y
+  const delta = below > 0 ? below : above > 0 ? -above : 0
+  if (delta !== 0) {
+    const before = sheet.surface.scrollTop
+    sheet.surface.scrollTop = before + delta
+    return y - (sheet.surface.scrollTop - before)
+  }
+  return y
+}
+
+const stay = (aim: number): Answer => ({ landing: { _tag: 'Stay' }, aim })
+
+const lastLineIndex = (surface: HTMLElement): number =>
+  Number(surface.dataset['lastLine'])
+
+/** Up, Down and paging: from the caret's row, `distance` pixels down (or up) at x `aim` from the text's left edge. */
+const verticalAnswer = (
+  sheet: Sheet,
+  line: HTMLElement,
+  from: Readonly<{ column: number; atRowEnd: boolean }>,
+  distance: number,
+  goal: Option.Option<number>,
+): Answer => {
+  const edges = textEdges(line)
+  const caret = caretBox(line, from.column, from.atRowEnd)
+  const aim = Option.getOrElse(goal, () => caret.left - edges.left)
+  const target = caret.top + sheet.rowHeight / 2 + distance
+  const first = sheet.surface.querySelector<HTMLElement>('.line')
+  const lines = sheet.surface.querySelectorAll<HTMLElement>('.line')
+  const last = lines[lines.length - 1]
+  if (
+    first !== null &&
+    indexOf(first) === 0 &&
+    target < first.getBoundingClientRect().top
+  ) {
+    return { landing: { _tag: 'TextStart' }, aim }
+  }
+  if (
+    last !== undefined &&
+    indexOf(last) === lastLineIndex(sheet.surface) &&
+    target > last.getBoundingClientRect().bottom
+  ) {
+    return { landing: { _tag: 'TextEnd' }, aim }
+  }
+  const y = bringOnScreen(sheet, target)
+  return Option.match(pointAt(textEdges(line).left + aim, y), {
+    onNone: () => stay(aim),
+    onSome: found => ({ landing: landAt(found, y), aim }),
   })
 }
 
-const observe = (
-  surface: HTMLElement,
-  probe: Element,
-): Stream.Stream<SurfaceMessage> =>
+/** One grapheme along the line, or to its row's start or end, as the browser moves its own caret. */
+const selectionMove = (
+  line: HTMLElement,
+  column: number,
+  direction: 'forward' | 'backward',
+  granularity: 'character' | 'lineboundary',
+): Option.Option<number> => {
+  const selection = document.getSelection()
+  if (selection === null) {
+    return Option.none()
+  }
+  const { node, offset } = domPoint(line, column)
+  selection.collapse(node, offset)
+  selection.modify('move', direction, granularity)
+  const moved =
+    selection.focusNode !== null && line.contains(selection.focusNode)
+      ? Option.some(columnOf(line, selection.focusNode, selection.focusOffset))
+      : Option.none()
+  selection.removeAllRanges()
+  return moved
+}
+
+const at = (line: HTMLElement, column: number, atRowEnd: boolean): Answer => ({
+  landing: { _tag: 'At', line: indexOf(line), column, atRowEnd },
+  aim: 0,
+})
+
+/** A row edge. A caret drawn at the end of the upper row starts Home from inside that row. */
+const rowEdgeAnswer = (
+  line: HTMLElement,
+  column: number,
+  atRowEnd: boolean,
+  edge: 'Start' | 'End',
+): Answer => {
+  const upstream = atRowEnd && wrapsAt(line, column)
+  if (edge === 'End' && upstream) {
+    return at(line, column, true)
+  }
+  const from =
+    edge === 'Start' && upstream
+      ? graphemeBefore(lineText(line), column)
+      : column
+  return Option.match(
+    selectionMove(
+      line,
+      from,
+      edge === 'Start' ? 'backward' : 'forward',
+      'lineboundary',
+    ),
+    {
+      onNone: () => stay(0),
+      onSome: landed =>
+        at(line, landed, edge === 'End' && wrapsAt(line, landed)),
+    },
+  )
+}
+
+/** A click: the text column catches every x, a point below the last line is the end of the text. */
+const pointAnswer = (sheet: Sheet, x: number, y: number): Answer => {
+  const lines = sheet.surface.querySelectorAll<HTMLElement>('.line')
+  const last = lines[lines.length - 1]
+  if (
+    last !== undefined &&
+    indexOf(last) === lastLineIndex(sheet.surface) &&
+    y >= last.getBoundingClientRect().bottom
+  ) {
+    return { landing: { _tag: 'TextEnd' }, aim: 0 }
+  }
+  const row = Math.min(sheet.viewBottom - 1, Math.max(sheet.viewTop + 1, y))
+  const hit = Array.findFirst(Array.fromIterable(lines), line => {
+    const box = line.getBoundingClientRect()
+    return row >= box.top && row < box.bottom
+  })
+  return Option.match(hit, {
+    onNone: () => stay(0),
+    onSome: line => {
+      const edges = textEdges(line)
+      const clampedX = Math.min(edges.right - 0.5, Math.max(edges.left, x))
+      return Option.match(pointAt(clampedX, row), {
+        onNone: () => stay(0),
+        onSome: found => ({ landing: landAt(found, row), aim: 0 }),
+      })
+    },
+  })
+}
+
+const pageDistance = (sheet: Sheet): number => {
+  const rows = Math.floor(
+    (sheet.viewBottom - sheet.viewTop) / sheet.rowHeight + 0.01,
+  )
+  return Math.max(1, Math.floor((rows * 7) / 8)) * sheet.rowHeight
+}
+
+const answer = (sheet: Sheet, query: Query): Answer =>
+  Query.match(query, {
+    Point: ({ x, y }) => pointAnswer(sheet, x, y),
+    Step: ({ at: from, direction }) =>
+      Option.match(lineElement(sheet.surface, from.line), {
+        onNone: () => stay(0),
+        onSome: line =>
+          Option.match(
+            selectionMove(
+              line,
+              from.column,
+              direction === 'Forward' ? 'forward' : 'backward',
+              'character',
+            ),
+            {
+              onNone: () => stay(0),
+              onSome: column => at(line, column, false),
+            },
+          ),
+      }),
+    RowEdge: ({ at: from, atRowEnd, edge }) =>
+      Option.match(lineElement(sheet.surface, from.line), {
+        onNone: () => stay(0),
+        onSome: line => rowEdgeAnswer(line, from.column, atRowEnd, edge),
+      }),
+    Vertical: ({ at: from, atRowEnd, rows, goal }) =>
+      Option.match(lineElement(sheet.surface, from.line), {
+        onNone: () => stay(Option.getOrElse(goal, () => 0)),
+        onSome: line =>
+          verticalAnswer(
+            sheet,
+            line,
+            { column: from.column, atRowEnd },
+            rows * sheet.rowHeight,
+            goal,
+          ),
+      }),
+    Page: ({ at: from, atRowEnd, direction }) =>
+      Option.match(lineElement(sheet.surface, from.line), {
+        onNone: () => stay(0),
+        onSome: line =>
+          verticalAnswer(
+            sheet,
+            line,
+            { column: from.column, atRowEnd },
+            direction * pageDistance(sheet),
+            Option.none(),
+          ),
+      }),
+  })
+
+const drawnRevision = (): number =>
+  Option.match(findSurface(), {
+    onNone: () => Number.POSITIVE_INFINITY,
+    onSome: surface => Number(surface.dataset['revision']),
+  })
+
+/** Waits, a few frames at most, until the screen shows `revision`. */
+const untilDrawn = (revision: number, frames: number): Effect.Effect<void> =>
+  drawnRevision() >= revision || frames === 0
+    ? Effect.void
+    : Render.afterCommit.pipe(
+        Effect.flatMap(() => untilDrawn(revision, frames - 1)),
+      )
+
+/** The browser's answer to a query, read from a screen that shows every input before it. */
+export const locate = (query: Query, revision: number): Effect.Effect<Answer> =>
+  untilDrawn(revision, 8).pipe(
+    Effect.map(() =>
+      Option.match(findSurface(), {
+        onNone: () => stay(0),
+        onSome: surface => answer(sheetOf(surface), query),
+      }),
+    ),
+  )
+
+/** Moves the drawn caret to the caret's place in the drawn text. The view draws the text; this draws only the caret. */
+const drawCaret = (surface: HTMLElement): void => {
+  const caret = surface.querySelector<HTMLElement>('#caret')
+  if (caret === null) {
+    return
+  }
+  const line = lineElement(surface, Number(surface.dataset['caretLine']))
+  Option.match(line, {
+    onNone: () => {
+      caret.style.display = 'none'
+    },
+    onSome: element => {
+      const box = caretBox(
+        element,
+        Number(surface.dataset['caretColumn']),
+        surface.dataset['caretEnd'] === 'true',
+      )
+      const frame = surface.getBoundingClientRect()
+      caret.style.display = ''
+      caret.style.left = `${box.left - frame.left + surface.scrollLeft}px`
+      caret.style.top = `${box.top - frame.top + surface.scrollTop}px`
+      caret.style.width = `${box.width}px`
+    },
+  })
+}
+
+/** Scrolls the drawn caret on screen once the screen shows it: as little as it takes, or its row to the top. */
+export const revealCaret = (align: 'Nearest' | 'Top'): Effect.Effect<void> =>
+  Render.afterCommit.pipe(
+    Effect.map(() =>
+      Option.map(findSurface(), surface => {
+        drawCaret(surface)
+        surface.querySelector('#caret')?.scrollIntoView({
+          block: align === 'Top' ? 'start' : 'nearest',
+          inline: 'nearest',
+        })
+      }),
+    ),
+  )
+
+/** The first line at the top of the screen, counting undrawn lines as one row each, as the spacers draw them. */
+const topLine = (surface: HTMLElement, sheet: Sheet): number => {
+  const lines = Array.fromIterable(
+    surface.querySelectorAll<HTMLElement>('.line'),
+  )
+  const visible = Array.findFirst(
+    lines,
+    line => line.getBoundingClientRect().bottom > sheet.viewTop + 1,
+  )
+  return Option.match(visible, {
+    onNone: () =>
+      Option.match(Array.last(lines), {
+        onNone: () => 0,
+        onSome: last =>
+          indexOf(last) +
+          Math.max(
+            1,
+            Math.ceil(
+              (sheet.viewTop - last.getBoundingClientRect().bottom) /
+                sheet.rowHeight,
+            ),
+          ),
+      }),
+    onSome: line => {
+      const above = line.getBoundingClientRect().top - sheet.viewTop
+      return above > 1
+        ? Math.max(0, indexOf(line) - Math.ceil(above / sheet.rowHeight))
+        : indexOf(line)
+    },
+  })
+}
+
+const observe = (surface: HTMLElement): Stream.Stream<SurfaceMessage> =>
   Stream.callback<SurfaceMessage>(queue =>
     Effect.gen(function* () {
       const style = getComputedStyle(surface)
@@ -49,49 +585,39 @@ const observe = (
         Effect.sync(() => {
           const controller = new AbortController()
           const { signal } = controller
-          const cell = { width: 1, height: 1, rows: 1 }
-          const wheel = { carry: 0 }
-
           const measure = () => {
-            const probeBox = probe.getBoundingClientRect()
-            const box = surface.getBoundingClientRect()
-            const width =
-              box.width - pixels(style.paddingLeft) - pixels(style.paddingRight)
-            const height =
-              box.height -
-              pixels(style.paddingTop) -
-              pixels(style.paddingBottom)
-            cell.width = probeBox.width / probeCells
-            cell.height = probeBox.height
-            cell.rows = Math.floor(height / cell.height + 0.01)
+            const sheet = sheetOf(surface)
             Queue.offerUnsafe(
               queue,
               Message.ResizedScreen({
-                columns: Math.floor(width / cell.width + 0.01),
-                rows: cell.rows,
+                rows: Math.floor(
+                  (sheet.viewBottom - sheet.viewTop) / sheet.rowHeight + 0.01,
+                ),
               }),
             )
+            drawCaret(surface)
           }
-          const observer = new ResizeObserver(measure)
-          observer.observe(surface)
-          observer.observe(probe)
-
+          const resizes = new ResizeObserver(measure)
+          resizes.observe(surface)
+          const patches = new MutationObserver(() => drawCaret(surface))
+          patches.observe(surface, {
+            attributes: true,
+            attributeFilter: [
+              'data-revision',
+              'data-caret-line',
+              'data-caret-column',
+              'data-caret-end',
+            ],
+          })
           surface.addEventListener(
-            'wheel',
-            event => {
-              if (event.ctrlKey) {
-                return
-              }
-              wheel.carry +=
-                event.deltaMode === WheelEvent.DOM_DELTA_PIXEL
-                  ? event.deltaY / cell.height
-                  : event.deltaY
-              const rows = Math.trunc(wheel.carry)
-              if (rows !== 0) {
-                wheel.carry -= rows
-                Queue.offerUnsafe(queue, Message.ScrolledWheel({ rows }))
-              }
-            },
+            'scroll',
+            () =>
+              Queue.offerUnsafe(
+                queue,
+                Message.ScrolledSurface({
+                  top: topLine(surface, sheetOf(surface)),
+                }),
+              ),
             { signal, passive: true },
           )
           surface.addEventListener(
@@ -101,110 +627,70 @@ const observe = (
                 return
               }
               event.preventDefault()
-              Queue.offerUnsafe(queue, pointAt(surface, style, cell, event))
+              Queue.offerUnsafe(
+                queue,
+                Message.ClickedText({ x: event.clientX, y: event.clientY }),
+              )
             },
             { signal },
           )
-          return { controller, observer }
+          return { controller, resizes, patches }
         }),
-        ({ controller, observer }) =>
+        ({ controller, resizes, patches }) =>
           Effect.sync(() => {
             controller.abort()
-            observer.disconnect()
+            resizes.disconnect()
+            patches.disconnect()
           }),
       )
       return yield* Effect.never
     }),
   )
 
-/** Pixels to cells. The only code that measures the DOM, and it never writes to it. */
+/** Reports the screen height in rows, the line at its top, and clicks; draws the caret after each patch. */
 export const SurfacePort = Mount.defineStream('SurfacePort', {
-  messages: [Message.ResizedScreen, Message.ScrolledWheel, Message.ClickedText],
-  execute: ({ element, viewStateChanges }) => {
-    const probe = element.querySelector('.probe')
-    return element instanceof HTMLElement && probe !== null
+  messages: [
+    Message.ResizedScreen,
+    Message.ScrolledSurface,
+    Message.ClickedText,
+  ],
+  execute: ({ element, viewStateChanges }) =>
+    element instanceof HTMLElement
       ? viewStateChanges.pipe(
           Stream.switchMap(viewState =>
-            viewState === 'Live' ? observe(element, probe) : Stream.never,
+            viewState === 'Live' ? observe(element) : Stream.never,
           ),
         )
-      : Stream.never
-  },
+      : Stream.never,
 })
 
-/**
- * A boxed span is an inline-block `--cells` cells wide, the class `w`. A box of 0 cells holds spaces that hang past
- * the row's edge, and the class `hang` sets them in no room at all.
- */
-const boxed = (
-  span: Span,
-  className: string,
+const lineView = (
+  line: PaintedLine,
+  isCaretLine: boolean,
   h: HtmlBuilder<Message>,
-): ReadonlyArray<Attribute<Message>> =>
-  Option.match(span.box, {
-    onNone: () => [h.Class(className)],
-    onSome: cells => [
-      h.Class(`${className} w${cells === 0 ? ' hang' : ''}`.trim()),
-      h.Style({ '--cells': String(cells) }),
-    ],
-  })
-
-const spanViews: Readonly<
-  Record<
-    SpanKind,
-    (span: Span, caretKey: string, h: HtmlBuilder<Message>) => Html | string
-  >
-> = {
-  Text: (span, _, h) =>
-    Option.isSome(span.box)
-      ? h.span(boxed(span, '', h), [span.text])
-      : span.text,
-  Preedit: (span, _, h) =>
-    h.span(
-      [...boxed(span, 'pre', h), h.DataAttribute('ghost', '')],
-      [span.text],
-    ),
-  Caret: (span, caretKey, h) =>
-    h.keyed('span')(
-      caretKey,
-      [h.Id('caret'), ...boxed(span, 'cur', h)],
-      [span.text],
-    ),
-  CaretPastEnd: (span, caretKey, h) =>
-    h.keyed('span')(
-      caretKey,
-      [h.Id('caret'), h.Class('cur'), h.DataAttribute('ghost', '')],
-      [span.text],
-    ),
-}
-
-const rowView = (
-  row: Row,
-  status: Frame['status'],
-  h: HtmlBuilder<Message>,
-): Html => {
-  const caretKey = `caret-${status.line}-${status.column}`
-  const isCaretLine = Option.contains(row.lineNumber, status.line)
-  return h.keyed('div')(
-    row.key,
+): Html =>
+  h.keyed('div')(
+    String(line.id),
     [
-      h.Class(isCaretLine ? 'row cl' : 'row'),
-      h.DataAttribute('line-id', String(row.lineId)),
-      h.DataAttribute('start', String(row.start)),
-      ...Option.match(row.lineNumber, {
-        onNone: () => [],
-        onSome: lineNumber => [h.DataAttribute('n', String(lineNumber))],
-      }),
+      h.Class(isCaretLine ? 'line cl' : 'line'),
+      h.DataAttribute('line-id', String(line.id)),
+      h.DataAttribute('index', String(line.index)),
+      h.DataAttribute('n', String(line.number)),
     ],
-    Array.map(row.spans, span => spanViews[span.kind](span, caretKey, h)),
+    Array.map(line.parts, part =>
+      part.isPreedit
+        ? h.span([h.Class('pre'), h.DataAttribute('ghost', '')], [part.text])
+        : part.text,
+    ),
   )
-}
+
+const spacer = (lines: number, h: HtmlBuilder<Message>): Html =>
+  h.div([h.Class('spacer'), h.Style({ '--lines': String(lines) })])
 
 /**
- * Paints the frame: one keyed `white-space: pre` div per Row, carrying data-line-id and data-start,
- * indented by the gutter (`--gutter`, in cells) that holds its line number.
- * Caret and CaretPastEnd become span#caret.cur, the CSS anchor the port sits on.
- * CaretPastEnd and Preedit spans carry data-ghost.
+ * The scrolling text: a spacer for the lines above, one `white-space: pre-wrap` div per drawn line, keyed by line id,
+ * whose pieces are separate text nodes and whose number its `data-n` draws in the gutter, a spacer for the lines
+ * below, and `#caret`, which SurfacePort places. The browser wraps the lines.
  */
 export const surface = (
   frame: Frame,
@@ -215,11 +701,20 @@ export const surface = (
     [
       h.Class(keyboard === 'Focused' ? 'surface focused' : 'surface'),
       h.Style({ '--gutter': String(frame.gutter) }),
+      h.DataAttribute('revision', String(frame.revision)),
+      h.DataAttribute('caret-line', String(frame.caret.line)),
+      h.DataAttribute('caret-column', String(frame.caret.column)),
+      h.DataAttribute('caret-end', String(frame.caret.atRowEnd)),
+      h.DataAttribute('last-line', String(frame.status.lineCount - 1)),
       h.OnMount(SurfacePort()),
     ],
     [
-      ...Array.map(frame.rows, row => rowView(row, frame.status, h)),
-      h.span([h.Class('probe'), h.AriaHidden(true)], ['0'.repeat(probeCells)]),
+      spacer(frame.above, h),
+      ...Array.map(frame.lines, line =>
+        lineView(line, line.index === frame.caret.line, h),
+      ),
+      spacer(frame.below, h),
+      h.div([h.Id('caret'), h.Class('cur'), h.AriaHidden(true)]),
     ],
   )
 

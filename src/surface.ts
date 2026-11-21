@@ -274,18 +274,23 @@ const pointAt = (
   }))
 }
 
-/** A landing at a point, drawn at the end of the upper row when it sits where its line wraps and the point is above. */
+/**
+ * A landing at a point, drawn at the end of the upper row when it sits where its line wraps and the point is above it,
+ * or wherever it sits where its line wraps when `row` is `Upper`.
+ */
 const landAt = (
   found: Readonly<{ line: HTMLElement; column: number }>,
   y: number,
+  row: 'Hit' | 'Upper' = 'Hit',
 ): Landing => {
   const { line, column } = found
   const upper =
     wrapsAt(line, column) &&
-    Option.match(
-      rangeRect(line, graphemeBefore(lineText(line), column), column),
-      { onNone: () => false, onSome: rect => y < rect.bottom },
-    )
+    (row === 'Upper' ||
+      Option.match(
+        rangeRect(line, graphemeBefore(lineText(line), column), column),
+        { onNone: () => false, onSome: rect => y < rect.bottom },
+      ))
   return { _tag: 'At', line: indexOf(line), column, atRowEnd: upper }
 }
 
@@ -322,39 +327,53 @@ const textStart = (line: HTMLElement): number => {
 const aimFrom = (boundary: number): number =>
   Math.max(0, Math.ceil(boundary) - 1)
 
-/** Up, Down and paging: from the caret's row, `distance` pixels down (or up) at x `aim` from the text's left edge. */
+/**
+ * Up, Down and paging: from the caret's row, `distance` pixels down (or up) at x `aim` from the text's left edge.
+ * Chrome pages row by row and steps from the first row to the start of the text and from the last row to its end, so a
+ * page that reaches either row goes on to that edge. PageUp that lands where a line wraps is drawn at the end of the
+ * upper row, as Chrome draws it; PageDown is not.
+ */
 const verticalAnswer = (
   sheet: Sheet,
   line: HTMLElement,
   from: Readonly<{ column: number; atRowEnd: boolean }>,
   distance: number,
   goal: Option.Option<number>,
+  stride: 'Row' | 'Page',
 ): Answer => {
   const start = textStart(line)
   const caret = caretBox(line, from.column, from.atRowEnd)
   const aim = Option.getOrElse(goal, () => aimFrom(caret.left - start))
   const target = caret.top + sheet.rowHeight / 2 + distance
+  const edgeRow = stride === 'Page' ? sheet.rowHeight : 0
   const first = sheet.surface.querySelector<HTMLElement>('.line')
   const lines = sheet.surface.querySelectorAll<HTMLElement>('.line')
   const last = lines[lines.length - 1]
   if (
     first !== null &&
     indexOf(first) === 0 &&
-    target < first.getBoundingClientRect().top
+    target < first.getBoundingClientRect().top + edgeRow
   ) {
     return { landing: { _tag: 'TextStart' }, aim }
   }
   if (
     last !== undefined &&
     indexOf(last) === lastLineIndex(sheet.surface) &&
-    target > last.getBoundingClientRect().bottom
+    target > last.getBoundingClientRect().bottom - edgeRow
   ) {
     return { landing: { _tag: 'TextEnd' }, aim }
   }
   const y = bringOnScreen(sheet, target)
   return Option.match(pointAt(start + aim, y), {
     onNone: () => stay(aim),
-    onSome: found => ({ landing: landAt(found, y), aim }),
+    onSome: found => ({
+      landing: landAt(
+        found,
+        y,
+        stride === 'Page' && distance < 0 ? 'Upper' : 'Hit',
+      ),
+      aim,
+    }),
   })
 }
 
@@ -486,6 +505,7 @@ const answer = (sheet: Sheet, query: Query): Answer =>
             { column: from.column, atRowEnd },
             rows * sheet.rowHeight,
             goal,
+            'Row',
           ),
       }),
     Page: ({ at: from, atRowEnd, direction }) =>
@@ -498,6 +518,7 @@ const answer = (sheet: Sheet, query: Query): Answer =>
             { column: from.column, atRowEnd },
             direction * pageDistance(sheet),
             Option.none(),
+            'Page',
           ),
       }),
   })

@@ -56,7 +56,9 @@ body {
   position: relative;
   box-sizing: border-box;
   min-height: var(--row);
-  max-width: calc((var(--gutter) + 76) * 1ch);
+  /* Half a pixel over 76 cells: Chrome measures a tab and each text node on its own, and their rounded sum can pass
+     76ch by a hair, which would wrap a 76-cell row. A 77th cell is still far too wide to fit. */
+  max-width: calc((var(--gutter) + 76) * 1ch + 0.5px);
   padding-left: calc(var(--gutter) * 1ch);
   white-space: pre-wrap;
   overflow-wrap: break-word;

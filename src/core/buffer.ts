@@ -284,8 +284,9 @@ export const backspaceTarget = (buffer: Buffer): Position => {
 
 /**
  * Whether erasing from `from` to `to` leaves the caret in the piece that holds it. Chrome holds a caret in the piece
- * before it, or its line's first piece at the line start, and in none on an empty line, and ends an erase in the piece
- * before where it starts, or the line's first piece when it starts at a line start.
+ * before it, or its line's first piece at the line start, and ends an erase in the piece before where it starts, or the
+ * line's first piece when it starts at a line start, so Delete on an empty line leaves it. Backspace that joins a line,
+ * even an empty one, onto the line above stays in the piece only when that line is empty.
  */
 export const keepsCaretPiece = (
   buffer: Buffer,
@@ -294,14 +295,10 @@ export const keepsCaretPiece = (
 ): boolean => {
   const [start, end] = isBefore(to, from) ? [to, from] : [from, to]
   const { caret } = buffer
-  const line = lineAt(buffer, caret.line)
-  if (line.text.length === 0) {
-    return false
-  }
   if (start.line < caret.line) {
     return start.column === 0
   }
-  const held = pieceAt(line, caret.column, 'Before')
+  const held = pieceAt(lineAt(buffer, caret.line), caret.column, 'Before')
   return (
     held.from < start.column ||
     (start.column === 0 && end.line === start.line && end.column < held.to)

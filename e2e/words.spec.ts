@@ -72,7 +72,7 @@ const mulberry32 = (seed: number) => {
 }
 
 /**
- * Ctrl+Right from the start to the end, Ctrl+Left back to the start with ArrowLeft past each line start it stops at,
+ * Ctrl+Right from the start to the end, Ctrl+Left back to the start with ArrowLeft between,
  * then a seeded mix of word, letter, row and line moves, so word moves start from many columns and Up, Down, Home and
  * End read the goal and row each word move leaves.
  */
@@ -119,6 +119,27 @@ const textareaCaret = (page: Page): Promise<Caret> =>
     }
   })
 
+/**
+ * A key on the textarea, as nullpad means it: where the textarea's Ctrl+Left stays at the start of a line below the
+ * first, nullpad goes on to the end of the line above, as Left does.
+ */
+const textareaPress = async (page: Page, key: Key): Promise<Caret> => {
+  const before = await textareaCaret(page)
+  await page.keyboard.press(key)
+  const after = await textareaCaret(page)
+  const stuckAtLineStart =
+    key === 'Control+ArrowLeft' &&
+    after.column === 1 &&
+    after.line > 1 &&
+    after.line === before.line &&
+    after.column === before.column
+  if (!stuckAtLineStart) {
+    return after
+  }
+  await page.keyboard.press('ArrowLeft')
+  return textareaCaret(page)
+}
+
 const load = async (pair: Pair, text: string) => {
   await Promise.all([
     pair.nullpad
@@ -154,9 +175,7 @@ const firstDifference = async (
   for (const [at, key] of keys.entries()) {
     const [nullpad, textarea] = await Promise.all([
       pair.nullpad.keyboard.press(key).then(() => nullpadCaret(pair.nullpad)),
-      pair.textarea.keyboard
-        .press(key)
-        .then(() => textareaCaret(pair.textarea)),
+      textareaPress(pair.textarea, key),
     ])
     if (nullpad.line !== textarea.line || nullpad.column !== textarea.column) {
       return [
@@ -189,6 +208,22 @@ test('Ctrl+Right stops at the end of each word and Ctrl+Left at its start, as on
     columns.push((await nullpad.status()).column)
   }
   expect(columns, 'Ctrl+Left from the end').toEqual([9, 8, 5, 1, 1])
+})
+
+test('Ctrl+Left at the start of a line goes to the end of the line above, where a textarea stays put', async ({
+  nullpad,
+}) => {
+  await nullpad.paste('ab cd\nef gh')
+  await nullpad.press('Home')
+  await nullpad.press('Control+ArrowLeft')
+  expect(await nullpad.status(), 'end of the line above').toEqual(
+    expect.objectContaining({ line: 1, column: 6 }),
+  )
+  await nullpad.press('Control+Home')
+  await nullpad.press('Control+ArrowLeft')
+  expect(await nullpad.status(), 'the first line start stays').toEqual(
+    expect.objectContaining({ line: 1, column: 1 }),
+  )
 })
 
 const shards = 6

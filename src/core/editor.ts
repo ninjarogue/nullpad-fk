@@ -10,7 +10,8 @@ export type Mode = typeof Mode.Type
 /**
  * What the core asks the browser, which alone knows where the text it drew wraps and where a pixel falls in it.
  * `at` is the caret the move starts from and `atRowEnd` the row it is drawn on where its line wraps.
- * Step is one grapheme along the line, as the browser moves its own caret. Point is a click, in client pixels.
+ * Step is one grapheme along the line, as the browser moves its own caret. Point is a click: `x` in client pixels and
+ * `textY` in pixels down the scrolled text, so a scroll before the answer leaves it on the line it was made on.
  */
 export const Query = Schema.TaggedUnion({
   Step: {
@@ -33,7 +34,7 @@ export const Query = Schema.TaggedUnion({
     atRowEnd: Schema.Boolean,
     direction: Schema.Literals([-1, 1]),
   },
-  Point: { x: Schema.Number, y: Schema.Number },
+  Point: { x: Schema.Number, textY: Schema.Number },
 })
 export type Query = typeof Query.Type
 
@@ -52,7 +53,7 @@ export type Answer = typeof Answer.Type
 
 const Queued = Schema.TaggedUnion({
   Fed: { input: Input },
-  Clicked: { x: Schema.Number, y: Schema.Number },
+  Clicked: { x: Schema.Number, textY: Schema.Number },
 })
 type Queued = typeof Queued.Type
 
@@ -485,8 +486,8 @@ const inputPlan = (editor: Editor, input: Input): Plan =>
     Commit: ({ text }) => now(insertText(text)({ ...editor, preedit: '' })),
   })
 
-const clickPlan = (editor: Editor, x: number, y: number): Plan =>
-  ask(Query.cases.Point.make({ x, y }), ({ landing }) =>
+const clickPlan = (editor: Editor, x: number, textY: number): Plan =>
+  ask(Query.cases.Point.make({ x, textY }), ({ landing }) =>
     done(
       Option.match(landingPosition(editor, landing), {
         onNone: () => editor,
@@ -498,7 +499,7 @@ const clickPlan = (editor: Editor, x: number, y: number): Plan =>
 const planOf = (editor: Editor, queued: Queued): Plan =>
   Queued.match(queued, {
     Fed: ({ input }) => inputPlan(editor, input),
-    Clicked: ({ x, y }) => clickPlan(editor, x, y),
+    Clicked: ({ x, textY }) => clickPlan(editor, x, textY),
   })
 
 /**
@@ -559,9 +560,12 @@ const replay = (start: Outcome, queued: ReadonlyArray<Queued>): Outcome =>
 export const feed = (editor: Editor, input: Input): Outcome =>
   enqueue(editor, Queued.cases.Fed.make({ input }))
 
-/** The pointer pressed at client pixel (x, y). It lands where it would after every input fed before it. */
-export const click = (editor: Editor, x: number, y: number): Outcome =>
-  enqueue(editor, Queued.cases.Clicked.make({ x, y }))
+/**
+ * The pointer pressed at client x, `textY` pixels down the scrolled text. It lands where it would after every input fed
+ * before it.
+ */
+export const click = (editor: Editor, x: number, textY: number): Outcome =>
+  enqueue(editor, Queued.cases.Clicked.make({ x, textY }))
 
 /** The browser answered the query the editor is waiting on. The caret lands, then the held inputs run. */
 export const located = (editor: Editor, answer: Answer): Outcome =>

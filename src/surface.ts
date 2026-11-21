@@ -435,8 +435,12 @@ const rowEdgeAnswer = (
   )
 }
 
-/** A click: the text column catches every x, a point below the last line is the end of the text. */
-const pointAnswer = (sheet: Sheet, x: number, y: number): Answer => {
+/**
+ * A click, `textY` pixels down the scrolled text: the text column catches every x, a point below the last line is the
+ * end of the text. A screen scrolled since the click scrolls back to show the point.
+ */
+const pointAnswer = (sheet: Sheet, x: number, textY: number): Answer => {
+  const y = textY + sheet.viewTop - sheet.surface.scrollTop
   const lines = sheet.surface.querySelectorAll<HTMLElement>('.line')
   const last = lines[lines.length - 1]
   if (
@@ -446,7 +450,7 @@ const pointAnswer = (sheet: Sheet, x: number, y: number): Answer => {
   ) {
     return { landing: { _tag: 'TextEnd' }, aim: 0 }
   }
-  const row = Math.min(sheet.viewBottom - 1, Math.max(sheet.viewTop + 1, y))
+  const row = bringOnScreen(sheet, y)
   const hit = Array.findFirst(Array.fromIterable(lines), line => {
     const box = line.getBoundingClientRect()
     return row >= box.top && row < box.bottom
@@ -473,7 +477,7 @@ const pageDistance = (sheet: Sheet): number => {
 
 const answer = (sheet: Sheet, query: Query): Answer =>
   Query.match(query, {
-    Point: ({ x, y }) => pointAnswer(sheet, x, y),
+    Point: ({ x, textY }) => pointAnswer(sheet, x, textY),
     Step: ({ at: from, direction }) =>
       Option.match(lineElement(sheet.surface, from.line), {
         onNone: () => stay(0),
@@ -575,6 +579,9 @@ const drawCaret = (surface: HTMLElement): void => {
   })
 }
 
+/** When the caret was last scrolled on screen, on the clock of `Event.timeStamp`. */
+const lastReveal = { at: 0 }
+
 /** Scrolls the drawn caret on screen once the screen shows it: as little as it takes, or its row to the top. */
 export const revealCaret = (align: 'Nearest' | 'Top'): Effect.Effect<void> =>
   Render.afterCommit.pipe(
@@ -585,6 +592,7 @@ export const revealCaret = (align: 'Nearest' | 'Top'): Effect.Effect<void> =>
           block: align === 'Top' ? 'start' : 'nearest',
           inline: 'nearest',
         })
+        lastReveal.at = performance.now()
       }),
     ),
   )
@@ -673,7 +681,23 @@ const observe = (surface: HTMLElement): Stream.Stream<SurfaceMessage> =>
           }
           const resizes = new ResizeObserver(measure)
           resizes.observe(surface)
-          const wheel = { pending: 0 }
+          const wheel = { pending: 0, turnedAt: 0 }
+          /**
+           * The scroll offset of the frame on screen, which a click is made on. A scroll reaches the screen a frame
+           * after Chrome draws it, and Chrome draws it in the frame that fires its scroll event.
+           */
+          const shown = { scrollTop: surface.scrollTop }
+          const showAfterNextFrame = (scrollTop: number) =>
+            requestAnimationFrame(() =>
+              requestAnimationFrame(() => {
+                shown.scrollTop = scrollTop
+              }),
+            )
+          const dropTurnsBeforeReveal = () => {
+            if (wheel.turnedAt < lastReveal.at) {
+              wheel.pending = 0
+            }
+          }
           const report = (top: number) =>
             Queue.offerUnsafe(queue, Message.ScrolledSurface({ top }))
           const reportTop = () => report(topLine(surface, sheetOf(surface)))
@@ -682,9 +706,12 @@ const observe = (surface: HTMLElement): Stream.Stream<SurfaceMessage> =>
            * When they do not, the screen stays put, the core is told the line there, and the patch that draws it
            * scrolls. Chrome scrolls a wheel turn on its compositor, ahead of the drawn lines, and paints blank screen
            * until they arrive; scrolled here, every painted frame shows drawn lines. A patch that still does not cover
-           * the place drops the turn, so it never scrolls after a later key.
+           * the place drops the turn, so it never scrolls after a later key. Chrome hands over a wheel turn at the next
+           * frame, after keys pressed later than it, so a turn made before the caret was last revealed is dropped too:
+           * the reveal is the later scroll.
            */
           const scrollPending = (whenUndrawn: 'AskCore' | 'Drop') => {
+            dropTurnsBeforeReveal()
             if (wheel.pending === 0) {
               return
             }
@@ -730,10 +757,14 @@ const observe = (surface: HTMLElement): Stream.Stream<SurfaceMessage> =>
               'data-caret-end',
             ],
           })
-          surface.addEventListener('scroll', reportTop, {
-            signal,
-            passive: true,
-          })
+          surface.addEventListener(
+            'scroll',
+            () => {
+              showAfterNextFrame(surface.scrollTop)
+              reportTop()
+            },
+            { signal, passive: true },
+          )
           surface.addEventListener(
             'wheel',
             event => {
@@ -741,7 +772,9 @@ const observe = (surface: HTMLElement): Stream.Stream<SurfaceMessage> =>
                 return
               }
               event.preventDefault()
+              dropTurnsBeforeReveal()
               wheel.pending += wheelPixels(surface, event)
+              wheel.turnedAt = event.timeStamp
               scrollPending('AskCore')
             },
             { signal, passive: false },
@@ -753,9 +786,17 @@ const observe = (surface: HTMLElement): Stream.Stream<SurfaceMessage> =>
                 return
               }
               event.preventDefault()
+              const sheet = sheetOf(surface)
+              const y = Math.min(
+                sheet.viewBottom - 1,
+                Math.max(sheet.viewTop + 1, event.clientY),
+              )
               Queue.offerUnsafe(
                 queue,
-                Message.ClickedText({ x: event.clientX, y: event.clientY }),
+                Message.ClickedText({
+                  x: event.clientX,
+                  textY: y - sheet.viewTop + shown.scrollTop,
+                }),
               )
             },
             { signal },

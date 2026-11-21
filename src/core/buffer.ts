@@ -242,6 +242,35 @@ export const moveTo = (buffer: Buffer, position: Position): Buffer => {
   return { ...buffer, caret: { line, column } }
 }
 
+const isLowSurrogate = (text: string, index: number): boolean => {
+  const unit = text.charCodeAt(index)
+  return unit >= 0xdc00 && unit <= 0xdfff
+}
+
+/**
+ * The span of the caret's line from `from` to `to` UTF-16 units away from the caret, negative before it, clamped to
+ * the line and widened so it never cuts a surrogate pair.
+ */
+export const spanAround = (
+  buffer: Buffer,
+  from: number,
+  to: number,
+): Readonly<{ from: Position; to: Position }> => {
+  const { line, column } = buffer.caret
+  const { text } = lineAt(buffer, line)
+  const clamp = (offset: number) =>
+    Math.max(0, Math.min(text.length, column + offset))
+  const start = clamp(Math.min(from, to))
+  const end = clamp(Math.max(from, to))
+  return {
+    from: {
+      line,
+      column: start > 0 && isLowSurrogate(text, start) ? start - 1 : start,
+    },
+    to: { line, column: isLowSurrogate(text, end) ? end + 1 : end },
+  }
+}
+
 /** Where Backspace starts deleting from the caret: the start of the letter before it, or the end of the line above. */
 export const backspaceTarget = (buffer: Buffer): Position => {
   const { line, column } = buffer.caret

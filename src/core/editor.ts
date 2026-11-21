@@ -116,13 +116,18 @@ export type PaintedLine = Readonly<{
   parts: ReadonlyArray<Part>
 }>
 
-/** Everything the view draws. `above` and `below` count the lines not drawn, each estimated at one row. */
+/**
+ * Everything the view draws. `above` and `below` count the lines not drawn, each estimated at one row. `surrounding` is
+ * the caret's line, or as much of it as lies near the caret, with the caret's offset in it: the text an IME reads to
+ * convert letters already typed.
+ */
 export type Frame = Readonly<{
   lines: ReadonlyArray<PaintedLine>
   above: number
   below: number
   gutter: number
   caret: Readonly<{ line: number; column: number; atRowEnd: boolean }>
+  surrounding: Readonly<{ text: string; caret: number }>
   status: Readonly<{
     mode: Mode
     line: number
@@ -477,6 +482,20 @@ const inputPlan = (editor: Editor, input: Input): Plan =>
     Chord: () => now(editor, 'None'),
     Text: ({ text, byKey }) =>
       now(byKey ? typeText(text)(editor) : insertText(text)(editor)),
+    Erase: span => {
+      const { from, to } = Buffer.spanAround(editor.buffer, span.from, span.to)
+      return now(
+        samePosition(from, to)
+          ? editor
+          : redraw(
+              { ...editor, goal: Option.none() },
+              {
+                buffer: Buffer.erase(editor.buffer, from, to),
+                caretAtRowEnd: false,
+              },
+            ),
+      )
+    },
     Paste: ({ text }) => now(insertText(text)(editor)),
     Preedit: ({ text }) =>
       now(redraw(editor, { buffer: settled(editor), preedit: text })),
@@ -656,10 +675,14 @@ const partsOf = (
     },
   })
 
+/** How far, in UTF-16 units on each side of the caret, an IME may read the caret's line. */
+const surroundingReach = 1000
+
 export const paint = (editor: Editor): Frame => {
   const { buffer } = editor
   const { caret, lines } = buffer
   const { first, last } = drawnLines(editor)
+  const near = Buffer.spanAround(buffer, -surroundingReach, surroundingReach)
   return {
     lines: Array.map(lines.slice(first, last + 1), (line, offset) => {
       const index = first + offset
@@ -679,6 +702,13 @@ export const paint = (editor: Editor): Frame => {
     below: lines.length - 1 - last,
     gutter: gutterWidth(buffer),
     caret: { ...caret, atRowEnd: editor.caretAtRowEnd },
+    surrounding: {
+      text: (lines[caret.line]?.text ?? '').slice(
+        near.from.column,
+        near.to.column,
+      ),
+      caret: caret.column - near.from.column,
+    },
     status: {
       mode: editor.mode,
       line: caret.line + 1,

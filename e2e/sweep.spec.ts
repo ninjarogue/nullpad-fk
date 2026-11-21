@@ -28,8 +28,17 @@ for (const sweep of sweeps) {
       const pair = await openPair(browser, baseURL ?? '')
       const accepted = new Map<string, number>()
       const failures: Array<string> = []
+      let threw = 0
       for (const row of mine) {
-        const divergence = await compare(pair, row.script)
+        const divergence = await compare(pair, row.script).catch(
+          (error: unknown) => {
+            threw += 1
+            failures.push(
+              `${row.document} | ${row.placement} | ${show(row.move)} | threw: ${String(error).split('\n')[0]}`,
+            )
+            return null
+          },
+        )
         if (divergence === null) {
           continue
         }
@@ -48,7 +57,7 @@ for (const sweep of sweeps) {
       const acceptedSummary = [...accepted]
         .map(([name, count]) => `${name}: ${count}`)
         .join(', ')
-      const summary = `${mine.length} rows checked, ${failures.length} differ, accepted differences: ${acceptedSummary || 'none'}`
+      const summary = `${mine.length} rows checked, ${failures.length - threw} differ, ${threw} threw, accepted differences: ${acceptedSummary || 'none'}`
       testInfo.annotations.push({ type: 'sweep', description: summary })
       console.log(
         `sweep "${sweep.name}" shard ${shard + 1} of ${shards}: ${summary}`,

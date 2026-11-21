@@ -53,7 +53,7 @@ const mulberry32 = (seed: number) => {
 export const sequenceSeed = (runSeed: number, index: number): number =>
   Math.floor(mulberry32(runSeed ^ Math.imul(index + 1, 0x9e3779b1))() * 2 ** 31)
 
-const ZWJ = '‍'
+export const ZWJ = '‍'
 const loneCodePoints = [
   '🇯',
   '🇵',

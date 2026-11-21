@@ -249,3 +249,41 @@ test('lines of notes in English, Japanese, Chinese, Korean and emoji break where
 }) => {
   await expectRowsLikeTextarea(nullpad, ['a'.repeat(200), ...notes])
 })
+
+test('a caret where Backspace joined two lines at a row break is drawn at the start of the lower row, as in a textarea', async ({
+  nullpad,
+}) => {
+  await nullpad.type(`${'a'.repeat(70)} ${'b'.repeat(30)}`)
+  await nullpad.press('Home')
+  await nullpad.press('Enter')
+  await nullpad.press('Backspace')
+  const screen = await nullpad.screen()
+  expect(caretAt(screen)).toEqual({ row: 1, cell: 0, column: 72 })
+})
+
+test('a line of exactly 76 cells, a tab and the pieces Backspace joined, stays on one row, as in a textarea', async ({
+  nullpad,
+}) => {
+  const pieces = [
+    '\tn',
+    'otes: the quick brown fox j',
+    'umps over the lazy dog while the cat watches',
+  ]
+  await nullpad.paste(pieces.join('\n'))
+  await nullpad.press('Home')
+  await nullpad.press('Backspace')
+  await nullpad.press('Home')
+  await nullpad.press('Backspace')
+  const screen = await nullpad.screen()
+  const line = pieces.join('')
+  expect(screen.status, 'one line, the cursor where the joins met').toEqual({
+    line: 1,
+    column: 3,
+    lineCount: 1,
+  })
+  expect(
+    rowStartsOf(screen),
+    'rows start where a textarea of the same width starts them',
+  ).toEqual(await textareaRowStarts(nullpad.page, [line], 76, screen.cell))
+  expect(rowTexts(screen), 'the whole line on one row').toEqual([line])
+})

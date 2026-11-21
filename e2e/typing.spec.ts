@@ -657,3 +657,100 @@ test('a burst of arrows, Home, End, Delete, Backspace and typing sent while the 
   })
   await pair.close()
 })
+
+test('Enter at the start of a line or of a joined piece forgets the cell Up and Down aim for, and Enter inside a piece keeps it, as a textarea does', async ({
+  nullpad,
+}) => {
+  await nullpad.type('a\na')
+  await nullpad.press('ArrowUp', 2)
+  await nullpad.press('Enter')
+  await nullpad.press('ArrowDown')
+  expect(
+    await nullpad.status(),
+    'Up on the first line went to its start; Enter there, then Down',
+  ).toEqual({ line: 3, column: 1, lineCount: 3 })
+  await nullpad.press('Control+End')
+  await nullpad.press('Enter')
+  await nullpad.type('abcd\nab\ncd\nabcd\nabcd')
+  await nullpad.press('ArrowUp', 2)
+  await nullpad.press('Home')
+  await nullpad.press('Backspace')
+  await nullpad.press('ArrowDown')
+  await nullpad.press('ArrowUp')
+  await nullpad.press('Enter')
+  await nullpad.press('ArrowDown')
+  expect(
+    await nullpad.status(),
+    'Enter where Backspace joined two lines, then Down',
+  ).toEqual({ line: 7, column: 1, lineCount: 8 })
+  await nullpad.press('Control+End')
+  await nullpad.press('Enter')
+  await nullpad.type('abcd\nab\ncd\nabcd\nabcd')
+  await nullpad.press('ArrowUp', 2)
+  await nullpad.press('Home')
+  await nullpad.press('Backspace')
+  await nullpad.press('ArrowRight')
+  await nullpad.press('ArrowDown')
+  await nullpad.press('ArrowUp')
+  await nullpad.press('Enter')
+  await nullpad.press('ArrowDown')
+  expect(
+    await nullpad.status(),
+    'Enter inside a piece of a joined line, then Down',
+  ).toEqual({ line: 12, column: 4, lineCount: 13 })
+})
+
+test('the cursor is drawn where the status line puts it after Backspace joins lines at trailing spaces', async ({
+  nullpad,
+}) => {
+  await nullpad.type('a  ')
+  await nullpad.press('ArrowLeft')
+  await nullpad.press('Enter')
+  await nullpad.press('Backspace')
+  await nullpad.press('ArrowRight')
+  const screen = await nullpad.screen()
+  expect(
+    { cell: screen.cursor?.cell, row: screen.cursor?.row },
+    'the cursor after both spaces',
+  ).toEqual({ cell: 3, row: 0 })
+  expect(screen.status).toEqual({ line: 1, column: 4, lineCount: 1 })
+})
+
+test('a key sent with no gap after a big paste and Ctrl+Home is never lost', async ({
+  nullpad,
+}) => {
+  const first = 'abcdefghijklmnopqrstuvwxyz0123456789'
+  const lines = Array.from({ length: 150 }, (_, index) =>
+    index % 5 === 0
+      ? `${index + 1}. a paragraph line that is long enough to wrap over the column limit of seventy six characters for sure`
+      : `${index + 1}. short line`,
+  )
+  const note = [first, ...lines].join('\n')
+  const key = { key: 'v', code: 'KeyV', windowsVirtualKeyCode: 86 }
+  const rounds = 20
+  for (let round = 0; round < rounds; round++) {
+    await nullpad.page.evaluate(
+      value => navigator.clipboard.writeText(value),
+      round === 0 ? note : `\n${lines.join('\n')}`,
+    )
+    await nullpad.press('Control+End')
+    await nullpad.cdp.send('Input.dispatchKeyEvent', {
+      type: 'rawKeyDown',
+      ...key,
+      modifiers: 2,
+      commands: ['paste'],
+    })
+    await nullpad.cdp.send('Input.dispatchKeyEvent', {
+      type: 'keyUp',
+      ...key,
+      modifiers: 2,
+    })
+    await nullpad.page.keyboard.press('Control+Home')
+    await nullpad.page.keyboard.press('Delete')
+  }
+  const screen = await nullpad.screen()
+  expect(
+    screen.rows[0]?.text,
+    `the first line lost one letter to each of ${rounds} Deletes`,
+  ).toBe(first.slice(rounds))
+})

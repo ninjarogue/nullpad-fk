@@ -139,3 +139,45 @@ test("the IME's candidate window sits on the preedit: the editor reports each pr
     'the boxes reported to the browser are the drawn ones, to the whole pixel the browser keeps',
   ).toEqual([])
 })
+
+test('an IME that converts text already typed replaces it, as in a textarea', async ({
+  nullpad,
+}) => {
+  await nullpad.type('first\nword かんじ tail')
+  await nullpad.press('ArrowLeft', 5)
+  await nullpad.compose('漢字', { start: 5, end: 8 })
+  expect(await nullpad.preedit(), 'the conversion drawn as a preedit').toBe(
+    '漢字',
+  )
+  expect(
+    await nullpad.text(),
+    'the converted letters gone while composing',
+  ).toBe('first\nword  tail')
+  await nullpad.commit('漢字')
+  expect(await nullpad.text(), 'the conversion replaces them once').toBe(
+    'first\nword 漢字 tail',
+  )
+  expect(await nullpad.status()).toEqual({ line: 2, column: 8, lineCount: 2 })
+  await nullpad.type('!')
+  expect(await nullpad.text(), 'typing goes after the conversion').toBe(
+    'first\nword 漢字! tail',
+  )
+})
+
+test('an IME that converts a word before the caret, not next to it, replaces that word and leaves the rest', async ({
+  nullpad,
+}) => {
+  await nullpad.type('one two three')
+  await nullpad.compose('2', { start: 4, end: 7 })
+  expect(await nullpad.preedit(), 'the conversion drawn as a preedit').toBe('2')
+  expect(await nullpad.text(), 'only the converted word gone').toBe(
+    'one  three',
+  )
+  await nullpad.commit('2')
+  expect(await nullpad.text()).toBe('one 2 three')
+  expect(await nullpad.status(), 'the cursor after the conversion').toEqual({
+    line: 1,
+    column: 6,
+    lineCount: 1,
+  })
+})

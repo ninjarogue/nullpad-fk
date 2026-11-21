@@ -303,11 +303,21 @@ const driver = (page: Page, cdp: CDPSession) => {
       await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', ...key })
       await settle(page)
     },
-    compose: async (text: string) => {
+    /** An IME's preedit. `replacing` is the range of the text field's text, in UTF-16 units, the IME converts again. */
+    compose: async (
+      text: string,
+      replacing?: Readonly<{ start: number; end: number }>,
+    ) => {
       await cdp.send('Input.imeSetComposition', {
         text,
         selectionStart: text.length,
         selectionEnd: text.length,
+        ...(replacing === undefined
+          ? {}
+          : {
+              replacementStart: replacing.start,
+              replacementEnd: replacing.end,
+            }),
       })
       await settle(page)
     },

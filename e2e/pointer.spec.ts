@@ -283,3 +283,73 @@ test('a click sent right after typing lands by the text as typed, not by the fra
     ).toBe('line one\nline two\n# Heading|')
   }
 })
+
+test('fast wheel turns through a 20,000-line note show text in every frame, never a blank band', async ({
+  nullpad,
+}) => {
+  await nullpad.paste(numberedLines(20_000))
+  await nullpad.press('Control+Home')
+  const { rowHeight } = await nullpad.screen()
+  await nullpad.page.evaluate(() => {
+    const surface = document.querySelector<HTMLElement>('.surface')
+    if (surface === null) {
+      throw new Error('no .surface')
+    }
+    const probe = { frames: [] as Array<number>, stopped: false }
+    Reflect.set(window, 'blankProbe', probe)
+    const blankPixels = () => {
+      const box = surface.getBoundingClientRect()
+      const top =
+        box.top + Number.parseFloat(getComputedStyle(surface).paddingTop)
+      const lines = surface.querySelectorAll('.line')
+      const first = lines[0]?.getBoundingClientRect()
+      const last = lines[lines.length - 1]?.getBoundingClientRect()
+      if (first === undefined || last === undefined) {
+        return box.bottom - top
+      }
+      const drawn = Math.max(
+        0,
+        Math.min(box.bottom, last.bottom) - Math.max(top, first.top),
+      )
+      return box.bottom - top - drawn
+    }
+    const tick = () => {
+      probe.frames.push(blankPixels())
+      if (!probe.stopped) {
+        requestAnimationFrame(tick)
+      }
+    }
+    requestAnimationFrame(tick)
+  })
+  await nullpad.page.mouse.move(400, 300)
+  const turns = [
+    ...Array.from({ length: 30 }, () => 1000),
+    ...Array.from({ length: 30 }, () => -700),
+    2000,
+    -2000,
+    2000,
+  ]
+  for (const delta of turns) {
+    await nullpad.page.mouse.wheel(0, delta)
+    await nullpad.page.waitForTimeout(16)
+  }
+  await nullpad.page.waitForTimeout(200)
+  const frames = await nullpad.page.evaluate(() => {
+    const probe = Reflect.get(window, 'blankProbe') as {
+      frames: Array<number>
+      stopped: boolean
+    }
+    probe.stopped = true
+    return probe.frames
+  })
+  expect(frames.length, 'frames seen while the wheel turned').toBeGreaterThan(
+    turns.length,
+  )
+  const blank = frames.flatMap((pixels, frame) =>
+    pixels > rowHeight / 2 ? [`frame ${frame}: ${Math.round(pixels)} px`] : [],
+  )
+  expect(
+    blank,
+    `frames, at their start, with screen left undrawn, of ${frames.length}`,
+  ).toEqual([])
+})

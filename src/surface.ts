@@ -631,6 +631,33 @@ const topLine = (surface: HTMLElement, sheet: Sheet): number => {
   })
 }
 
+const wheelPixels = (surface: HTMLElement, event: WheelEvent): number => {
+  const sheet = sheetOf(surface)
+  return event.deltaMode === WheelEvent.DOM_DELTA_LINE
+    ? event.deltaY * sheet.rowHeight
+    : event.deltaMode === WheelEvent.DOM_DELTA_PAGE
+      ? event.deltaY * pageDistance(sheet)
+      : event.deltaY
+}
+
+/** The scroll offsets at which the text area shows only drawn lines, from the first drawn line's top to the last's bottom. */
+const drawnScrollRange = (
+  surface: HTMLElement,
+): Readonly<{ min: number; max: number }> => {
+  const lines = surface.querySelectorAll<HTMLElement>('.line')
+  const first = lines[0]
+  const last = lines[lines.length - 1]
+  if (first === undefined || last === undefined) {
+    return { min: surface.scrollTop, max: surface.scrollTop }
+  }
+  const sheet = sheetOf(surface)
+  const shift = surface.scrollTop
+  return {
+    min: first.getBoundingClientRect().top - sheet.viewTop + shift,
+    max: last.getBoundingClientRect().bottom - sheet.viewBottom + shift,
+  }
+}
+
 const observe = (surface: HTMLElement): Stream.Stream<SurfaceMessage> =>
   Stream.callback<SurfaceMessage>(queue =>
     Effect.gen(function* () {
@@ -656,7 +683,54 @@ const observe = (surface: HTMLElement): Stream.Stream<SurfaceMessage> =>
           }
           const resizes = new ResizeObserver(measure)
           resizes.observe(surface)
-          const patches = new MutationObserver(() => drawCaret(surface))
+          const wheel = { pending: 0 }
+          const report = (top: number) =>
+            Queue.offerUnsafe(queue, Message.ScrolledSurface({ top }))
+          const reportTop = () => report(topLine(surface, sheetOf(surface)))
+          /**
+           * Scrolls the wheel's pending distance from the main thread when the drawn lines cover the place it lands.
+           * When they do not, the screen stays put, the core is told the line there, and the patch that draws it
+           * scrolls. Chrome scrolls a wheel turn on its compositor, ahead of the drawn lines, and paints blank screen
+           * until they arrive; scrolled here, every painted frame shows drawn lines. A patch that still does not cover
+           * the place drops the turn, so it never scrolls after a later key.
+           */
+          const scrollPending = (whenUndrawn: 'AskCore' | 'Drop') => {
+            if (wheel.pending === 0) {
+              return
+            }
+            const before = surface.scrollTop
+            const wanted = Math.min(
+              surface.scrollHeight - surface.clientHeight,
+              Math.max(0, before + wheel.pending),
+            )
+            const drawn = drawnScrollRange(surface)
+            const isDrawn =
+              wanted >= Math.min(drawn.min, before) &&
+              wanted <= Math.max(drawn.max, before)
+            if (isDrawn) {
+              wheel.pending = 0
+              if (wanted !== before) {
+                surface.scrollTop = wanted
+                reportTop()
+              }
+            } else if (whenUndrawn === 'AskCore') {
+              const sheet = sheetOf(surface)
+              const shift = wanted - before
+              report(
+                topLine(surface, {
+                  ...sheet,
+                  viewTop: sheet.viewTop + shift,
+                  viewBottom: sheet.viewBottom + shift,
+                }),
+              )
+            } else {
+              wheel.pending = 0
+            }
+          }
+          const patches = new MutationObserver(() => {
+            drawCaret(surface)
+            scrollPending('Drop')
+          })
           patches.observe(surface, {
             attributes: true,
             attributeFilter: [
@@ -666,16 +740,21 @@ const observe = (surface: HTMLElement): Stream.Stream<SurfaceMessage> =>
               'data-caret-end',
             ],
           })
+          surface.addEventListener('scroll', reportTop, {
+            signal,
+            passive: true,
+          })
           surface.addEventListener(
-            'scroll',
-            () =>
-              Queue.offerUnsafe(
-                queue,
-                Message.ScrolledSurface({
-                  top: topLine(surface, sheetOf(surface)),
-                }),
-              ),
-            { signal, passive: true },
+            'wheel',
+            event => {
+              if (event.ctrlKey || event.deltaY === 0) {
+                return
+              }
+              event.preventDefault()
+              wheel.pending += wheelPixels(surface, event)
+              scrollPending('AskCore')
+            },
+            { signal, passive: false },
           )
           surface.addEventListener(
             'pointerdown',

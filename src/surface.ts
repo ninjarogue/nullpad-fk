@@ -275,18 +275,19 @@ const pointAt = (
 }
 
 /**
- * A landing at a point, drawn at the end of the upper row when it sits where its line wraps and the point is above it,
- * or wherever it sits where its line wraps when `row` is `Upper`.
+ * A landing at a point. Where its line wraps it is drawn at the end of the upper row when the point is above the wrap
+ * and `side` is `Hit`, and always when `side` is `Upper`; `Lower` draws it at the start of the lower row.
  */
 const landAt = (
   found: Readonly<{ line: HTMLElement; column: number }>,
   y: number,
-  row: 'Hit' | 'Upper' = 'Hit',
+  side: 'Hit' | 'Upper' | 'Lower' = 'Hit',
 ): Landing => {
   const { line, column } = found
   const upper =
+    side !== 'Lower' &&
     wrapsAt(line, column) &&
-    (row === 'Upper' ||
+    (side === 'Upper' ||
       Option.match(
         rangeRect(line, graphemeBefore(lineText(line), column), column),
         { onNone: () => false, onSome: rect => y < rect.bottom },
@@ -330,8 +331,8 @@ const aimFrom = (boundary: number): number =>
 /**
  * Up, Down and paging: from the caret's row, `distance` pixels down (or up) at x `aim` from the text's left edge.
  * Chrome pages row by row and steps from the first row to the start of the text and from the last row to its end, so a
- * page that reaches either row goes on to that edge. PageUp that lands where a line wraps is drawn at the end of the
- * upper row, as Chrome draws it; PageDown is not.
+ * page that reaches either row goes on to that edge. Where a line wraps, Chrome draws a PageUp landing at the end of
+ * the upper row and a PageDown landing at the start of the lower row, whichever side the caret started on.
  */
 const verticalAnswer = (
   sheet: Sheet,
@@ -370,7 +371,7 @@ const verticalAnswer = (
       landing: landAt(
         found,
         y,
-        stride === 'Page' && distance < 0 ? 'Upper' : 'Hit',
+        stride === 'Row' ? 'Hit' : distance < 0 ? 'Upper' : 'Lower',
       ),
       aim,
     }),

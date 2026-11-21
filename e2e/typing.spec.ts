@@ -754,3 +754,53 @@ test('a key sent with no gap after a big paste and Ctrl+Home is never lost', asy
     `the first line lost one letter to each of ${rounds} Deletes`,
   ).toBe(first.slice(rounds))
 })
+
+test('a Delete a moment after a big paste and Ctrl+Home lands at the top and leaves the cursor on screen', async ({
+  nullpad,
+}) => {
+  const lines = Array.from({ length: 150 }, (_, index) =>
+    index % 5 === 0
+      ? `${index + 1}. a paragraph line that is long enough to wrap over the column limit of seventy six characters for sure`
+      : `${index + 1}. short line`,
+  )
+  const key = { key: 'v', code: 'KeyV', windowsVirtualKeyCode: 86 }
+  const rounds = 10
+  const seen = []
+  for (let round = 0; round < rounds; round++) {
+    await nullpad.page.goto('/')
+    await nullpad.page.locator('#caret').waitFor()
+    await nullpad.page.evaluate(
+      value => navigator.clipboard.writeText(value),
+      lines.join('\n'),
+    )
+    await nullpad.cdp.send('Input.dispatchKeyEvent', {
+      type: 'rawKeyDown',
+      ...key,
+      modifiers: 2,
+      commands: ['paste'],
+    })
+    await nullpad.cdp.send('Input.dispatchKeyEvent', {
+      type: 'keyUp',
+      ...key,
+      modifiers: 2,
+    })
+    await nullpad.page.keyboard.press('Control+Home')
+    await nullpad.page.waitForTimeout(100)
+    await nullpad.page.keyboard.press('Delete')
+    await nullpad.page.waitForTimeout(300)
+    const screen = await nullpad.screen()
+    seen.push({
+      firstRow: screen.rows[0]?.text.slice(0, 12),
+      cursorOnScreen: screen.cursor?.inside ?? false,
+    })
+  }
+  expect(
+    seen,
+    'each round: the first line lost its 1, cursor on screen',
+  ).toEqual(
+    Array.from({ length: rounds }, () => ({
+      firstRow: '. a paragrap',
+      cursorOnScreen: true,
+    })),
+  )
+})

@@ -13,5 +13,6 @@ export const Message = defineMessageUnion({
   CompletedRevealCaret: {},
   FocusedKeyboard: {},
   BlurredKeyboard: {},
+  FoundBrowserUnsupported: {},
 })
 export type Message = typeof Message.Type

@@ -151,6 +151,22 @@ body {
   color: var(--dim);
 }
 
+.unsupported {
+  flex: 1;
+  max-width: 76ch;
+  padding: 10px 2ch 0;
+  color: var(--dim);
+}
+
+.unsupported p {
+  margin: 0 0 var(--row);
+}
+
+.unsupported .headline {
+  color: var(--fg);
+  font-weight: 800;
+}
+
 #port {
   position: fixed;
   position-anchor: --caret;

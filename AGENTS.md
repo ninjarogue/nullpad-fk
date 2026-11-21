@@ -50,7 +50,7 @@ A rule that breaks twice gets a check, not a reminder. Add the rule to its confi
 
 ```sh
 pnpm format:check
-pnpm lint        # oxlint with the Foldkit and Effect presets, read-only
+pnpm lint        # oxlint with the Foldkit and Effect presets and type-aware TypeScript rules, read-only
 pnpm typecheck   # the shell (tsconfig.json), the core (src/core/tsconfig.json) and the tests (e2e/tsconfig.json)
 pnpm arch        # import rules and the one-keyboard check
 pnpm build

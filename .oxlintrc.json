@@ -5,6 +5,9 @@
   "categories": {
     "correctness": "off"
   },
+  "options": {
+    "typeAware": true
+  },
   "rules": {
     "no-unused-vars": [
       "error",
@@ -24,7 +27,11 @@
     ],
     "typescript/triple-slash-reference": [
       "error",
-      { "lib": "never", "path": "never", "types": "never" }
+      {
+        "lib": "never",
+        "path": "never",
+        "types": "never"
+      }
     ],
     "sort-imports": [
       "error",
@@ -32,7 +39,44 @@
         "ignoreDeclarationSort": true,
         "ignoreCase": false
       }
-    ]
+    ],
+    "eqeqeq": "error",
+    "typescript/consistent-type-imports": "error",
+    "typescript/no-floating-promises": "error",
+    "typescript/no-misused-promises": "error",
+    "typescript/no-misused-spread": "error",
+    "typescript/no-non-null-assertion": "error",
+    "typescript/no-unnecessary-type-assertion": "error",
+    "typescript/no-unsafe-argument": "error",
+    "typescript/no-unsafe-assignment": "error",
+    "typescript/no-unsafe-call": "error",
+    "typescript/no-unsafe-member-access": "error",
+    "typescript/no-unsafe-return": "error",
+    "typescript/no-unsafe-type-assertion": "error",
+    "typescript/only-throw-error": "error",
+    "typescript/switch-exhaustiveness-check": [
+      "error",
+      {
+        "allowDefaultCaseForExhaustiveSwitch": true,
+        "considerDefaultExhaustiveForUnions": true
+      }
+    ],
+    "typescript/await-thenable": "error",
+    "typescript/restrict-template-expressions": "error",
+    "typescript/restrict-plus-operands": [
+      "error",
+      {
+        "allowNumberAndString": false,
+        "allowAny": false,
+        "allowBoolean": false,
+        "allowNullish": false,
+        "allowRegExp": false
+      }
+    ],
+    "typescript/no-unnecessary-condition": "error",
+    "typescript/prefer-promise-reject-errors": "error",
+    "typescript/unbound-method": "error",
+    "no-debugger": "error"
   },
   "ignorePatterns": [
     "dist/",

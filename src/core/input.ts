@@ -32,11 +32,15 @@ export type Modifiers = typeof Modifiers.Type
  * it past a grapheme typed text joined with.
  * Paste is separate from Text so a mode that reads Text as commands never runs a paste.
  * Preedit is the IME's unfinished text ('' when it has none). Commit ends a composition.
+ * Erase is text an IME takes back before it writes its replacement, as when it converts letters already typed: the
+ * caret's line from `from` to `to`, in UTF-16 units counted from the caret, negative before it. The caret goes to
+ * where the erased text began.
  */
 export const Input = Schema.TaggedUnion({
   Key: { key: NamedKey, modifiers: Modifiers },
   Chord: { char: Schema.String, modifiers: Modifiers },
   Text: { text: Schema.String, byKey: Schema.Boolean },
+  Erase: { from: Schema.Number, to: Schema.Number },
   Paste: { text: Schema.String },
   Preedit: { text: Schema.String },
   Commit: { text: Schema.String },

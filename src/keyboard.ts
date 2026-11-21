@@ -67,8 +67,8 @@ const modifiersOf = (event: KeyboardEvent): Modifiers => ({
 /**
  * A keydown as an Input, or none when the key belongs to the browser or the IME, or will arrive as text from the
  * EditContext. Windows reports AltGr as Ctrl+Alt, so a character typed with both arrives as text. Backspace is taken
- * here too, so it lands in order with the keys around it. The EditContext holds no text to delete from, so the core
- * deletes the whole letter before the caret, as an EditContext does.
+ * here too, so it lands in order with the keys around it, and the core deletes the whole letter before the caret, as
+ * an EditContext does.
  */
 const fromKeyDown = (event: KeyboardEvent): Option.Option<Input> => {
   const { key } = event
@@ -124,6 +124,43 @@ const preeditBounds = (from: number, to: number): ReadonlyArray<DOMRect> => {
   )
 }
 
+/** A range of the EditContext's text, in UTF-16 units. */
+type Span = Readonly<{ start: number; end: number }>
+
+/**
+ * The text a textupdate replaces outside `kept`, the caret or the composition so far, as an Erase for the core. The
+ * EditContext holds the caret's line, so an IME can replace text already typed, but its copy may be a frame behind the
+ * core's. So the range is counted from `kept`, which stands where the core's caret does, never from the line's start.
+ */
+const replacement = (kept: Span, replaced: Span): Option.Option<Input> => {
+  const fromCaret = (offset: number) =>
+    offset < kept.start
+      ? offset - kept.start
+      : offset > kept.end
+        ? offset - kept.end
+        : 0
+  const from = fromCaret(replaced.start)
+  const to = fromCaret(replaced.end)
+  return from === to
+    ? Option.none()
+    : Option.some(Input.cases.Erase.make({ from, to }))
+}
+
+/** Where the composition lies once a textupdate replaced `replaced` with `text`: it takes in a range it touches. */
+const composedAfter = (composed: Span, replaced: Span, text: string): Span => {
+  const touches =
+    replaced.start <= composed.end && replaced.end >= composed.start
+  const start = touches
+    ? Math.min(composed.start, replaced.start)
+    : replaced.start
+  const end = touches
+    ? Math.max(composed.end, replaced.end) +
+      text.length -
+      (replaced.end - replaced.start)
+    : replaced.start + text.length
+  return { start, end }
+}
+
 const listen = (
   port: HTMLElement,
   context: EditContext,
@@ -131,11 +168,14 @@ const listen = (
   Stream.callback<KeyboardMessage>(queue =>
     Effect.gen(function* () {
       const boundsRequests =
-        yield* Queue.unbounded<Readonly<{ from: number; to: number }>>()
+        yield* Queue.unbounded<
+          Readonly<{ from: number; to: number; base: number }>
+        >()
       const reportBounds = ({
         from,
         to,
-      }: Readonly<{ from: number; to: number }>) =>
+        base,
+      }: Readonly<{ from: number; to: number; base: number }>) =>
         Effect.sync(() => {
           Option.map(drawnRect('.surface'), rect =>
             context.updateControlBounds(rect),
@@ -143,7 +183,10 @@ const listen = (
           Option.map(drawnRect('#caret'), rect =>
             context.updateSelectionBounds(rect),
           )
-          context.updateCharacterBounds(from, preeditBounds(from, to))
+          context.updateCharacterBounds(
+            from,
+            preeditBounds(from - base, to - base),
+          )
         })
       yield* Queue.take(boundsRequests).pipe(
         Effect.tap(() => Render.afterCommit),
@@ -158,14 +201,38 @@ const listen = (
           const offerInput = (input: Input): boolean =>
             Queue.offerUnsafe(queue, Message.ReceivedInput({ input }))
           const keepFocus = () => port.focus({ preventScroll: true })
-          const state: { lastKey: Option.Option<string>; composing: boolean } =
-            { lastKey: Option.none(), composing: false }
-          const empty = () => {
-            context.updateText(0, context.text.length, '')
-            context.updateSelection(0, 0)
+          const state: {
+            lastKey: Option.Option<string>
+            selection: Span
+            composition: Option.Option<Span>
+          } = {
+            lastKey: Option.none(),
+            selection: { start: 0, end: 0 },
+            composition: Option.none(),
           }
+          const holdSurrounding = () => {
+            if (Option.isSome(state.composition)) {
+              return
+            }
+            const text = port.dataset['surrounding'] ?? ''
+            const caret = Number(port.dataset['caret'] ?? 0)
+            if (context.text !== text) {
+              context.updateText(0, context.text.length, text)
+            }
+            context.updateSelection(caret, caret)
+            state.selection = { start: caret, end: caret }
+          }
+          const surroundingChanges = new MutationObserver(holdSurrounding)
+          surroundingChanges.observe(port, {
+            attributes: true,
+            attributeFilter: ['data-surrounding', 'data-caret'],
+          })
+          signal.addEventListener('abort', () =>
+            surroundingChanges.disconnect(),
+          )
 
           Reflect.set(port, 'editContext', context)
+          holdSurrounding()
           port.addEventListener(
             'keydown',
             event => {
@@ -181,35 +248,54 @@ const listen = (
             'textupdate',
             event => {
               const text = textField(event, 'text')
-              if (state.composing) {
-                offerInput(Input.cases.Preedit.make({ text: context.text }))
-                return
+              const replaced = {
+                start: numberField(event, 'updateRangeStart'),
+                end: numberField(event, 'updateRangeEnd'),
               }
-              empty()
-              if (text !== '') {
-                offerInput(
-                  Input.cases.Text.make({
-                    text,
-                    byKey: Option.contains(state.lastKey, text),
-                  }),
-                )
+              Option.match(state.composition, {
+                onNone: () => {
+                  Option.map(replacement(state.selection, replaced), offerInput)
+                  if (text !== '') {
+                    offerInput(
+                      Input.cases.Text.make({
+                        text,
+                        byKey: Option.contains(state.lastKey, text),
+                      }),
+                    )
+                  }
+                  state.lastKey = Option.none()
+                },
+                onSome: composed => {
+                  Option.map(replacement(composed, replaced), offerInput)
+                  const { start, end } = composedAfter(composed, replaced, text)
+                  state.composition = Option.some({ start, end })
+                  offerInput(
+                    Input.cases.Preedit.make({
+                      text: context.text.slice(start, end),
+                    }),
+                  )
+                },
+              })
+              state.selection = {
+                start: numberField(event, 'selectionStart'),
+                end: numberField(event, 'selectionEnd'),
               }
-              state.lastKey = Option.none()
             },
             { signal },
           )
           context.addEventListener(
             'compositionstart',
             () => {
-              state.composing = true
+              const { start } = state.selection
+              state.composition = Option.some({ start, end: start })
             },
             { signal },
           )
           context.addEventListener(
             'compositionend',
             event => {
-              state.composing = false
-              empty()
+              state.composition = Option.none()
+              holdSurrounding()
               offerInput(
                 Input.cases.Commit.make({
                   text: event instanceof CompositionEvent ? event.data : '',
@@ -224,6 +310,10 @@ const listen = (
               Queue.offerUnsafe(boundsRequests, {
                 from: numberField(event, 'rangeStart'),
                 to: numberField(event, 'rangeEnd'),
+                base: Option.match(state.composition, {
+                  onNone: () => state.selection.start,
+                  onSome: ({ start }) => start,
+                }),
               })
             },
             { signal },
@@ -275,9 +365,10 @@ const listen = (
   )
 
 /**
- * The app's only keyboard listener, on the app's only text input: an element with an empty EditContext. The
- * EditContext holds nothing between keys. Text it receives becomes an Input and is cleared, and an IME composes in it
- * until it commits, so the core's text never has to be copied into it.
+ * The app's only keyboard listener, on the app's only text input: an element with an EditContext. The EditContext
+ * holds the caret's line, or the part of it near the caret, which the port's attributes carry from the view, so an IME
+ * can read it and convert letters already typed. Text it receives becomes an Input, and an IME composes in it until it
+ * commits. The EditContext takes the line again after each render, except while an IME composes.
  */
 export const KeyboardPort = Mount.defineStream('KeyboardPort', {
   messages: [
@@ -300,11 +391,16 @@ export const KeyboardPort = Mount.defineStream('KeyboardPort', {
 })
 
 /** Rendered once, at the app root, outside every branch that can switch. */
-export const keyboardPort = (h: HtmlBuilder<Message>): Html =>
+export const keyboardPort = (
+  surrounding: Readonly<{ text: string; caret: number }>,
+  h: HtmlBuilder<Message>,
+): Html =>
   h.div([
     h.Id('port'),
     h.Role('textbox'),
     h.AriaLabel('editor'),
     h.Tabindex(0),
+    h.DataAttribute('surrounding', surrounding.text),
+    h.DataAttribute('caret', String(surrounding.caret)),
     h.OnMount(KeyboardPort()),
   ])

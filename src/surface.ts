@@ -1,6 +1,6 @@
 import { Array, Effect, Option, Queue, Stream } from 'effect'
 import { Mount, Render } from 'foldkit'
-import type { Html, HtmlBuilder } from 'foldkit/html'
+import { type Html, type HtmlBuilder, createKeyedLazy } from 'foldkit/html'
 
 import {
   type Answer,
@@ -75,10 +75,14 @@ const lineText = (line: HTMLElement): string =>
     '',
   )
 
-/** The DOM point of a column, in the text node that holds it, or the end of the one before a join. */
+/**
+ * The DOM point of a column, in the text node that holds it. At a join it is the end of the node before, or with side
+ * `After` the start of the node after, so a range that starts at a join measures the text after it.
+ */
 const domPoint = (
   line: HTMLElement,
   column: number,
+  side: 'Before' | 'After' = 'Before',
 ): Readonly<{ node: Node; offset: number }> => {
   const nodes = textNodes(line)
   const found = Array.reduce(
@@ -87,12 +91,18 @@ const domPoint = (
       rest: column,
       point: Option.none<Readonly<{ node: Node; offset: number }>>(),
     },
-    (search, node) =>
-      Option.isSome(search.point) || search.rest > node.length
-        ? Option.isSome(search.point)
-          ? search
-          : { rest: search.rest - node.length, point: search.point }
-        : { rest: 0, point: Option.some({ node, offset: search.rest }) },
+    (search, node, index) => {
+      if (Option.isSome(search.point)) {
+        return search
+      }
+      const takesNext =
+        side === 'After' && index < nodes.length - 1
+          ? search.rest >= node.length
+          : search.rest > node.length
+      return takesNext
+        ? { rest: search.rest - node.length, point: search.point }
+        : { rest: 0, point: Option.some({ node, offset: search.rest }) }
+    },
   )
   return Option.getOrElse(found.point, () => ({ node: line, offset: 0 }))
 }
@@ -129,7 +139,7 @@ const rangeRect = (
   from: number,
   to: number,
 ): Option.Option<DOMRect> => {
-  const start = domPoint(line, from)
+  const start = domPoint(line, from, 'After')
   const end = domPoint(line, to)
   const range = document.createRange()
   range.setStart(start.node, start.offset)
@@ -712,24 +722,33 @@ export const SurfacePort = Mount.defineStream('SurfacePort', {
 })
 
 const lineView = (
-  line: PaintedLine,
+  id: PaintedLine['id'],
+  index: number,
+  number: number,
+  parts: PaintedLine['parts'],
   isCaretLine: boolean,
   h: HtmlBuilder<Message>,
 ): Html =>
   h.keyed('div')(
-    String(line.id),
+    String(id),
     [
       h.Class(isCaretLine ? 'line cl' : 'line'),
-      h.DataAttribute('line-id', String(line.id)),
-      h.DataAttribute('index', String(line.index)),
-      h.DataAttribute('n', String(line.number)),
+      h.DataAttribute('line-id', String(id)),
+      h.DataAttribute('index', String(index)),
+      h.DataAttribute('n', String(number)),
     ],
-    Array.map(line.parts, part =>
+    Array.map(parts, part =>
       part.isPreedit
         ? h.span([h.Class('pre'), h.DataAttribute('ghost', '')], [part.text])
         : part.text,
     ),
   )
+
+/**
+ * The view of each drawn line, rebuilt only when its parts, place or caret change. The core keeps a line's parts while
+ * the line is unchanged, so a keypress rebuilds one line however many are drawn.
+ */
+const lazyLine = createKeyedLazy()
 
 const spacer = (lines: number, h: HtmlBuilder<Message>): Html =>
   h.div([h.Class('spacer'), h.Style({ '--lines': String(lines) })])
@@ -758,7 +777,14 @@ export const surface = (
     [
       spacer(frame.above, h),
       ...Array.map(frame.lines, line =>
-        lineView(line, line.index === frame.caret.line, h),
+        lazyLine(line.id, lineView, [
+          line.id,
+          line.index,
+          line.number,
+          line.parts,
+          line.index === frame.caret.line,
+          h,
+        ]),
       ),
       spacer(frame.below, h),
       h.div([h.Id('caret'), h.Class('cur'), h.AriaHidden(true)]),

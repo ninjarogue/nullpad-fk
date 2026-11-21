@@ -70,9 +70,10 @@ const Locating = Schema.Struct({ cause: Queued, queued: Schema.Array(Queued) })
 /**
  * The text, the caret and what is drawn. The core never reads layout: rows, pixels and graphemes on screen are the
  * browser's, and come back as Answers. `goal` is the x that Up and Down aim for. As in Chrome, typing, a click or a
- * move that lands elsewhere clears it; Backspace, Delete, Enter inside a line and a move that stays put keep it.
- * `goalRow` is the row of its line the last vertical move landed on: the goal holds only while the caret is still
- * drawn there, so a Backspace that takes the caret to another row forgets it, as in Chrome. Enter lifts the limit.
+ * move that lands elsewhere clears it; Backspace, Delete, Enter inside a piece of its line and a move that stays put
+ * keep it. `goalRow` is the row of its line the last vertical move landed on: the goal holds only while the caret is
+ * still drawn there, so a Backspace that takes the caret to another row forgets it, as in Chrome. Enter lifts the
+ * limit.
  * `caretAtRowEnd` draws a caret where its line wraps at the end of the upper row, as Chrome's upstream caret after
  * End, a click past a row end or a vertical move onto one. `top` is the line the shell reports at the top of the
  * screen and `rows` how many rows the screen holds. `revision` counts changes to the drawn text, so the shell answers
@@ -115,13 +116,18 @@ export type PaintedLine = Readonly<{
   parts: ReadonlyArray<Part>
 }>
 
-/** Everything the view draws. `above` and `below` count the lines not drawn, each estimated at one row. */
+/**
+ * Everything the view draws. `above` and `below` count the lines not drawn, each estimated at one row. `surrounding` is
+ * the caret's line, or as much of it as lies near the caret, with the caret's offset in it: the text an IME reads to
+ * convert letters already typed.
+ */
 export type Frame = Readonly<{
   lines: ReadonlyArray<PaintedLine>
   above: number
   below: number
   gutter: number
   caret: Readonly<{ line: number; column: number; atRowEnd: boolean }>
+  surrounding: Readonly<{ text: string; caret: number }>
   status: Readonly<{
     mode: Mode
     line: number
@@ -164,8 +170,12 @@ const redraw = (editor: Editor, drawn: Drawn): Editor => {
     : { ...next, revision: editor.revision + 1 }
 }
 
-/** Lines drawn on each side of the screen, so Up, Down and paging find their target drawn. */
-const margin = (editor: Editor): number => editor.rows
+/**
+ * Lines drawn past each edge of the screen. Up, Down and paging find their target among a screen of them. A fast wheel
+ * scrolls the screen before nullpad hears of it and draws, so 125 lines, about 2,750 pixels, are drawn ahead of it.
+ * The shell reuses the view of every line that did not change, so typing costs what it did with one screen drawn.
+ */
+const margin = (editor: Editor): number => Math.max(editor.rows, 125)
 
 const drawnLines = (
   editor: Editor,
@@ -246,11 +256,14 @@ const typeText =
     return { ...inserted, buffer: Buffer.settle(inserted.buffer) }
   }
 
-/** Enter. Chrome keeps the goal when the break splits a line, and clears it at a line end. */
+/**
+ * Enter. Chrome keeps the goal when the break falls inside a piece of the line, and clears it at the start of the
+ * line, at a join and at the line end.
+ */
 const breakLine = (editor: Editor): Editor => {
-  const { caret } = settled(editor)
+  const buffer = settled(editor)
   const typed = typeText('\n')(editor)
-  return caret.column < Buffer.lineEnd(editor.buffer, caret.line)
+  return Buffer.isInsidePiece(buffer)
     ? { ...typed, goal: editor.goal, goalRow: Option.none() }
     : typed
 }
@@ -469,6 +482,20 @@ const inputPlan = (editor: Editor, input: Input): Plan =>
     Chord: () => now(editor, 'None'),
     Text: ({ text, byKey }) =>
       now(byKey ? typeText(text)(editor) : insertText(text)(editor)),
+    Erase: span => {
+      const { from, to } = Buffer.spanAround(editor.buffer, span.from, span.to)
+      return now(
+        samePosition(from, to)
+          ? editor
+          : redraw(
+              { ...editor, goal: Option.none() },
+              {
+                buffer: Buffer.erase(editor.buffer, from, to),
+                caretAtRowEnd: false,
+              },
+            ),
+      )
+    },
     Paste: ({ text }) => now(insertText(text)(editor)),
     Preedit: ({ text }) =>
       now(redraw(editor, { buffer: settled(editor), preedit: text })),
@@ -491,6 +518,11 @@ const planOf = (editor: Editor, queued: Queued): Plan =>
     Clicked: ({ x, y }) => clickPlan(editor, x, y),
   })
 
+/**
+ * Runs an input, or asks the browser what it needs first. A key whose caret left the drawn lines draws them again and
+ * scrolls the caret on screen in the frame that draws them. Waiting for the answer would leave a frame in which the
+ * browser, keeping the lines on screen still as the drawn lines change, reports the old place as a scroll.
+ */
 const run = (editor: Editor, queued: Queued): Outcome => {
   const plan = planOf(editor, queued)
   if (plan._tag === 'Done') {
@@ -503,7 +535,7 @@ const run = (editor: Editor, queued: Queued): Outcome => {
       locating: Option.some({ cause: queued, queued: [] }),
     },
     locate: Option.some({ query: plan.query, revision: drawn.revision }),
-    reveal: 'None',
+    reveal: drawn === editor ? 'None' : 'Nearest',
   }
 }
 
@@ -560,9 +592,24 @@ export const located = (editor: Editor, answer: Answer): Outcome =>
     },
   })
 
-/** The screen shows `top` as its first line. The caret may leave the screen until an input brings it back. */
-export const scrolled = (editor: Editor, top: number): Editor =>
-  top === editor.top ? editor : redraw(editor, { top })
+/**
+ * The screen shows `top` as its first line. The caret may leave the screen until an input brings it back, but its line
+ * stays drawn while the browser has yet to answer a key's query about it: a scroll reported then can come from a frame
+ * drawn before that key, and the answer reads the caret's line from the screen.
+ */
+export const scrolled = (editor: Editor, top: number): Editor => {
+  if (top === editor.top) {
+    return editor
+  }
+  const moved = redraw(editor, { top })
+  const { first, last } = drawnLines(moved)
+  const { line } = editor.buffer.caret
+  const asksAboutCaret = Option.exists(
+    editor.locating,
+    ({ cause }) => cause._tag === 'Fed',
+  )
+  return asksAboutCaret && (line < first || line > last) ? editor : moved
+}
 
 /** The screen holds this many rows now. The same size returns the same Editor. */
 export const resized = (editor: Editor, rows: number): Editor => {
@@ -577,29 +624,50 @@ const gutterWidth = (buffer: Buffer.Buffer): number =>
 const caretGrapheme = (text: string, column: number): number =>
   Array.fromIterable(Buffer.segmenter.segment(text.slice(0, column))).length
 
-/** The line split at its joins, and at the caret when a preedit is drawn there. */
-const partsOf = (
+const cutAt = (
   line: Buffer.Line,
-  preedit: Option.Option<Readonly<{ column: number; text: string }>>,
-): ReadonlyArray<Part> => {
-  const column = Option.match(preedit, {
-    onNone: () => [],
-    onSome: ({ column }) => [column],
-  })
+  extra: ReadonlyArray<number>,
+): ReadonlyArray<
+  Readonly<{ from: number; text: string; isPreedit: boolean }>
+> => {
   const cuts = Array.dedupeAdjacent(
-    Array.sort([0, ...line.joins, ...column, line.text.length], Order.Number),
+    Array.sort([0, ...line.joins, ...extra, line.text.length], Order.Number),
   )
   const texts = Array.map(Array.zip(cuts, cuts.slice(1)), ([from, to]) => ({
     from,
     text: line.text.slice(from, to),
     isPreedit: false,
   }))
-  const pieces = Array.isArrayNonEmpty(texts)
+  return Array.isArrayNonEmpty(texts)
     ? texts
     : [{ from: 0, text: '', isPreedit: false }]
-  return Option.match(preedit, {
-    onNone: () => pieces,
+}
+
+/**
+ * Each line's pieces, kept while the line is unchanged. An edit replaces a Line object, so a paint returns the same
+ * parts array for every other line and the shell can tell at once that its view is unchanged.
+ */
+const piecesOfLine = new WeakMap<Buffer.Line, ReadonlyArray<Part>>()
+
+const piecesOf = (line: Buffer.Line): ReadonlyArray<Part> => {
+  const known = piecesOfLine.get(line)
+  if (known !== undefined) {
+    return known
+  }
+  const pieces = cutAt(line, [])
+  piecesOfLine.set(line, pieces)
+  return pieces
+}
+
+/** The line split at its joins, and at the caret when a preedit is drawn there. */
+const partsOf = (
+  line: Buffer.Line,
+  preedit: Option.Option<Readonly<{ column: number; text: string }>>,
+): ReadonlyArray<Part> =>
+  Option.match(preedit, {
+    onNone: () => piecesOf(line),
     onSome: ({ column, text }) => {
+      const pieces = cutAt(line, [column])
       const at = Option.getOrElse(
         Array.findFirstIndex(pieces, piece => piece.from >= column),
         () => pieces.length,
@@ -611,12 +679,15 @@ const partsOf = (
       ]
     },
   })
-}
+
+/** How far, in UTF-16 units on each side of the caret, an IME may read the caret's line. */
+const surroundingReach = 1000
 
 export const paint = (editor: Editor): Frame => {
   const { buffer } = editor
   const { caret, lines } = buffer
   const { first, last } = drawnLines(editor)
+  const near = Buffer.spanAround(buffer, -surroundingReach, surroundingReach)
   return {
     lines: Array.map(lines.slice(first, last + 1), (line, offset) => {
       const index = first + offset
@@ -636,6 +707,13 @@ export const paint = (editor: Editor): Frame => {
     below: lines.length - 1 - last,
     gutter: gutterWidth(buffer),
     caret: { ...caret, atRowEnd: editor.caretAtRowEnd },
+    surrounding: {
+      text: (lines[caret.line]?.text ?? '').slice(
+        near.from.column,
+        near.to.column,
+      ),
+      caret: caret.column - near.from.column,
+    },
     status: {
       mode: editor.mode,
       line: caret.line + 1,

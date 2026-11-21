@@ -564,9 +564,24 @@ export const located = (editor: Editor, answer: Answer): Outcome =>
     },
   })
 
-/** The screen shows `top` as its first line. The caret may leave the screen until an input brings it back. */
-export const scrolled = (editor: Editor, top: number): Editor =>
-  top === editor.top ? editor : redraw(editor, { top })
+/**
+ * The screen shows `top` as its first line. The caret may leave the screen until an input brings it back, but its line
+ * stays drawn while the browser has yet to answer a key's query about it: a scroll reported then can come from a frame
+ * drawn before that key, and the answer reads the caret's line from the screen.
+ */
+export const scrolled = (editor: Editor, top: number): Editor => {
+  if (top === editor.top) {
+    return editor
+  }
+  const moved = redraw(editor, { top })
+  const { first, last } = drawnLines(moved)
+  const { line } = editor.buffer.caret
+  const asksAboutCaret = Option.exists(
+    editor.locating,
+    ({ cause }) => cause._tag === 'Fed',
+  )
+  return asksAboutCaret && (line < first || line > last) ? editor : moved
+}
 
 /** The screen holds this many rows now. The same size returns the same Editor. */
 export const resized = (editor: Editor, rows: number): Editor => {

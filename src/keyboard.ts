@@ -67,8 +67,8 @@ const modifiersOf = (event: KeyboardEvent): Modifiers => ({
 /**
  * A keydown as an Input, or none when the key belongs to the browser or the IME, or will arrive as text from the
  * EditContext. Windows reports AltGr as Ctrl+Alt, so a character typed with both arrives as text. Backspace is taken
- * here, before the EditContext acts, because a textarea takes a combining mark or a jamo alone where the EditContext
- * takes the whole cluster; leaving Backspace out of this function hands it to the EditContext instead.
+ * here too, so it lands in order with the keys around it. The EditContext holds no text to delete from, so the core
+ * deletes the whole letter before the caret, as an EditContext does.
  */
 const fromKeyDown = (event: KeyboardEvent): Option.Option<Input> => {
   const { key } = event

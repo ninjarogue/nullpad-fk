@@ -42,31 +42,6 @@ export const segmenter = new Intl.Segmenter(undefined, {
   granularity: 'grapheme',
 })
 
-const isHighSurrogate = (unit: number): boolean =>
-  unit >= 0xd800 && unit <= 0xdbff
-
-const isLowSurrogate = (unit: number): boolean =>
-  unit >= 0xdc00 && unit <= 0xdfff
-
-const isInsidePair = (text: string, at: number): boolean =>
-  isLowSurrogate(text.charCodeAt(at)) &&
-  isHighSurrogate(text.charCodeAt(at - 1))
-
-const codePointBefore = (text: string, at: number): string =>
-  text.slice(isInsidePair(text, at - 1) ? at - 2 : at - 1, at)
-
-const zwj = '\u200d'
-const isEmoji = /^\p{Emoji}$/u
-const isRegionalIndicator = /^\p{Regional_Indicator}$/u
-const isVariationSelector = /^[\ufe00-\ufe0f\u{e0100}-\u{e01ef}]$/u
-const isNonSpacingMark = /^\p{Mn}$/u
-const isEmojiModifier = /^\p{Emoji_Modifier}$/u
-const isEmojiModifierBase = /^\p{Emoji_Modifier_Base}$/u
-const isKeycapBase = /^[0-9#*]$/
-const isTag = /^[\u{e0020}-\u{e007e}]$/u
-const cancelTag = '\u{e007f}'
-const keycap = '\u20e3'
-
 type Piece = Readonly<{ from: number; to: number }>
 
 /** The text between the joins around a column. `side` picks the piece before or after a join that sits on it. */
@@ -89,157 +64,18 @@ const pieceAt = (
   ),
 })
 
-type BackspaceState =
-  | 'Start'
-  | 'BeforeKeycap'
-  | 'BeforeVariationAndKeycap'
-  | 'BeforeModifier'
-  | 'BeforeVariationAndModifier'
-  | 'BeforeVariation'
-  | 'BeforeEmoji'
-  | 'BeforeZwj'
-  | 'BeforeVariationAndZwj'
-  | 'OddFlagLetters'
-  | 'EvenFlagLetters'
-  | 'BeforeCancelTag'
-  | 'Done'
-
-type BackspaceStep = Readonly<{
-  state: BackspaceState
-  units: number
-  variation: number
-}>
-
 /**
- * Chrome's Backspace state machine: what it deletes, read one code point at a time backwards from the caret.
- * Most code points go alone. Emoji sequences (keycaps, skin tones, variation selectors, ZWJ chains,
- * flag pairs, tag sequences) go whole, but only as far as their parts are well formed.
+ * The grapheme boundary before `column` inside the piece before it, as Intl.Segmenter finds them: where Backspace
+ * starts deleting, so it takes a whole letter, accent, conjunct or jamo syllable, never one code point of it. The
+ * piece is segmented from its start, so a flag pair or a long run of marks is read whole.
  */
-const backspaceSteps: Readonly<
-  Record<BackspaceState, (step: BackspaceStep, point: string) => BackspaceStep>
-> = {
-  Start: (step, point) => {
-    const units = point.length
-    const next = (state: BackspaceState): BackspaceStep => ({
-      ...step,
-      state,
-      units,
-    })
-    return isVariationSelector.test(point)
-      ? next('BeforeVariation')
-      : isRegionalIndicator.test(point)
-        ? next('OddFlagLetters')
-        : isEmojiModifier.test(point)
-          ? next('BeforeModifier')
-          : isEmoji.test(point)
-            ? next('BeforeEmoji')
-            : point === keycap
-              ? next('BeforeKeycap')
-              : point === cancelTag
-                ? next('BeforeCancelTag')
-                : next('Done')
-  },
-  BeforeKeycap: (step, point) =>
-    isVariationSelector.test(point)
-      ? { ...step, state: 'BeforeVariationAndKeycap', variation: point.length }
-      : {
-          ...step,
-          state: 'Done',
-          units: step.units + (isKeycapBase.test(point) ? point.length : 0),
-        },
-  BeforeVariationAndKeycap: (step, point) => ({
-    ...step,
-    state: 'Done',
-    units:
-      step.units +
-      (isKeycapBase.test(point) ? step.variation + point.length : 0),
-  }),
-  BeforeModifier: (step, point) =>
-    isVariationSelector.test(point)
-      ? {
-          ...step,
-          state: 'BeforeVariationAndModifier',
-          variation: point.length,
-        }
-      : isEmojiModifierBase.test(point)
-        ? { ...step, state: 'BeforeEmoji', units: step.units + point.length }
-        : { ...step, state: 'Done' },
-  BeforeVariationAndModifier: (step, point) => ({
-    ...step,
-    state: 'Done',
-    units:
-      step.units +
-      (isEmojiModifierBase.test(point) ? step.variation + point.length : 0),
-  }),
-  BeforeVariation: (step, point) =>
-    isEmoji.test(point)
-      ? { ...step, state: 'BeforeEmoji', units: step.units + point.length }
-      : {
-          ...step,
-          state: 'Done',
-          units:
-            step.units +
-            (isVariationSelector.test(point) || isNonSpacingMark.test(point)
-              ? 0
-              : point.length),
-        },
-  BeforeEmoji: (step, point) => ({
-    ...step,
-    state: point === zwj ? 'BeforeZwj' : 'Done',
-  }),
-  BeforeZwj: (step, point) =>
-    isEmoji.test(point)
-      ? {
-          ...step,
-          state: isEmojiModifier.test(point) ? 'BeforeModifier' : 'BeforeEmoji',
-          units: step.units + point.length + zwj.length,
-        }
-      : isVariationSelector.test(point)
-        ? { ...step, state: 'BeforeVariationAndZwj', variation: point.length }
-        : { ...step, state: 'Done' },
-  BeforeVariationAndZwj: (step, point) =>
-    isEmoji.test(point)
-      ? {
-          state: 'BeforeEmoji',
-          units: step.units + point.length + zwj.length + step.variation,
-          variation: 0,
-        }
-      : { ...step, state: 'Done' },
-  OddFlagLetters: (step, point) =>
-    isRegionalIndicator.test(point)
-      ? { ...step, state: 'EvenFlagLetters', units: step.units + point.length }
-      : { ...step, state: 'Done' },
-  EvenFlagLetters: (step, point) =>
-    isRegionalIndicator.test(point)
-      ? { ...step, state: 'OddFlagLetters', units: step.units - point.length }
-      : { ...step, state: 'Done' },
-  BeforeCancelTag: (step, point) =>
-    isTag.test(point)
-      ? { ...step, units: step.units + point.length }
-      : {
-          ...step,
-          state: 'Done',
-          units: step.units + (isEmoji.test(point) ? point.length : 0),
-        },
-  Done: step => step,
+const boundaryBefore = (line: Line, column: number): number => {
+  const { from } = pieceAt(line, column, 'Before')
+  const grapheme = segmenter
+    .segment(line.text.slice(from, column))
+    .containing(column - from - 1)
+  return from + (grapheme?.index ?? 0)
 }
-
-/** UTF-16 units Backspace deletes before `at`, reading back no further than `from`. */
-const backspaceUnits = (text: string, from: number, at: number): number => {
-  let step: BackspaceStep = { state: 'Start', units: 0, variation: 0 }
-  let cursor = at
-  while (cursor > from && step.state !== 'Done') {
-    const point = codePointBefore(text, cursor)
-    step = backspaceSteps[step.state](step, point)
-    cursor -= point.length
-  }
-  return step.units
-}
-
-/** Where Backspace starts deleting, as Chrome decides it for a text box: what the state machine reads back inside the piece before the caret. */
-const backspaceStart = (line: Line, column: number): number =>
-  column -
-  backspaceUnits(line.text, pieceAt(line, column, 'Before').from, column)
 
 /**
  * The next grapheme boundary at or after `column` inside its piece, as Intl.Segmenter finds them. Only the text near
@@ -406,11 +242,11 @@ export const moveTo = (buffer: Buffer, position: Position): Buffer => {
   return { ...buffer, caret: { line, column } }
 }
 
-/** Where Backspace starts deleting from the caret: back inside the line, or the end of the line above. */
+/** Where Backspace starts deleting from the caret: the start of the letter before it, or the end of the line above. */
 export const backspaceTarget = (buffer: Buffer): Position => {
   const { line, column } = buffer.caret
   if (column > 0) {
-    return { line, column: backspaceStart(lineAt(buffer, line), column) }
+    return { line, column: boundaryBefore(lineAt(buffer, line), column) }
   }
   return line > 0
     ? { line: line - 1, column: lineAt(buffer, line - 1).text.length }

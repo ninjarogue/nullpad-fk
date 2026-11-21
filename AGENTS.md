@@ -14,10 +14,10 @@ subtree_prompted: false
 
 ## Editor
 
-The editor types like a browser text box because the browser makes the decisions a text box makes. The core owns the text, the caret, which lines are drawn and the Backspace rule. The browser owns typed text, IME composition, line wrap, caret steps, hit testing and scrolling.
+The editor types like a browser text box because the browser makes the decisions a text box makes. The core owns the text, the caret and which lines are drawn. The browser owns typed text, IME composition, line wrap, caret steps, hit testing and scrolling.
 
 - `src/keyboard.ts` puts an empty EditContext on `#port`, the app's one focusable element, and turns every key, text, IME and paste event into an `Input`. Text the EditContext receives is cleared at once, so it never holds the note. `update` passes the `Input` to `Editor.feed` in `src/core/editor.ts`. Only this file knows about EditContext; a fallback for browsers without one slots in here.
-- Backspace follows the core's textarea rule (`backspaceTarget` in `src/core/buffer.ts`), taken in `keydown` before the EditContext acts. Leaving Backspace out of `fromKeyDown` hands it to the EditContext instead.
+- Backspace deletes the whole letter (grapheme cluster) before the caret, as an EditContext does, where a textarea deletes one code point of an accent, a conjunct or a jamo. The EditContext holds no text, so `fromKeyDown` takes Backspace in `keydown`, which keeps it in order with the other keys, and `backspaceTarget` in `src/core/buffer.ts` finds the letter with `Intl.Segmenter`.
 - A key that needs layout (Left, Right, Delete, Home, End, Up, Down, Page Up, Page Down) or a click makes the core return a `Query` and queue every input after it. `src/surface.ts` answers it once the DOM shows the core's `revision`, with `Selection.modify` and `caretPositionFromPoint` on the drawn lines, and `CompletedLocate` lands the answer and replays the queue. The core never reads layout and the shell never moves the caret from a stale frame.
 - `src/surface.ts` draws the lines of `Editor.paint`: one `.line` per text line, wrapped by CSS, each piece between joins its own text node, one spacer row per undrawn line above and below, and a `#caret` overlay placed from a Range rect after each patch. `.surface` scrolls natively and reports its first line and its height in rows.
 - A new key binding goes in `plainKeys` in `src/core/editor.ts`.

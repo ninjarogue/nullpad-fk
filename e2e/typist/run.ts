@@ -263,10 +263,9 @@ const editContextBackspace = async (
 /**
  * Backspace on the textarea, then as much more of the letter before the caret as a bare EditContext takes from the
  * same text. The textarea keeps its own Backspace where the two agree, so its column for Up and Down survives; where
- * the EditContext takes more, the rest goes as a selection. On text that holds an accepted difference, such as a mark
- * after a flag letter or a ZWJ before a flag letter, Chrome's textarea deletes text outside the letter, such as the
- * character after the caret, so there is nothing to finish and the pair is left for `compare` to file under that
- * accepted difference.
+ * the EditContext takes more, the rest goes as a selection. On an accepted malformed sequence, Chrome's textarea may delete
+ * text outside the letter, such as the character after the caret, so there is nothing to finish and the pair is left
+ * for `compare` to file under that accepted difference.
  */
 const backspaceAsEditContext = async (pair: Pair) => {
   const { value, caret } = await textareaCaret(pair.textarea)

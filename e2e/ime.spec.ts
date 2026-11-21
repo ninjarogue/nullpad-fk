@@ -1,4 +1,4 @@
-import { expect, numberedLines, test } from './nullpad'
+import { expect, linesOf, numberedLines, test } from './nullpad'
 
 test('an IME composition shows its preedit at the cursor without changing the text, then commits once', async ({
   nullpad,
@@ -180,4 +180,71 @@ test('an IME that converts a word before the caret, not next to it, replaces tha
     column: 6,
     lineCount: 1,
   })
+})
+
+test('a click while composing commits the composition where it was composed and moves the cursor to the click', async ({
+  nullpad,
+}) => {
+  await nullpad.paste('hello world')
+  await nullpad.press('Control+Home')
+  await nullpad.compose('か')
+  expect(await nullpad.preedit(), 'preedit drawn').toBe('か')
+  const screen = await nullpad.screen()
+  const row = screen.rows[0]
+  await nullpad.click(
+    (row?.inkRight ?? 0) + 3 * screen.cell,
+    ((row?.top ?? 0) + (row?.bottom ?? 0)) / 2,
+  )
+  expect(await nullpad.preedit(), 'no preedit left').toBe('')
+  expect(await nullpad.text(), 'the composition committed in place').toBe(
+    'かhello world',
+  )
+  expect(await nullpad.status(), 'cursor at the click').toEqual({
+    line: 1,
+    column: 13,
+    lineCount: 1,
+  })
+})
+
+test('a click right after a wheel turn made while composing commits the composition on its own line and lands on the line the turn scrolled under the pointer', async ({
+  nullpad,
+}) => {
+  await nullpad.paste(numberedLines(400))
+  await nullpad.page.mouse.move(400, 300)
+  const start = await nullpad.screen()
+  const turn = 40
+  for (let trial = 1; trial <= 3; trial++) {
+    await nullpad.press('Control+End')
+    await nullpad.compose('かな')
+    const target = start.rows[4 * trial]
+    if (target === undefined || target.number === null) {
+      throw new Error('no numbered row to click')
+    }
+    await nullpad.cdp.send('Input.dispatchMouseEvent', {
+      type: 'mouseWheel',
+      x: 400,
+      y: 300,
+      deltaX: 0,
+      deltaY: -start.rowHeight * turn,
+    })
+    await nullpad.click(
+      target.left + 2.25 * start.cell,
+      (target.top + target.bottom) / 2,
+    )
+    expect(await nullpad.preedit(), `trial ${trial}: no preedit left`).toBe('')
+    const after = await nullpad.screen()
+    expect(
+      after.status.line,
+      `trial ${trial}: the cursor is on the line the turn scrolled there`,
+    ).toBe(Number(target.number) - turn)
+    expect(
+      after.cursor?.inside,
+      `trial ${trial}: the cursor is on screen`,
+    ).toBe(true)
+    await nullpad.press('Control+End')
+    expect(
+      linesOf(await nullpad.screen()).at(-1),
+      `trial ${trial}: the composition committed on the last line`,
+    ).toBe(`line 400${'かな'.repeat(trial)}`)
+  }
 })

@@ -21,6 +21,24 @@ module.exports = {
       to: { path: 'node_modules/@effect/platform-browser/' },
     },
     {
+      name: 'shell-imports-core-internals',
+      severity: 'error',
+      from: { path: '^src/', pathNot: core },
+      to: { path: core, pathNot: '^src/core/(editor|input)[.]ts$' },
+    },
+    {
+      name: 'src-imports-outside-src',
+      severity: 'error',
+      from: { path: '^src/' },
+      to: { pathNot: ['^src/', '^node_modules/'] },
+    },
+    {
+      name: 'ui-components-outside-keyboard',
+      severity: 'error',
+      from: { path: '^src/', pathNot: '^src/keyboard[.]ts$' },
+      to: { path: 'node_modules/@foldkit/ui/' },
+    },
+    {
       name: 'not-to-unresolvable',
       severity: 'error',
       from: {},

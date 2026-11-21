@@ -98,7 +98,7 @@ export const view = (model: Model, h: HtmlBuilder<Message>): Document => {
               surface(frame, model.keyboard, h),
               statusLine(frame.status, model.path, h),
             ]),
-        keyboardPort(frame.surrounding, h),
+        keyboardPort(frame.surrounding, model.keyboard, h),
       ],
     ),
   }

@@ -23,11 +23,17 @@ type EditContext = EventTarget &
     ) => void
   }>
 
+/** None where the browser has no EditContext, or has one turned off so that making it throws. */
 const makeEditContext = (): Option.Option<EditContext> => {
   const constructor: unknown = Reflect.get(globalThis, 'EditContext')
-  return typeof constructor === 'function'
-    ? Option.some(Reflect.construct(constructor, []))
-    : Option.none()
+  if (typeof constructor !== 'function') {
+    return Option.none()
+  }
+  try {
+    return Option.some(Reflect.construct(constructor, []))
+  } catch {
+    return Option.none()
+  }
 }
 
 /** A field of an EditContext event, whose classes TypeScript's DOM library does not declare either. */
@@ -395,13 +401,14 @@ export const KeyboardPort = Mount.defineStream('KeyboardPort', {
 /** Rendered once, at the app root, outside every branch that can switch. */
 export const keyboardPort = (
   surrounding: Readonly<{ text: string; caret: number }>,
+  keyboard: Keyboard,
   h: HtmlBuilder<Message>,
 ): Html =>
   h.div([
     h.Id('port'),
-    h.Role('textbox'),
-    h.AriaLabel('editor'),
-    h.Tabindex(0),
+    ...(keyboard === 'Unsupported'
+      ? [h.Tabindex(-1)]
+      : [h.Role('textbox'), h.AriaLabel('editor'), h.Tabindex(0)]),
     h.DataAttribute('surrounding', surrounding.text),
     h.DataAttribute('caret', String(surrounding.caret)),
     h.OnMount(KeyboardPort()),
@@ -416,7 +423,7 @@ export const browserUnsupportedNotice = (h: HtmlBuilder<Message>): Html =>
       h.p(
         [],
         [
-          "It types through EditContext, which Firefox and Safari don't have yet.",
+          "It types through EditContext, which Firefox, Safari and browsers built on them, such as Zen, don't have yet.",
         ],
       ),
     ],

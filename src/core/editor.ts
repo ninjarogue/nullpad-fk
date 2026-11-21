@@ -27,7 +27,6 @@ export const Query = Schema.TaggedUnion({
     atRowEnd: Schema.Boolean,
     rows: Schema.Literals([-1, 1]),
     goal: Schema.Option(Schema.Number),
-    goalRow: Schema.Option(Schema.Number),
   },
   Page: {
     at: Buffer.Position,
@@ -47,15 +46,8 @@ export const Landing = Schema.TaggedUnion({
 })
 export type Landing = typeof Landing.Type
 
-/**
- * `aim` is the x, in pixels from the text's left edge, that a vertical move aimed at: the goal it keeps. `row` is
- * the row of its line, counted from 0, that a vertical move left the caret on.
- */
-export const Answer = Schema.Struct({
-  landing: Landing,
-  aim: Schema.Number,
-  row: Schema.Number,
-})
+/** `aim` is the x, in pixels from the text's left edge, that a vertical move aimed at: the goal it keeps. */
+export const Answer = Schema.Struct({ landing: Landing, aim: Schema.Number })
 export type Answer = typeof Answer.Type
 
 const Queued = Schema.TaggedUnion({
@@ -70,10 +62,8 @@ const Locating = Schema.Struct({ cause: Queued, queued: Schema.Array(Queued) })
 /**
  * The text, the caret and what is drawn. The core never reads layout: rows, pixels and graphemes on screen are the
  * browser's, and come back as Answers. `goal` is the x that Up and Down aim for. As in Chrome, typing, a click or a
- * move that lands elsewhere clears it; Backspace, Delete, Enter inside a piece of its line (not at a caret drawn at the
- * end of the upper row) and a move that stays put keep it. `goalRow` is the row of its line the last vertical move
- * landed on: the goal holds only while the caret is still drawn there, so a Backspace that takes the caret to another row forgets it, as in Chrome. Enter lifts the
- * limit.
+ * move that lands elsewhere clears it; a move that stays put keeps it, and so do Backspace, Delete and Enter that leave
+ * the caret in the text node it was in, on the same side of a wrap (see `eraseTo` and `breakLine`).
  * `caretAtRowEnd` draws a caret where its line wraps at the end of the upper row, as Chrome's upstream caret after
  * End, a click past a row end or a vertical move onto one. `top` is the line the shell reports at the top of the
  * screen and `rows` how many rows the screen holds. `revision` counts changes to the drawn text, so the shell answers
@@ -84,7 +74,6 @@ export const Editor = Schema.Struct({
   mode: Mode,
   preedit: Schema.String,
   goal: Schema.Option(Schema.Number),
-  goalRow: Schema.Option(Schema.Number),
   caretAtRowEnd: Schema.Boolean,
   top: Schema.Number,
   rows: Schema.Number,
@@ -142,7 +131,6 @@ export const open = (text: string): Editor => ({
   mode: 'Plain',
   preedit: '',
   goal: Option.none(),
-  goalRow: Option.none(),
   caretAtRowEnd: false,
   top: 0,
   rows: 24,
@@ -264,15 +252,23 @@ const breakLine = (editor: Editor): Editor => {
   const buffer = settled(editor)
   const typed = typeText('\n')(editor)
   return Buffer.isInsidePiece(buffer) && !editor.caretAtRowEnd
-    ? { ...typed, goal: editor.goal, goalRow: Option.none() }
+    ? { ...typed, goal: editor.goal }
     : typed
 }
 
+/**
+ * Backspace and Delete. Chrome keeps the goal only when its caret ends in the text node it was in, on the same side of
+ * a wrap: an erase that empties the caret's piece, ends in another one or starts at a caret drawn at the end of the
+ * upper row clears it, wherever the caret is drawn after.
+ */
 const eraseTo = (editor: Editor, target: Buffer.Position): Editor => {
   const buffer = settled(editor)
+  const keepsGoal =
+    !editor.caretAtRowEnd &&
+    Buffer.keepsCaretPiece(buffer, buffer.caret, target)
   return samePosition(target, buffer.caret)
     ? editor
-    : redraw(editor, {
+    : redraw(keepsGoal ? editor : { ...editor, goal: Option.none() }, {
         buffer: Buffer.erase(buffer, buffer.caret, target),
         caretAtRowEnd: false,
       })
@@ -401,10 +397,7 @@ const documentEdge = (editor: Editor, edge: 'Start' | 'End'): Plan =>
     ),
   )
 
-/**
- * Up and Down aim at the goal while the caret is on its row, or else at the caret's own x, which becomes the goal even
- * if the caret cannot move.
- */
+/** Up and Down aim at the goal, or at the caret's own x, which becomes the goal even if the caret cannot move. */
 const vertical =
   (rows: -1 | 1) =>
   (editor: Editor): Plan =>
@@ -414,16 +407,15 @@ const vertical =
         atRowEnd: editor.caretAtRowEnd,
         rows,
         goal: editor.goal,
-        goalRow: editor.goalRow,
       }),
-      ({ landing, aim, row }) => {
-        const goal = { goal: Option.some(aim), goalRow: Option.some(row) }
+      ({ landing, aim }) => {
+        const goal = Option.some(aim)
         return done(
           Option.match(landingPosition(editor, landing), {
-            onNone: () => ({ ...editor, ...goal }),
+            onNone: () => ({ ...editor, goal }),
             onSome: ({ caret, atRowEnd }) => ({
               ...moveTo(editor, caret, atRowEnd),
-              ...goal,
+              goal,
             }),
           }),
         )
@@ -432,7 +424,7 @@ const vertical =
 
 /**
  * Page Up and Page Down move the caret a page at the x it is drawn at, then scroll its row to the top of the screen,
- * as far as the end of the text allows. Like Chrome, they forget the goal.
+ * as far as the end of the text allows. Like any other move, they clear the goal unless they leave the caret where it was.
  */
 const page =
   (direction: -1 | 1) =>
@@ -443,10 +435,7 @@ const page =
         atRowEnd: editor.caretAtRowEnd,
         direction,
       }),
-      answer => {
-        const landed = landMove(editor, 'Top')(answer)
-        return { ...landed, editor: { ...landed.editor, goal: Option.none() } }
-      },
+      landMove(editor, 'Top'),
     )
 
 const plainKeys: Readonly<
@@ -455,14 +444,8 @@ const plainKeys: Readonly<
   Escape: editor => now(editor, 'None'),
   Enter: editor => now(breakLine(editor)),
   Tab: editor => now(typeText('  ')(editor)),
-  Backspace: editor => {
-    const erased = eraseTo(editor, Buffer.backspaceTarget(settled(editor)))
-    return now(
-      erased.buffer.caret.line === editor.buffer.caret.line
-        ? erased
-        : { ...erased, goal: Option.none() },
-    )
-  },
+  Backspace: editor =>
+    now(eraseTo(editor, Buffer.backspaceTarget(settled(editor)))),
   Delete: deleteForward,
   ArrowLeft: step('Backward'),
   ArrowRight: step('Forward'),

@@ -196,6 +196,7 @@ Where a malformed sequence makes Chrome's textarea or EditContext disagree with 
 - A skin tone after a character that takes none.
 - A virama with no letter before it.
 - A variation selector not after a pictograph.
+- A mark on a space.
 
 Each sweep shard and each scout shard reports how many mismatches each accepted difference covered.
 

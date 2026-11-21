@@ -800,6 +800,17 @@ export const namedScripts: ReadonlyArray<
       key('ArrowDown'),
     ],
   },
+  {
+    name: 'End after a space typed in front of a mark that starts a line of one long word',
+    script: [
+      insert('x'.repeat(100)),
+      key('Control+Home'),
+      text('\u0308'),
+      key('Home'),
+      text(' '),
+      key('End'),
+    ],
+  },
 ]
 
 type Difference = Readonly<{ name: string; pattern: RegExp }>
@@ -834,6 +845,10 @@ export const acceptedDifferences: ReadonlyArray<Difference> = [
   {
     name: 'stray variation selector',
     pattern: /(?<!\p{Extended_Pictographic})️/u,
+  },
+  {
+    name: 'mark on a space',
+    pattern: / \p{M}/u,
   },
 ]
 

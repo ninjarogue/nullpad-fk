@@ -70,9 +70,9 @@ const Locating = Schema.Struct({ cause: Queued, queued: Schema.Array(Queued) })
 /**
  * The text, the caret and what is drawn. The core never reads layout: rows, pixels and graphemes on screen are the
  * browser's, and come back as Answers. `goal` is the x that Up and Down aim for. As in Chrome, typing, a click or a
- * move that lands elsewhere clears it; Backspace, Delete, Enter inside a piece of its line and a move that stays put
- * keep it. `goalRow` is the row of its line the last vertical move landed on: the goal holds only while the caret is
- * still drawn there, so a Backspace that takes the caret to another row forgets it, as in Chrome. Enter lifts the
+ * move that lands elsewhere clears it; Backspace, Delete, Enter inside a piece of its line (not at a caret drawn at the
+ * end of the upper row) and a move that stays put keep it. `goalRow` is the row of its line the last vertical move
+ * landed on: the goal holds only while the caret is still drawn there, so a Backspace that takes the caret to another row forgets it, as in Chrome. Enter lifts the
  * limit.
  * `caretAtRowEnd` draws a caret where its line wraps at the end of the upper row, as Chrome's upstream caret after
  * End, a click past a row end or a vertical move onto one. `top` is the line the shell reports at the top of the
@@ -258,12 +258,12 @@ const typeText =
 
 /**
  * Enter. Chrome keeps the goal when the break falls inside a piece of the line, and clears it at the start of the
- * line, at a join and at the line end.
+ * line, at a join, at the line end and at a caret drawn at the end of the upper row.
  */
 const breakLine = (editor: Editor): Editor => {
   const buffer = settled(editor)
   const typed = typeText('\n')(editor)
-  return Buffer.isInsidePiece(buffer)
+  return Buffer.isInsidePiece(buffer) && !editor.caretAtRowEnd
     ? { ...typed, goal: editor.goal, goalRow: Option.none() }
     : typed
 }

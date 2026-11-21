@@ -477,6 +477,31 @@ test('PageDown aims at the cell the cursor is in, not at one an earlier move kep
   ).toMatchObject({ line: 2 + 2 * page, column: 2 })
 })
 
+test('PageUp on the first row keeps the column ArrowDown aims for, as a textarea does', async ({
+  nullpad,
+}) => {
+  await nullpad.paste('abcdefgh\nabcdefgh')
+  await nullpad.press('Control+Home')
+  await nullpad.press('ArrowRight', 3)
+  await nullpad.press('ArrowUp')
+  await nullpad.press('PageUp')
+  await nullpad.press('ArrowDown')
+  expect(await nullpad.status()).toEqual({ line: 2, column: 4, lineCount: 2 })
+})
+
+test('PageDown on the last row keeps the column ArrowUp aims for, as a textarea does', async ({
+  nullpad,
+}) => {
+  await nullpad.paste('abcdefgh\nabcdefgh')
+  await nullpad.press('Control+Home')
+  await nullpad.press('ArrowRight', 3)
+  await nullpad.press('ArrowDown')
+  await nullpad.press('ArrowDown')
+  await nullpad.press('PageDown')
+  await nullpad.press('ArrowUp')
+  expect(await nullpad.status()).toEqual({ line: 1, column: 4, lineCount: 2 })
+})
+
 test('Ctrl+End from a short line lands at the end of the last line', async ({
   nullpad,
 }) => {

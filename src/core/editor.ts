@@ -28,20 +28,20 @@ export const Query = Schema.TaggedUnion({
     at: Buffer.Position,
     atRowEnd: Schema.Boolean,
     rows: Schema.Literals([-1, 1]),
-    goal: Schema.Option(Schema.Number),
+    goal: Schema.Option(Schema.Finite),
   },
   Page: {
     at: Buffer.Position,
     atRowEnd: Schema.Boolean,
     direction: Schema.Literals([-1, 1]),
   },
-  Point: { x: Schema.Number, line: Schema.Number, y: Schema.Number },
+  Point: { x: Schema.Finite, line: Schema.Int, y: Schema.Finite },
 })
 export type Query = typeof Query.Type
 
 /** Where the browser puts the caret. Stay means the target is not drawn, so the move does nothing. */
 export const Landing = Schema.TaggedUnion({
-  At: { line: Schema.Number, column: Schema.Number, atRowEnd: Schema.Boolean },
+  At: { line: Schema.Int, column: Schema.Int, atRowEnd: Schema.Boolean },
   TextStart: {},
   TextEnd: {},
   Stay: {},
@@ -49,12 +49,12 @@ export const Landing = Schema.TaggedUnion({
 export type Landing = typeof Landing.Type
 
 /** `aim` is the x, in pixels from the text's left edge, that a vertical move aimed at: the goal it keeps. */
-export const Answer = Schema.Struct({ landing: Landing, aim: Schema.Number })
+export const Answer = Schema.Struct({ landing: Landing, aim: Schema.Finite })
 export type Answer = typeof Answer.Type
 
 const Queued = Schema.TaggedUnion({
   Fed: { input: Input },
-  Clicked: { x: Schema.Number, line: Schema.Number, y: Schema.Number },
+  Clicked: { x: Schema.Finite, line: Schema.Int, y: Schema.Finite },
 })
 type Queued = typeof Queued.Type
 
@@ -75,13 +75,13 @@ export const Editor = Schema.Struct({
   buffer: Buffer.Buffer,
   mode: Mode,
   preedit: Schema.String,
-  goal: Schema.Option(Schema.Number),
+  goal: Schema.Option(Schema.Finite),
   caretAtRowEnd: Schema.Boolean,
-  top: Schema.Number,
-  rows: Schema.Number,
-  revision: Schema.Number,
+  top: Schema.Int,
+  rows: Schema.Int,
+  revision: Schema.Int,
   locating: Schema.Option(Locating),
-  revealing: Schema.Number,
+  revealing: Schema.Int,
 })
 export type Editor = typeof Editor.Type
 

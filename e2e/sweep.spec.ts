@@ -35,15 +35,17 @@ for (const sweep of sweeps) {
       const failures: Array<string> = []
       let threw = 0
       for (const row of mine) {
-        const divergence = await compare(pair, row.script, row.from).catch(
-          (error: unknown) => {
-            threw += 1
-            failures.push(
-              `${row.document} | ${row.placement} | ${show(row.move)} | threw: ${String(error).split('\n')[0]}`,
-            )
-            return null
-          },
-        )
+        const divergence = await compare(
+          pair,
+          row.script,
+          row.compareFrom,
+        ).catch((error: unknown) => {
+          threw += 1
+          failures.push(
+            `${row.document} | ${row.placement} | ${show(row.move)} | threw: ${String(error).split('\n')[0]}`,
+          )
+          return null
+        })
         if (divergence === null) {
           continue
         }

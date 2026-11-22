@@ -232,6 +232,14 @@ const median = (values: ReadonlyArray<number>): number => {
   return sorted[sorted.length >> 1] ?? 0
 }
 
+const neighborFrames = 4
+
+const minInkAround = 0.005
+
+const faintShareOfAround = 0.5
+
+const maxBlankRows = 2
+
 export const flickeringFrames = (
   frames: ReadonlyArray<Painted>,
   rowHeight: number,
@@ -239,12 +247,13 @@ export const flickeringFrames = (
   frames.flatMap((frame, index) => {
     const around = median(
       [
-        ...frames.slice(Math.max(0, index - 4), index),
-        ...frames.slice(index + 1, index + 5),
+        ...frames.slice(Math.max(0, index - neighborFrames), index),
+        ...frames.slice(index + 1, index + 1 + neighborFrames),
       ].map(({ ink }) => ink),
     )
-    const isFaint = around > 0.005 && frame.ink < around / 2
-    const hasBlankStrip = frame.blankStrip > rowHeight * 2
+    const isFaint =
+      around > minInkAround && frame.ink < around * faintShareOfAround
+    const hasBlankStrip = frame.blankStrip > rowHeight * maxBlankRows
     return isFaint || hasBlankStrip
       ? [
           `frame ${index + 1} of ${frames.length}: ink ${(frame.ink * 100).toFixed(1)}% against ${(around * 100).toFixed(1)}% around it, blank strip ${frame.blankStrip} px`,

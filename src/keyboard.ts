@@ -61,6 +61,8 @@ const browserChords: ReadonlySet<string> = new Set([
 
 const isNamedKey = Schema.is(NamedKey)
 
+const isOneCodePoint = (text: string): boolean => Array.from(text).length === 1
+
 const modifiersOf = (event: KeyboardEvent): Modifiers => ({
   ctrl: event.ctrlKey,
   alt: event.altKey,
@@ -87,8 +89,7 @@ const fromKeyDown = (event: KeyboardEvent): Option.Option<Input> => {
   const isAltGraph =
     event.getModifierState('AltGraph') || (event.ctrlKey && event.altKey)
   const isChord =
-    // oxlint-disable-next-line typescript/no-misused-spread -- a chord takes a key that types one code point
-    [...key].length === 1 && (event.ctrlKey || event.metaKey) && !isAltGraph
+    isOneCodePoint(key) && (event.ctrlKey || event.metaKey) && !isAltGraph
   return isChord && !browserChords.has(key.toLowerCase())
     ? Option.some(
         Input.cases.Chord.make({ char: key, modifiers: modifiersOf(event) }),
@@ -126,18 +127,18 @@ const preeditBounds = (from: number, to: number): ReadonlyArray<DOMRect> => {
 
 type Span = Readonly<{ start: number; end: number }>
 
-const replacement = (kept: Span, replaced: Span): Option.Option<Input> => {
-  const fromCaret = (offset: number) =>
+const eraseOutside = (kept: Span, replaced: Span): Option.Option<Input> => {
+  const offsetFromCaret = (offset: number) =>
     offset < kept.start
       ? offset - kept.start
       : offset > kept.end
         ? offset - kept.end
         : 0
-  const from = fromCaret(replaced.start)
-  const to = fromCaret(replaced.end)
-  return from === to
+  const fromCaret = offsetFromCaret(replaced.start)
+  const toCaret = offsetFromCaret(replaced.end)
+  return fromCaret === toCaret
     ? Option.none()
-    : Option.some(Input.cases.Erase.make({ from, to }))
+    : Option.some(Input.cases.Erase.make({ fromCaret, toCaret }))
 }
 
 const composedAfter = (composed: Span, replaced: Span, text: string): Span => {
@@ -251,7 +252,10 @@ const listen = (
               }
               Option.match(state.composition, {
                 onNone: () => {
-                  Option.map(replacement(state.selection, replaced), offerInput)
+                  Option.map(
+                    eraseOutside(state.selection, replaced),
+                    offerInput,
+                  )
                   if (text !== '') {
                     offerInput(
                       Input.cases.Text.make({
@@ -263,7 +267,7 @@ const listen = (
                   state.lastKey = Option.none()
                 },
                 onSome: composed => {
-                  Option.map(replacement(composed, replaced), offerInput)
+                  Option.map(eraseOutside(composed, replaced), offerInput)
                   const { start, end } = composedAfter(composed, replaced, text)
                   state.composition = Option.some({ start, end })
                   offerInput(

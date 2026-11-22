@@ -404,6 +404,8 @@ test('a letter and ArrowDown sent right after a big wheel turn leave the cursor 
   }
 })
 
+const oldFrameWindowMs = 12
+
 const letterThenClick = async (
   nullpad: Nullpad,
   point: Readonly<{ x: number; y: number }>,
@@ -412,7 +414,7 @@ const letterThenClick = async (
   const sent = performance.now()
   await nullpad.page.keyboard.press('x')
   await nullpad.page.mouse.down()
-  const clickedOldFrame = performance.now() - sent < 12
+  const clickedOldFrame = performance.now() - sent < oldFrameWindowMs
   await nullpad.page.mouse.up()
   return clickedOldFrame
 }
@@ -420,7 +422,7 @@ const letterThenClick = async (
 const expectSomeCounted = (trials: number) =>
   expect(
     trials,
-    'trials whose click left within 12 ms of the letter',
+    `trials whose click left within ${oldFrameWindowMs} ms of the letter`,
   ).toBeGreaterThan(0)
 
 test('a click sent right after a letter lands on the line that was on screen where it clicked', async ({
@@ -465,7 +467,7 @@ const longNoteAtEnd = async (nullpad: Nullpad) => {
   return nullpad.screen()
 }
 
-const turnWheel = (nullpad: Nullpad, deltaY: number) =>
+const turnWheelNoWait = (nullpad: Nullpad, deltaY: number) =>
   nullpad.cdp.send('Input.dispatchMouseEvent', {
     type: 'mouseWheel',
     x: 400,
@@ -495,7 +497,7 @@ test('a click right after a wheel turn lands on the line the turn scrolled under
     await nullpad.press('Control+Home')
     await nullpad.wheel(start.rowHeight * turn)
     const target = numberedRow(await nullpad.screen(), 4 * trial)
-    await turnWheel(nullpad, start.rowHeight * turn)
+    await turnWheelNoWait(nullpad, start.rowHeight * turn)
     await nullpad.page.mouse.click(target.x, target.y)
     const after = await settleScroll(nullpad)
     expect(
@@ -519,7 +521,7 @@ test('a click right after a wheel turn too far to be drawn at once lands on a li
     await nullpad.press('ArrowDown')
     await nullpad.wheel(start.rowHeight * far)
     const target = numberedRow(await nullpad.screen(), 4 * trial)
-    await turnWheel(nullpad, start.rowHeight * far)
+    await turnWheelNoWait(nullpad, start.rowHeight * far)
     await nullpad.page.mouse.click(target.x, target.y)
     const after = await settleScroll(nullpad)
     expect(
@@ -539,7 +541,7 @@ test('a letter typed right after a wheel turn far up from the end of the note br
   const start = await longNoteAtEnd(nullpad)
   for (let trial = 1; trial <= 4; trial++) {
     await nullpad.press('Control+End')
-    await turnWheel(nullpad, -start.rowHeight * 230)
+    await turnWheelNoWait(nullpad, -start.rowHeight * 230)
     await nullpad.page.keyboard.type('x')
     const after = await settleScroll(nullpad)
     expect(
@@ -590,7 +592,7 @@ test('a click made once a key has brought the cursor back on screen after a whee
   ).entries()) {
     await nullpad.press('Control+End')
     await nullpad.press('ArrowUp')
-    await turnWheel(nullpad, -start.rowHeight * 90)
+    await turnWheelNoWait(nullpad, -start.rowHeight * 90)
     await nullpad.page.keyboard.press(key)
     const revealed = await nullpad.screen()
     expect(
@@ -614,7 +616,7 @@ test('a wheel turn dropped for a key that could not move the cursor stays droppe
   for (let trial = 1; trial <= 4; trial++) {
     await nullpad.press('Control+Home')
     await wheelThenKeys(nullpad, start.rowHeight * 200, ['ArrowUp'])
-    await turnWheel(nullpad, start.rowHeight * 3)
+    await turnWheelNoWait(nullpad, start.rowHeight * 3)
     const after = await settleScroll(nullpad)
     expect(
       after.rows[0]?.number,
@@ -630,7 +632,7 @@ test('a wheel turn right after a key scrolls the screen', async ({
   for (let trial = 1; trial <= 4; trial++) {
     await nullpad.press('Control+Home')
     await nullpad.page.keyboard.press('ArrowUp')
-    await turnWheel(nullpad, start.rowHeight * 3)
+    await turnWheelNoWait(nullpad, start.rowHeight * 3)
     const after = await settleScroll(nullpad)
     expect(
       after.rows[0]?.number,

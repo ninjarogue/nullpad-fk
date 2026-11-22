@@ -96,6 +96,7 @@ On a machine without Playwright's Chromium, install it once with `pnpm exec play
 | `extremes.spec.ts`                                               | Giant and tiny wheel turns, 120,000-line pastes, line counts crossing 9,999 and 99,999, very long lines, AltGr keys, IME compositions.                                                                                                            |
 | `sweep.spec.ts`, `e2e/typist/sweeps.ts`                          | The sweeps: grids of scripts, each compared with a textarea. Some play on every push, the rest before a merge.                                                                                                                                    |
 | `typist.spec.ts`, `typist-flicker.spec.ts`, `e2e/typist/`        | The named scripts, which run on every push. The scout and the typist flicker checks, which run only with `TYPIST_SCOUT_MINUTES`. `run.ts` holds the comparison, `script.ts` the named scripts and accepted differences, and `scout.ts` the scout. |
+| `e2e/drive.ts`, `.claude/skills/verify-nullpad/`                 | Not a test. Plays a JSON list of steps on a fresh build with the fixture's driver, prints the screen after each step and saves evidence. The `verify-nullpad` skill says how, and its `features/*.json` are runnable proofs of each feature.      |
 | `e2e/reporters/require-tests.ts`                                 | Fails a run in which no test ran, so a filter or a skip cannot turn the gate green.                                                                                                                                                               |
 
 ### Add a scenario
@@ -204,6 +205,7 @@ Each sweep shard and each scout shard reports how many mismatches each accepted 
 ## Process
 
 - Tests are end-to-end only. See Testing.
+- Prove a change in the running app with the `verify-nullpad` skill (`node e2e/drive.ts`) before calling it done.
 - Before a PR is ready, `pnpm test:ready` passes on its tip, and the PR body says so.
 - Before a PR is ready, an agent that did not write the change breaks it. It plants bugs, drives the app, and reports what got through.
 - Few comments. Name things better instead. Keep a comment only for a fact we cannot change, such as a browser rule. Skip the `// MODEL` section headers that `FOLDKIT.md` suggests.

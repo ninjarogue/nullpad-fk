@@ -1,0 +1,76 @@
+[
+  {
+    "paste": "foo bar baz\nab\nlonger line"
+  },
+  {
+    "expect": {
+      "status": "3:12 3L"
+    }
+  },
+  {
+    "press": "ArrowUp"
+  },
+  {
+    "expect": {
+      "status": "2:3 3L"
+    }
+  },
+  {
+    "press": "ArrowUp"
+  },
+  {
+    "expect": {
+      "status": "1:12 3L"
+    }
+  },
+  {
+    "press": "Home"
+  },
+  {
+    "expect": {
+      "status": "1:1 3L",
+      "under": "f"
+    }
+  },
+  {
+    "press": "Control+ArrowRight"
+  },
+  {
+    "expect": {
+      "status": "1:4 3L"
+    }
+  },
+  {
+    "press": "Control+ArrowRight"
+  },
+  {
+    "expect": {
+      "status": "1:8 3L"
+    }
+  },
+  {
+    "press": "Control+ArrowLeft"
+  },
+  {
+    "expect": {
+      "status": "1:5 3L",
+      "under": "b"
+    }
+  },
+  {
+    "press": "Control+End"
+  },
+  {
+    "expect": {
+      "status": "3:12 3L"
+    }
+  },
+  {
+    "press": "Control+a"
+  },
+  {
+    "expect": {
+      "status": "3:12 3L"
+    }
+  }
+]

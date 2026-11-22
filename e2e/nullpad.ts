@@ -258,7 +258,7 @@ export const screenOf = async (page: Page): Promise<Screen> => {
   return readScreen(page)
 }
 
-const driver = (page: Page, cdp: CDPSession) => {
+export const driver = (page: Page, cdp: CDPSession) => {
   const screen = () => screenOf(page)
   return {
     page,

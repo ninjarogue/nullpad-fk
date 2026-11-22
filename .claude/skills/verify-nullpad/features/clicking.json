@@ -1,0 +1,42 @@
+[
+  {
+    "paste": "hello world\nsecond"
+  },
+  {
+    "click": {
+      "row": 0,
+      "cell": 6
+    }
+  },
+  {
+    "expect": {
+      "status": "1:7 2L",
+      "under": "w"
+    }
+  },
+  {
+    "click": {
+      "row": 1,
+      "cell": 40
+    }
+  },
+  {
+    "expect": {
+      "status": "2:7 2L"
+    }
+  },
+  {
+    "press": "Control+Home"
+  },
+  {
+    "click": {
+      "x": 500,
+      "y": 500
+    }
+  },
+  {
+    "expect": {
+      "status": "2:7 2L"
+    }
+  }
+]

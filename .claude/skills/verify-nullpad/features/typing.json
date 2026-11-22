@@ -1,0 +1,73 @@
+[
+  {
+    "type": "foo bar"
+  },
+  {
+    "expect": {
+      "text": "foo bar",
+      "status": "1:8 1L"
+    }
+  },
+  {
+    "press": "ArrowLeft",
+    "times": 3
+  },
+  {
+    "press": "Enter"
+  },
+  {
+    "expect": {
+      "text": "foo \nbar",
+      "status": "2:1 2L",
+      "under": "b"
+    }
+  },
+  {
+    "press": "Tab"
+  },
+  {
+    "expect": {
+      "text": "foo \n  bar",
+      "status": "2:3 2L"
+    }
+  },
+  {
+    "press": "Home"
+  },
+  {
+    "press": "Backspace"
+  },
+  {
+    "expect": {
+      "text": "foo   bar",
+      "status": "1:5 1L"
+    }
+  },
+  {
+    "press": "End"
+  },
+  {
+    "type": "👨‍👩‍👧"
+  },
+  {
+    "press": "Backspace"
+  },
+  {
+    "expect": {
+      "text": "foo   bar",
+      "status": "1:10 1L"
+    }
+  },
+  {
+    "press": "Home"
+  },
+  {
+    "press": "Delete"
+  },
+  {
+    "expect": {
+      "text": "oo   bar",
+      "under": "o"
+    }
+  }
+]

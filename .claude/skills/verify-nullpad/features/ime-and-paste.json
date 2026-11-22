@@ -1,0 +1,32 @@
+[
+  {
+    "type": "ab"
+  },
+  {
+    "compose": "に"
+  },
+  {
+    "expect": {
+      "text": "ab",
+      "status": "1:3 1L"
+    }
+  },
+  {
+    "commit": "日"
+  },
+  {
+    "expect": {
+      "text": "ab日",
+      "status": "1:4 1L"
+    }
+  },
+  {
+    "paste": "one\ntwo"
+  },
+  {
+    "expect": {
+      "text": "ab日one\ntwo",
+      "status": "2:4 2L"
+    }
+  }
+]

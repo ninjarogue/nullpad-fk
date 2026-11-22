@@ -27,6 +27,12 @@ module.exports = {
       to: { path: core, pathNot: '^src/core/(editor|input)[.]ts$' },
     },
     {
+      name: 'markdown-internals-outside-markdown',
+      severity: 'error',
+      from: { pathNot: '^src/core/markdown([.]ts$|/)' },
+      to: { path: '^src/core/markdown/' },
+    },
+    {
       name: 'src-imports-outside-src',
       severity: 'error',
       from: { path: '^src/' },

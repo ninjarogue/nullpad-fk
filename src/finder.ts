@@ -12,6 +12,8 @@ export const finderBounds = {
 
 const previewLines = 40
 
+const drawnRows = 60
+
 const segmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' })
 
 const graphemes = (text: string): ReadonlyArray<string> =>
@@ -187,7 +189,7 @@ const rowView = (
           }),
         ],
         [
-          h.span([h.Class('t')], marked(Notes.title(note.text), titleHits, h)),
+          h.span([h.Class('t')], marked(Notes.noteTitle(note), titleHits, h)),
           h.span(
             [h.Class('fd')],
             [h.bdi([], [folder === '' ? '' : `${folder}/`])],
@@ -237,7 +239,7 @@ const titlesIn = (
         Array.filter(notes, note => isIn(note.folder)),
         Notes.newestFirst,
       ).slice(0, previewLines),
-      note => Notes.title(note.text),
+      note => Notes.noteTitle(note),
     ),
     '\n',
   )
@@ -264,7 +266,7 @@ const preview = (
           [h.Class('path')],
           [
             note.folder === '' ? '' : `${note.folder}/`,
-            h.b([], [Notes.title(note.text)]),
+            h.b([], [Notes.noteTitle(note)]),
           ],
         ),
         h.div(
@@ -320,7 +322,7 @@ const resultsTitle = (
   h.span(
     [h.Class('bt')],
     Option.match(Finder.movingNote(finder, notes), {
-      onSome: note => ['move ', h.b([], [Notes.title(note.text)]), ' to…'],
+      onSome: note => ['move ', h.b([], [Notes.noteTitle(note)]), ' to…'],
       onNone: () => [
         `${finder.scope === '' ? 'all folders' : `${finder.scope}/`} · ${
           Finder.query(finder) === '' ? 'newest first' : 'best match'
@@ -337,8 +339,11 @@ export const finder = (
 ): Html => {
   const rows = Finder.rows(model, notes)
   const selected = Finder.highlighted(model, rows.length)
+  const firstDrawn = Math.max(0, selected - drawnRows / 2)
   const isFind = model.mode._tag === 'Find'
-  const noteCount = Array.filter(rows, Finder.Row.guards.Note).length
+  const noteCount = Array.reduce(rows, 0, (count, row) =>
+    row._tag === 'Note' ? count + 1 : count,
+  )
   return h.div(
     [h.Class('finder')],
     [
@@ -374,8 +379,17 @@ export const finder = (
               resultsTitle(model, notes, h),
               h.div(
                 [h.Class('rl')],
-                Array.map(rows, (row, index) =>
-                  rowView(row, index, index === selected, model, now, h),
+                Array.map(
+                  rows.slice(firstDrawn, firstDrawn + drawnRows),
+                  (row, offset) =>
+                    rowView(
+                      row,
+                      firstDrawn + offset,
+                      firstDrawn + offset === selected,
+                      model,
+                      now,
+                      h,
+                    ),
                 ),
               ),
             ],

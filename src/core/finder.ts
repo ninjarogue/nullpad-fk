@@ -62,6 +62,36 @@ export const surrounding = (
   caret: finder.caret,
 })
 
+const lastRanked: {
+  notes: ReadonlyArray<Notes.Note>
+  scope: string
+  typed: string
+  ranked: ReadonlyArray<Fuzzy.Ranked>
+} = { notes: [], scope: '', typed: '', ranked: [] }
+
+const rankInScope = (
+  notes: ReadonlyArray<Notes.Note>,
+  scope: string,
+  typed: string,
+): ReadonlyArray<Fuzzy.Ranked> => {
+  const narrows =
+    lastRanked.notes === notes &&
+    lastRanked.scope === scope &&
+    lastRanked.typed !== '' &&
+    typed.startsWith(lastRanked.typed)
+  const ranked = Fuzzy.rank(
+    narrows
+      ? Array.map(lastRanked.ranked, ({ note }) => note)
+      : Notes.inScope(notes, scope),
+    typed,
+  )
+  lastRanked.notes = notes
+  lastRanked.scope = scope
+  lastRanked.typed = typed
+  lastRanked.ranked = ranked
+  return ranked
+}
+
 const findRows = (
   finder: Finder,
   notes: ReadonlyArray<Notes.Note>,
@@ -75,7 +105,7 @@ const findRows = (
     ),
   )
   const ranked = Array.map(
-    Fuzzy.rank(Notes.inScope(notes, finder.scope), typed),
+    rankInScope(notes, finder.scope, typed),
     ({ note, titleHits }) => Row.cases.Note.make({ note, titleHits }),
   )
   const create =
@@ -115,14 +145,32 @@ const moveRows = (
   ]
 }
 
+const modeKey = (mode: Mode): string =>
+  Mode.match(mode, { Find: () => 'Find', Move: ({ id }) => `Move ${id}` })
+
+const lastRows: {
+  notes: ReadonlyArray<Notes.Note>
+  key: string
+  rows: ReadonlyArray<Row>
+} = { notes: [], key: '', rows: [] }
+
 export const rows = (
   finder: Finder,
   notes: ReadonlyArray<Notes.Note>,
-): ReadonlyArray<Row> =>
-  Mode.match(finder.mode, {
+): ReadonlyArray<Row> => {
+  const key = `${modeKey(finder.mode)}\n${finder.scope}\n${finder.prompt}`
+  if (lastRows.notes === notes && lastRows.key === key) {
+    return lastRows.rows
+  }
+  const found = Mode.match(finder.mode, {
     Find: () => findRows(finder, notes),
     Move: () => moveRows(finder, notes),
   })
+  lastRows.notes = notes
+  lastRows.key = key
+  lastRows.rows = found
+  return found
+}
 
 export const highlighted = (finder: Finder, rowCount: number): number =>
   Math.max(0, Math.min(finder.selected, rowCount - 1))

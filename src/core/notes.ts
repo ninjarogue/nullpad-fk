@@ -75,8 +75,20 @@ export const fileName = (title: string): string =>
       .replace(/^-|-$/gu, '') || 'untitled'
   }.md`
 
+const titles = new WeakMap<Note, string>()
+
+export const noteTitle = (note: Note): string => {
+  const known = titles.get(note)
+  if (known !== undefined) {
+    return known
+  }
+  const found = title(note.text)
+  titles.set(note, found)
+  return found
+}
+
 export const pathOf = (note: Note): string =>
-  joinFolder(note.folder, title(note.text))
+  joinFolder(note.folder, noteTitle(note))
 
 export const inScope = (
   notes: ReadonlyArray<Note>,
@@ -99,11 +111,12 @@ export const children = (
         : Option.none(),
     ),
   )
-  const names = Array.sort(Array.dedupe(below), Order.String)
-  return Array.map(names, name => ({
+  const counts = new Map<string, number>()
+  Array.forEach(below, name => counts.set(name, (counts.get(name) ?? 0) + 1))
+  return Array.map(Array.sort(counts.keys(), Order.String), name => ({
     name,
     path: joinFolder(scope, name),
-    count: Array.filter(below, other => other === name).length,
+    count: counts.get(name) ?? 0,
   }))
 }
 
@@ -112,7 +125,7 @@ export const topFolders = (notes: ReadonlyArray<Note>): ReadonlyArray<Folder> =>
 
 export const allFolders = (notes: ReadonlyArray<Note>): ReadonlyArray<string> =>
   Array.sort(
-    Array.dedupe(
+    new Set(
       Array.flatMap(notes, ({ folder }) =>
         folder === ''
           ? []

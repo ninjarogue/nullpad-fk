@@ -1,6 +1,6 @@
 import { Array, Option, Order } from 'effect'
 
-import { type Note, newestFirst, pathOf, title } from './notes'
+import { type Note, newestFirst, noteTitle, pathOf } from './notes'
 
 export type Match = Readonly<{
   score: number
@@ -30,13 +30,29 @@ type CharClass =
 
 const segmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' })
 
-const graphemesOf = (text: string): ReadonlyArray<string> =>
-  Array.map(
-    Array.fromIterable(segmenter.segment(text.normalize('NFC'))),
-    ({ segment }) => segment,
-  )
+const printableAscii = /^[\x20-\x7e]*$/u
 
-const classOf = (grapheme: string): CharClass =>
+const graphemesOf = (text: string): ReadonlyArray<string> =>
+  printableAscii.test(text)
+    ? text.split('')
+    : Array.map(
+        Array.fromIterable(segmenter.segment(text.normalize('NFC'))),
+        ({ segment }) => segment,
+      )
+
+const classes = new Map<string, CharClass>()
+
+const classOf = (grapheme: string): CharClass => {
+  const known = classes.get(grapheme)
+  if (known !== undefined) {
+    return known
+  }
+  const found = freshClassOf(grapheme)
+  classes.set(grapheme, found)
+  return found
+}
+
+const freshClassOf = (grapheme: string): CharClass =>
   /^\s/u.test(grapheme)
     ? 'White'
     : /^[/,:;|]/u.test(grapheme)
@@ -99,24 +115,38 @@ const firstPositions = (
       }),
   )
 
-type Grid = Array<Array<number>>
+type Table = Readonly<{
+  scores: Int32Array
+  runs: Int32Array
+  rows: number
+  columns: number
+}>
 
-const grid = (rows: number, columns: number): Grid =>
-  Array.makeBy(rows, () => Array.makeBy(columns, () => 0))
+const scratch = { scores: new Int32Array(1024), runs: new Int32Array(1024) }
 
-const cell = (rows: Grid, row: number, column: number): number =>
-  rows[row]?.[column] ?? 0
-
-const setCell = (rows: Grid, row: number, column: number, value: number) => {
-  const target = rows[row]
-  if (target !== undefined) {
-    target[column] = value
+const table = (rows: number, columns: number): Table => {
+  const size = rows * columns
+  if (scratch.scores.length < size) {
+    scratch.scores = new Int32Array(size * 2)
+    scratch.runs = new Int32Array(size * 2)
   }
+  scratch.scores.fill(0, 0, size)
+  scratch.runs.fill(0, 0, size)
+  return { scores: scratch.scores, runs: scratch.runs, rows, columns }
 }
 
+const read = (
+  cells: Int32Array,
+  { rows, columns }: Table,
+  row: number,
+  column: number,
+): number =>
+  row < 0 || row >= rows || column < 0 || column >= columns
+    ? 0
+    : (cells[row * columns + column] ?? 0)
+
 const backtrace = (
-  scores: Grid,
-  runs: Grid,
+  grid: Table,
   first: ReadonlyArray<number>,
   row: number,
   column: number,
@@ -126,50 +156,56 @@ const backtrace = (
   if (column < 0) {
     return positions
   }
-  const here = cell(scores, row, column)
+  const here = read(grid.scores, grid, row, column)
   const start = first[row] ?? 0
   const diagonal =
-    row > 0 && column >= start ? cell(scores, row - 1, column - 1) : 0
-  const left = column > start ? cell(scores, row, column - 1) : 0
+    row > 0 && column >= start
+      ? read(grid.scores, grid, row - 1, column - 1)
+      : 0
+  const left = column > start ? read(grid.scores, grid, row, column - 1) : 0
   const takes =
     here > diagonal && (here > left || (here === left && preferMatch))
   if (takes && row === 0) {
     return [column, ...positions]
   }
   return backtrace(
-    scores,
-    runs,
+    grid,
     first,
     takes ? row - 1 : row,
     column - 1,
-    cell(runs, row, column) > 1 || cell(runs, row + 1, column + 1) > 0,
+    read(grid.runs, grid, row, column) > 1 ||
+      read(grid.runs, grid, row + 1, column + 1) > 0,
     takes ? [column, ...positions] : positions,
   )
 }
 
-const matchedCell = (
-  scores: Grid,
-  runs: Grid,
+const fillMatchedCell = (
+  grid: Table,
   bonuses: ReadonlyArray<number>,
   row: number,
   column: number,
   left: number,
-): Readonly<{ score: number; run: number }> => {
+): number => {
+  const at = row * grid.columns + column
   const bonus = bonuses[column] ?? 0
   if (row === 0) {
-    return { score: scoreMatch + bonus * bonusFirstCharMultiplier, run: 1 }
+    grid.runs[at] = 1
+    return scoreMatch + bonus * bonusFirstCharMultiplier
   }
-  const diagonal = cell(scores, row - 1, column - 1) + scoreMatch
-  const run = cell(runs, row - 1, column - 1) + 1
+  const diagonal = read(grid.scores, grid, row - 1, column - 1) + scoreMatch
+  const run = read(grid.runs, grid, row - 1, column - 1) + 1
   const runStartBonus = bonuses[column - run + 1] ?? 0
   const breaksRun = run > 1 && bonus >= bonusBoundary && bonus > runStartBonus
   const boosted =
     run > 1 && !breaksRun
       ? Math.max(bonus, bonusConsecutive, runStartBonus)
       : bonus
-  return diagonal + boosted < left
-    ? { score: diagonal + bonus, run: 0 }
-    : { score: diagonal + boosted, run: breaksRun ? 1 : run }
+  if (diagonal + boosted < left) {
+    grid.runs[at] = 0
+    return diagonal + bonus
+  }
+  grid.runs[at] = breaksRun ? 1 : run
+  return diagonal + boosted
 }
 
 const matchTerm = (
@@ -180,29 +216,28 @@ const matchTerm = (
   Option.flatMap(firstPositions(text, pattern), first => {
     const rows = pattern.length
     const columns = text.length
-    const scores = grid(rows, columns)
-    const runs = grid(rows, columns)
+    const grid = table(rows, columns)
     const best = { score: 0, column: -1 }
     Array.forEach(pattern, (wanted, row) => {
       const start = first[row] ?? 0
-      const gap = { open: false }
-      Array.forEach(Array.range(start, columns - 1), column => {
+      const state = { gapOpen: false, left: 0 }
+      Array.forEach(text, (grapheme, column) => {
+        if (column < start) {
+          return
+        }
         const left =
           column > start
-            ? cell(scores, row, column - 1) +
-              (gap.open ? scoreGapExtension : scoreGapStart)
+            ? state.left + (state.gapOpen ? scoreGapExtension : scoreGapStart)
             : 0
-        const isMatch = text[column] === wanted
-        const outcome = isMatch
-          ? matchedCell(scores, runs, bonuses, row, column, left)
-          : { score: 0, run: 0 }
+        const isMatch = grapheme === wanted
+        const matched = isMatch
+          ? fillMatchedCell(grid, bonuses, row, column, left)
+          : 0
         const freshStart = row === 0 && isMatch
-        const score = freshStart
-          ? outcome.score
-          : Math.max(outcome.score, left, 0)
-        gap.open = freshStart ? false : outcome.score < left
-        setCell(scores, row, column, score)
-        setCell(runs, row, column, isMatch ? outcome.run : 0)
+        const score = freshStart ? matched : Math.max(matched, left, 0)
+        state.gapOpen = freshStart ? false : matched < left
+        state.left = score
+        grid.scores[row * columns + column] = score
         if (row === rows - 1 && score > best.score) {
           best.score = score
           best.column = column
@@ -213,15 +248,7 @@ const matchTerm = (
       ? Option.none()
       : Option.some({
           score: best.score,
-          positions: backtrace(
-            scores,
-            runs,
-            first,
-            rows - 1,
-            best.column,
-            true,
-            [],
-          ),
+          positions: backtrace(grid, first, rows - 1, best.column, true, []),
         })
   })
 
@@ -230,45 +257,72 @@ const foldCase = (graphemes: ReadonlyArray<string>, caseSensitive: boolean) =>
     ? graphemes
     : Array.map(graphemes, grapheme => grapheme.toLowerCase())
 
-export const match = (text: string, query: string): Option.Option<Match> => {
-  const terms = Array.filter(
-    query.normalize('NFC').split(/\s+/u),
-    term => term !== '',
-  )
-  if (Array.isArrayEmpty(terms)) {
-    return Option.some({ score: 0, positions: [] })
+type Prepared = Readonly<{
+  original: ReadonlyArray<string>
+  lower: ReadonlyArray<string>
+  bonuses: ReadonlyArray<number>
+}>
+
+const preparedLimit = 20_000
+
+const prepared = new Map<string, Prepared>()
+
+const prepare = (text: string): Prepared => {
+  const known = prepared.get(text)
+  if (known !== undefined) {
+    return known
   }
-  const caseSensitive = /\p{Lu}/u.test(query)
   const original = graphemesOf(text)
-  const folded = foldCase(original, caseSensitive)
-  const bonuses = Array.map(original, (grapheme, index) =>
-    bonusFor(
-      index === 0 ? 'White' : classOf(original[index - 1] ?? ' '),
-      classOf(grapheme),
+  const fresh = {
+    original,
+    lower: foldCase(original, false),
+    bonuses: Array.map(original, (grapheme, index) =>
+      bonusFor(
+        index === 0 ? 'White' : classOf(original[index - 1] ?? ' '),
+        classOf(grapheme),
+      ),
     ),
+  }
+  if (prepared.size >= preparedLimit) {
+    prepared.clear()
+  }
+  prepared.set(text, fresh)
+  return fresh
+}
+
+export const matcher = (
+  query: string,
+): ((text: string) => Option.Option<Match>) => {
+  const caseSensitive = /\p{Lu}/u.test(query)
+  const patterns = Array.map(
+    Array.filter(query.normalize('NFC').split(/\s+/u), term => term !== ''),
+    term => foldCase(graphemesOf(term), caseSensitive),
   )
-  return Array.reduce(
-    terms,
-    Option.some<Match>({ score: 0, positions: [] }),
-    (sofar, term) =>
-      Option.flatMap(sofar, total =>
-        Option.map(
-          matchTerm(
-            folded,
-            bonuses,
-            foldCase(graphemesOf(term), caseSensitive),
-          ),
-          found => ({
+  if (Array.isArrayEmpty(patterns)) {
+    return () => Option.some({ score: 0, positions: [] })
+  }
+  return text => {
+    const { original, lower, bonuses } = prepare(text)
+    const folded = caseSensitive ? original : lower
+    return Array.reduce(
+      patterns,
+      Option.some<Match>({ score: 0, positions: [] }),
+      (sofar, pattern) =>
+        Option.flatMap(sofar, total =>
+          Option.map(matchTerm(folded, bonuses, pattern), found => ({
             score: total.score + found.score,
             positions: Array.sort(
               Array.dedupe([...total.positions, ...found.positions]),
               Order.Number,
             ),
-          }),
+          })),
         ),
-      ),
-  )
+    )
+  }
 }
+
+export const match = (text: string, query: string): Option.Option<Match> =>
+  matcher(query)(text)
 
 export type Ranked = Readonly<{
   note: Note
@@ -283,15 +337,16 @@ const byScore: Order.Order<Ranked> = Order.flip(
 export const rank = (
   notes: ReadonlyArray<Note>,
   query: string,
-): ReadonlyArray<Ranked> =>
-  Array.sort(
+): ReadonlyArray<Ranked> => {
+  const matches = matcher(query)
+  return Array.sort(
     Array.getSomes(
       Array.map(notes, note => {
-        const titleMatch = match(title(note.text), query)
-        const pathMatch = match(pathOf(note), query)
-        if (Option.isNone(titleMatch) && Option.isNone(pathMatch)) {
+        const pathMatch = matches(pathOf(note))
+        if (Option.isNone(pathMatch)) {
           return Option.none()
         }
+        const titleMatch = matches(noteTitle(note))
         const titleScore = Option.match(titleMatch, {
           onNone: () => 0,
           onSome: ({ score }) => score,
@@ -315,3 +370,4 @@ export const rank = (
       Order.mapInput(newestFirst, (ranked: Ranked) => ranked.note),
     ),
   )
+}

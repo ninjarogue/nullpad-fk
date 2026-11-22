@@ -1,0 +1,407 @@
+[
+  {
+    "id": "wheel-turn-compare-flipped",
+    "kind": "timing",
+    "file": "src/surface.ts",
+    "find": "wheel.turnedAt < lastReveal.askedAt",
+    "replace": "wheel.turnedAt > lastReveal.askedAt",
+    "see": "Wheel turns made before a key are not dropped (and later ones are), so a scroll fights the caret reveal after typing",
+    "heldOut": false
+  },
+  {
+    "id": "click-unshown-compare-flipped",
+    "kind": "timing",
+    "file": "src/surface.ts",
+    "find": "time < shownAt ? pixels + distance : pixels",
+    "replace": "time > shownAt ? pixels + distance : pixels",
+    "see": "A click right after a key-driven scroll lands on the wrong line",
+    "heldOut": false
+  },
+  {
+    "id": "app-scroll-shown-immediately",
+    "kind": "timing",
+    "file": "src/surface.ts",
+    "find": "made.shownAt = nextFrame",
+    "replace": "made.shownAt = 0",
+    "see": "A click made just after the app scrolled for a key is read against the scrolled screen and lands a few lines off",
+    "heldOut": true
+  },
+  {
+    "id": "click-adds-unshown-scroll",
+    "kind": "timing",
+    "file": "src/surface.ts",
+    "find": "y - unshownAt(event.timeStamp)",
+    "replace": "y + unshownAt(event.timeStamp)",
+    "see": "Clicks soon after an auto-scroll land off by twice the scroll distance",
+    "heldOut": false
+  },
+  {
+    "id": "locate-answers-stale-frame",
+    "kind": "timing",
+    "file": "src/surface.ts",
+    "find": "drawnRevision() >= revision || frames === 0",
+    "replace": "drawnRevision() >= revision - 1 || frames === 0",
+    "see": "Arrow keys/clicks right after an edit are measured on the previous frame and the caret lands on the wrong column",
+    "heldOut": false
+  },
+  {
+    "id": "queued-inputs-reversed",
+    "kind": "timing",
+    "file": "src/core/editor.ts",
+    "find": "queued: [...locating.queued, queued],",
+    "replace": "queued: [queued, ...locating.queued],",
+    "see": "Keys typed quickly while a cursor key is being measured arrive in reverse order",
+    "heldOut": true
+  },
+  {
+    "id": "queued-last-input-dropped",
+    "kind": "timing",
+    "file": "src/core/editor.ts",
+    "find": "countPendingReveal(replay(landed, queued))",
+    "replace": "countPendingReveal(replay(landed, queued.slice(0, -1)))",
+    "see": "A key typed right after an arrow key is sometimes lost",
+    "heldOut": false
+  },
+  {
+    "id": "composition-end-hold-order",
+    "kind": "timing",
+    "file": "src/keyboard.ts",
+    "find": "state.composition = Option.none()\n              holdSurrounding()",
+    "replace": "holdSurrounding()\n              state.composition = Option.none()",
+    "see": "After an IME commit the surrounding text for the next composition is stale",
+    "heldOut": false
+  },
+  {
+    "id": "pointerdown-commit-inverted",
+    "kind": "timing",
+    "file": "src/keyboard.ts",
+    "find": "if (Option.isSome(state.composition)) {\n                commitComposition()",
+    "replace": "if (Option.isNone(state.composition)) {\n                commitComposition()",
+    "see": "Clicking during an IME composition does not end it; the preedit stays and moves with the caret",
+    "heldOut": true
+  },
+  {
+    "id": "reveal-ask-time-zero",
+    "kind": "timing",
+    "file": "src/surface.ts",
+    "find": "lastReveal.askedAt = performance.now()",
+    "replace": "lastReveal.askedAt = 0",
+    "see": "A wheel turn made before a key press is applied after the key, pulling the view off the caret",
+    "heldOut": false
+  },
+  {
+    "id": "wheel-skips-drop-before-reveal",
+    "kind": "timing",
+    "file": "src/surface.ts",
+    "find": "dropTurnsBeforeReveal()\n              wheel.pending += wheelPixels(surface, event)",
+    "replace": "wheel.pending += wheelPixels(surface, event)",
+    "see": "Stale wheel turns pile up with new ones, so one notch scrolls too far after typing",
+    "heldOut": false
+  },
+  {
+    "id": "scroll-report-undraws-awaited",
+    "kind": "timing",
+    "file": "src/core/editor.ts",
+    "find": "return undrawsAwaitedLine(editor, moved) ? editor : moved",
+    "replace": "return moved",
+    "see": "Scrolling while a click/key is pending undraws the line it targets, giving blank rows or a lost click",
+    "heldOut": true
+  },
+  {
+    "id": "caret-row-offset",
+    "kind": "measure",
+    "file": "src/surface.ts",
+    "find": "edges.top + Math.floor((top - edges.top + row / 2) / row) * row",
+    "replace": "edges.top + Math.floor((top - edges.top + row) / row) * row",
+    "see": "The cursor box is drawn one row below the real caret",
+    "heldOut": false
+  },
+  {
+    "id": "page-distance-short",
+    "kind": "measure",
+    "file": "src/surface.ts",
+    "find": "(sheet.surface.clientHeight * 7) / 8",
+    "replace": "(sheet.surface.clientHeight * 5) / 8",
+    "see": "Page Up/Down moves fewer rows than a screenful minus one",
+    "heldOut": false
+  },
+  {
+    "id": "screen-rows-round-up",
+    "kind": "measure",
+    "file": "src/surface.ts",
+    "find": "/ sheet.rowHeight + 0.01",
+    "replace": "/ sheet.rowHeight + 0.99",
+    "see": "Editor believes one more row fits, so reveal and drawn-line windows are off by a row",
+    "heldOut": true
+  },
+  {
+    "id": "gutter-extra-blank",
+    "kind": "measure",
+    "file": "src/core/editor.ts",
+    "find": "const gutterBlankCells = 2",
+    "replace": "const gutterBlankCells = 3",
+    "see": "Line numbers sit further left of the text; gutter looks wider and wrap column shifts",
+    "heldOut": false
+  },
+  {
+    "id": "caret-end-on-left-edge",
+    "kind": "measure",
+    "file": "src/surface.ts",
+    "find": "onSome: rect => ({ left: rect.right, top: rect.top, width: cell }),",
+    "replace": "onSome: rect => ({ left: rect.left, top: rect.top, width: cell }),",
+    "see": "At a line end the cursor draws over the last character instead of after it",
+    "heldOut": false
+  },
+  {
+    "id": "aim-rounds-not-floors",
+    "kind": "measure",
+    "file": "src/surface.ts",
+    "find": "Math.floor(Math.min(caret, textEdges(line).right - start - 1))",
+    "replace": "Math.round(Math.min(caret, textEdges(line).right - start - 1))",
+    "see": "Up/Down aim lands on the next character when the caret is in the right half of a cell",
+    "heldOut": true
+  },
+  {
+    "id": "wrap-detect-threshold",
+    "kind": "measure",
+    "file": "src/surface.ts",
+    "find": "after.top > before.top + 1",
+    "replace": "after.top > before.top + 30",
+    "see": "Wrapped rows are never detected: Home/End and caret at a wrap point behave as if there is no wrap",
+    "heldOut": false
+  },
+  {
+    "id": "click-yinline-overshoot",
+    "kind": "measure",
+    "file": "src/surface.ts",
+    "find": "Math.min(yInLine, box.height - 1)",
+    "replace": "Math.min(yInLine, box.height)",
+    "see": "Clicking in the bottom pixel of a line puts the caret on the next line",
+    "heldOut": false
+  },
+  {
+    "id": "bring-above-margin",
+    "kind": "measure",
+    "file": "src/surface.ts",
+    "find": "const above = sheet.viewTop + 1 - y",
+    "replace": "const above = sheet.viewTop - 1 - y",
+    "see": "Moving up to the top row leaves the caret row partly under the top edge",
+    "heldOut": true
+  },
+  {
+    "id": "row-edge-skips-first-row",
+    "kind": "measure",
+    "file": "src/surface.ts",
+    "find": "const edgeRow = stride === 'Page' ? sheet.rowHeight : 0",
+    "replace": "const edgeRow = stride === 'Page' ? 0 : sheet.rowHeight",
+    "see": "Up from the second line jumps to text start; Down from the second last line jumps to text end",
+    "heldOut": false
+  },
+  {
+    "id": "ctrl-v-swallowed",
+    "kind": "input",
+    "file": "src/keyboard.ts",
+    "find": "  'v',\n",
+    "replace": "",
+    "see": "Ctrl+V does nothing: keydown is cancelled as a chord so no paste arrives",
+    "heldOut": false
+  },
+  {
+    "id": "altgr-chars-swallowed",
+    "kind": "input",
+    "file": "src/keyboard.ts",
+    "find": "event.getModifierState('AltGraph') || (event.ctrlKey && event.altKey)",
+    "replace": "event.getModifierState('AltGraph')",
+    "see": "AltGr characters on Windows layouts (Ctrl+Alt) are swallowed",
+    "heldOut": true
+  },
+  {
+    "id": "backspace-code-unit",
+    "kind": "input",
+    "file": "src/core/buffer.ts",
+    "find": "return { line, column: boundaryBefore(lineAt(buffer, line), column) }",
+    "replace": "return {\n      line,\n      column: Math.max(boundaryBefore(lineAt(buffer, line), column), column - 1),\n    }",
+    "see": "Backspace after an emoji, flag or accent removes only part of the letter",
+    "heldOut": false
+  },
+  {
+    "id": "composing-key-handled",
+    "kind": "input",
+    "file": "src/keyboard.ts",
+    "find": "    event.isComposing ||\n",
+    "replace": "",
+    "see": "Enter/arrows pressed to pick an IME candidate also act on the editor",
+    "heldOut": false
+  },
+  {
+    "id": "paste-default-not-prevented",
+    "kind": "input",
+    "file": "src/keyboard.ts",
+    "find": "event.preventDefault()\n              offerInput(\n                Input.cases.Paste",
+    "replace": "offerInput(\n                Input.cases.Paste",
+    "see": "Pasted text appears twice",
+    "heldOut": true
+  },
+  {
+    "id": "keydown-default-not-prevented",
+    "kind": "input",
+    "file": "src/keyboard.ts",
+    "find": "event.preventDefault()\n                offerInput(input)",
+    "replace": "offerInput(input)",
+    "see": "Special keys also run the browser default, so Backspace/Enter double up",
+    "heldOut": false
+  },
+  {
+    "id": "tab-types-tab-char",
+    "kind": "input",
+    "file": "src/core/editor.ts",
+    "find": "Tab: editor => now(typeText('  ')(editor)),",
+    "replace": "Tab: editor => now(typeText('\\t')(editor)),",
+    "see": "Tab inserts a tab character instead of two spaces",
+    "heldOut": false
+  },
+  {
+    "id": "commit-keeps-preedit",
+    "kind": "input",
+    "file": "src/core/editor.ts",
+    "find": "Commit: ({ text }) => now(insertText(text)({ ...editor, preedit: '' })),",
+    "replace": "Commit: ({ text }) => now(insertText(text)(editor)),",
+    "see": "After committing an IME composition the preedit text stays drawn as a ghost",
+    "heldOut": true
+  },
+  {
+    "id": "paste-caret-column",
+    "kind": "core",
+    "file": "src/core/buffer.ts",
+    "find": "(added === 0 ? column : 0) + lastPart.length",
+    "replace": "column + lastPart.length",
+    "see": "After pasting multiple lines the caret lands too far right on the last line",
+    "heldOut": false
+  },
+  {
+    "id": "goal-kept-on-horizontal-move",
+    "kind": "core",
+    "file": "src/core/editor.ts",
+    "find": "{ ...editor, goalX: Option.none() },\n        { buffer: moved, caretAtRowEnd: atRowEnd },",
+    "replace": "editor,\n        { buffer: moved, caretAtRowEnd: atRowEnd },",
+    "see": "Up/Down remembers an old goal column after Left/Right/Home/End",
+    "heldOut": false
+  },
+  {
+    "id": "word-right-stuck",
+    "kind": "core",
+    "file": "src/core/words.ts",
+    "find": "boundary => boundary.column > from && endsWord(boundary)",
+    "replace": "boundary => boundary.column >= from && endsWord(boundary)",
+    "see": "Ctrl+Right at the end of a word does not move",
+    "heldOut": true
+  },
+  {
+    "id": "word-left-stuck",
+    "kind": "core",
+    "file": "src/core/words.ts",
+    "find": "boundary => boundary.column < column && startsWord(boundary)",
+    "replace": "boundary => boundary.column <= column && startsWord(boundary)",
+    "see": "Ctrl+Left at the start of a word does not move",
+    "heldOut": false
+  },
+  {
+    "id": "left-at-line-start-short",
+    "kind": "core",
+    "file": "src/core/editor.ts",
+    "find": "{ line: line - 1, column: Buffer.lineEnd(buffer, line - 1) },\n                false,",
+    "replace": "{ line: line - 1, column: Buffer.lineEnd(buffer, line - 1) - 1 },\n                false,",
+    "see": "Left at a line start lands before the last character of the previous line",
+    "heldOut": false
+  },
+  {
+    "id": "status-column-zero-based",
+    "kind": "core",
+    "file": "src/core/editor.ts",
+    "find": "caretGrapheme(lines[caret.line]?.text ?? '', caret.column) + 1",
+    "replace": "caretGrapheme(lines[caret.line]?.text ?? '', caret.column)",
+    "see": "Status line column starts at 0",
+    "heldOut": true
+  },
+  {
+    "id": "crlf-not-split",
+    "kind": "core",
+    "file": "src/core/buffer.ts",
+    "find": "/\\r\\n|\\r|\\n/",
+    "replace": "/\\n/",
+    "see": "Pasting Windows text leaves stray carriage returns and merged lines",
+    "heldOut": false
+  },
+  {
+    "id": "ctrl-end-goes-to-start",
+    "kind": "core",
+    "file": "src/core/editor.ts",
+    "find": "ctrl ? documentEdge(editor, 'End') : rowEdge('End')(editor)",
+    "replace": "ctrl ? documentEdge(editor, 'Start') : rowEdge('End')(editor)",
+    "see": "Ctrl+End jumps to the start of the text",
+    "heldOut": false
+  },
+  {
+    "id": "page-keys-reveal-nearest",
+    "kind": "core",
+    "file": "src/core/editor.ts",
+    "find": "landMove(editor, 'Top'),",
+    "replace": "landMove(editor, 'Nearest'),",
+    "see": "Page Up/Down leaves the caret at the screen edge instead of the top",
+    "heldOut": true
+  },
+  {
+    "id": "key-space-caret-at-row-end",
+    "kind": "core",
+    "file": "src/core/editor.ts",
+    "find": "insertText(text, text === ' ')(editor)",
+    "replace": "insertText(text)(editor)",
+    "see": "A space typed at a wrap leaves the caret at the start of the lower row instead of the end of the upper row",
+    "heldOut": false
+  },
+  {
+    "id": "caret-overlay-scroll-sign",
+    "kind": "paint",
+    "file": "src/surface.ts",
+    "find": "caret.style.top = `${box.top - frame.top + surface.scrollTop}px`",
+    "replace": "caret.style.top = `${box.top - frame.top - surface.scrollTop}px`",
+    "see": "The cursor box is drawn in the wrong place once the surface is scrolled",
+    "heldOut": false
+  },
+  {
+    "id": "caret-stays-when-undrawn",
+    "kind": "paint",
+    "file": "src/surface.ts",
+    "find": "caret.style.display = 'none'",
+    "replace": "caret.style.display = ''",
+    "see": "When the caret line scrolls out of the drawn lines the cursor box stays behind on screen",
+    "heldOut": true
+  },
+  {
+    "id": "drawn-above-one-line",
+    "kind": "paint",
+    "file": "src/core/editor.ts",
+    "find": "first: Math.max(0, top - linesDrawnPastScreen(editor)),",
+    "replace": "first: Math.max(0, top - 1),",
+    "see": "Scrolling up shows blank screen: lines above the view are not drawn",
+    "heldOut": false
+  },
+  {
+    "id": "caret-line-class-swapped",
+    "kind": "paint",
+    "file": "src/surface.ts",
+    "find": "h.Class(isCaretLine ? 'line cl' : 'line')",
+    "replace": "h.Class(isCaretLine ? 'line' : 'line cl')",
+    "see": "Every line number except the caret line is highlighted",
+    "heldOut": false
+  },
+  {
+    "id": "spacer-below-extra-row",
+    "kind": "paint",
+    "file": "src/core/editor.ts",
+    "find": "undrawnBelow: lines.length - 1 - last",
+    "replace": "undrawnBelow: lines.length - last",
+    "see": "The text can be scrolled one blank row past the last line",
+    "heldOut": true
+  }
+]

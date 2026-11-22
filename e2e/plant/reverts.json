@@ -1,0 +1,227 @@
+[
+  {
+    "id": "revert-4b29147-click-after-key-scroll",
+    "kind": "timing",
+    "file": "src/surface.ts",
+    "find": "made.shownAt = nextFrame\n",
+    "replace": "made.shownAt = nextFrame + 17\n",
+    "see": "A click made 20 to 40 ms after a key that scrolled the cursor on screen lands on the line that was under the pointer before the scroll, though the scrolled frame was already on screen.",
+    "heldOut": true
+  },
+  {
+    "id": "revert-b5b855a-click-or-letter-after-wheel-far",
+    "kind": "timing",
+    "file": "src/core/editor.ts",
+    "find": "      editor.pendingReveals > 0\n        ? Option.some(editor.buffer.caret.line)\n        : Option.none(),",
+    "replace": "      Option.none(),",
+    "see": "A letter typed right after a wheel turn far up from the end of the note leaves the screen far from the cursor for good: a late scroll report moves the drawn lines away from the caret and the reveal finds no caret.",
+    "heldOut": true
+  },
+  {
+    "id": "revert-3201629-page-distance",
+    "kind": "measure",
+    "file": "src/surface.ts",
+    "find": "    Math.floor(\n      Math.floor((sheet.surface.clientHeight * 7) / 8) / sheet.rowHeight,\n    ),",
+    "replace": "    Math.floor(\n      (Math.floor(\n        (sheet.surface.clientHeight -\n          pixels(getComputedStyle(sheet.surface).paddingTop)) /\n          sheet.rowHeight,\n      ) *\n        7) /\n        8,\n    ),",
+    "see": "PageUp and PageDown move one row fewer than a textarea (29 rows where Chrome pages 30 at 778 px), so the caret lands on a different row after a page key.",
+    "heldOut": false
+  },
+  {
+    "id": "revert-b3ca4a5-wheel-before-key",
+    "kind": "timing",
+    "file": "src/surface.ts",
+    "find": "if (wheel.turnedAt < lastReveal.askedAt) {",
+    "replace": "if (wheel.turnedAt < 0) {",
+    "see": "A letter typed right after a wheel turn leaves the cursor off screen: Chrome hands the turn over after the key, whose reveal scrolled nothing, and the turn then scrolls the cursor away.",
+    "heldOut": true
+  },
+  {
+    "id": "revert-209f281-click-while-composing",
+    "kind": "input",
+    "file": "src/keyboard.ts",
+    "find": "              if (Option.isSome(state.composition)) {\n                commitComposition()",
+    "replace": "              if (Option.isSome(state.composition) && false) {\n                commitComposition()",
+    "see": "A click during an IME composition moves the cursor and the preedit with it, so the IME commits its text at the click instead of where it was composed.",
+    "heldOut": true
+  },
+  {
+    "id": "revert-397c832-pagedown-wrap-side",
+    "kind": "measure",
+    "file": "src/surface.ts",
+    "find": "stride === 'Row' ? 'ByPointY' : distance < 0 ? 'Upper' : 'Lower',",
+    "replace": "stride === 'Row' || distance > 0 ? 'ByPointY' : 'Upper',",
+    "see": "A PageDown that lands where a line wraps leaves the caret drawn at the end of the upper row instead of the start of the lower row, so Home, End, Up, Down and the next PageUp start from the wrong row.",
+    "heldOut": false
+  },
+  {
+    "id": "revert-66afe31-page-to-edges",
+    "kind": "measure",
+    "file": "src/surface.ts",
+    "find": "const edgeRow = stride === 'Page' ? sheet.rowHeight : 0",
+    "replace": "const edgeRow = 0",
+    "see": "PageUp or PageDown that reaches the first or last row stops on that row at the caret column instead of going on to the start or end of the text, as a textarea does.",
+    "heldOut": false
+  },
+  {
+    "id": "revert-e3a0aa3-erase-keeps-goal",
+    "kind": "core",
+    "file": "src/core/editor.ts",
+    "find": "Buffer.keepsCaretPiece(buffer, buffer.caret, target)",
+    "replace": "true",
+    "see": "Backspace or Delete that empties the caret piece, ends at a join or deletes on an empty line keeps the column Up and Down aim for, where a textarea forgets it, so the next Up or Down lands in another column.",
+    "heldOut": false
+  },
+  {
+    "id": "revert-9942e17-editcontext-construct-throws",
+    "kind": "input",
+    "file": "src/keyboard.ts",
+    "find": "  try {\n    return Option.some(Reflect.construct(constructor, []))\n  } catch {\n    return Option.none()\n  }",
+    "replace": "  return Option.some(Reflect.construct(constructor, []))",
+    "see": "In a browser where EditContext exists but making one throws, the browser notice does not show and the app fails to start the keyboard instead.",
+    "heldOut": false
+  },
+  {
+    "id": "revert-fef9547-no-editcontext-notice",
+    "kind": "input",
+    "file": "src/keyboard.ts",
+    "find": "onNone: () => Stream.make(Message.FoundBrowserUnsupported()),",
+    "replace": "onNone: () => Stream.never,",
+    "see": "In Firefox or Safari the editor opens, takes no typing and draws a hollow cursor, with no notice that nullpad needs Chrome or Edge.",
+    "heldOut": false
+  },
+  {
+    "id": "revert-ca1c919-aim-whole-pixel",
+    "kind": "measure",
+    "file": "src/surface.ts",
+    "find": "    Math.floor(Math.min(caret, textEdges(line).right - start - 1)),",
+    "replace": "    Math.min(caret, textEdges(line).right - start - 1),",
+    "see": "Up and Down aim from the caret boundary itself instead of the last whole pixel before it, so after wide glyphs such as an emoji the caret crosses the middle of the next glyph and lands after it where a textarea lands before it.",
+    "heldOut": false
+  },
+  {
+    "id": "revert-9b527a2-wheel-main-thread",
+    "kind": "paint",
+    "file": "src/surface.ts",
+    "find": "if (event.ctrlKey || event.deltaY === 0) {",
+    "replace": "if (true || event.ctrlKey || event.deltaY === 0) {",
+    "see": "Fast wheel turns paint part or all of the screen blank for a frame or two, because Chrome scrolls on its compositor ahead of the lines the core draws.",
+    "heldOut": false
+  },
+  {
+    "id": "revert-4ddc17a-query-reveal-same-frame",
+    "kind": "timing",
+    "file": "src/core/editor.ts",
+    "find": "plan.query._tag === 'Point' || drawn === editor ? 'None' : 'Nearest',",
+    "replace": "'None',",
+    "see": "After a big paste, Ctrl+Home, then Delete 100 ms later: the Delete lands but the view stays at the bottom, because the caret is only scrolled on screen a frame after the key query is answered.",
+    "heldOut": true
+  },
+  {
+    "id": "revert-aca23c3-ime-replace-typed",
+    "kind": "input",
+    "file": "src/keyboard.ts",
+    "find": "                  Option.map(\n                    eraseOutside(state.selection, replaced),\n                    offerInput,\n                  )",
+    "replace": "                  Option.map(Option.none<Input>(), offerInput)",
+    "see": "An IME that converts letters already typed (reconversion, correction, accent for the letter before the caret) lands its conversion next to the letters it meant to replace, which stay on screen.",
+    "heldOut": false
+  },
+  {
+    "id": "revert-1b041eb-lines-past-edge",
+    "kind": "paint",
+    "file": "src/core/editor.ts",
+    "find": "const minLinesDrawnPastScreen = 125",
+    "replace": "const minLinesDrawnPastScreen = 0",
+    "see": "A fast wheel turn longer than one screen shows a blank band until the next frame, because only one screen of lines is drawn past each edge.",
+    "heldOut": false
+  },
+  {
+    "id": "revert-5077edc-keep-caret-line-while-query",
+    "kind": "timing",
+    "file": "src/core/editor.ts",
+    "find": "      Option.some(\n        Queued.match(cause, {\n          Fed: () => editor.buffer.caret.line,\n          Clicked: ({ line }) => line,\n        }),\n      ),",
+    "replace": "      Queued.match(cause, {\n        Fed: () => Option.none<number>(),\n        Clicked: ({ line }) => Option.some(line),\n      }),",
+    "see": "After a big paste, Ctrl+Home and Delete sent with no gap: a late scroll report moves the drawn lines away from the first line and the Delete finds its line undrawn and does nothing.",
+    "heldOut": true
+  },
+  {
+    "id": "revert-81d82bb-column-half-pixel",
+    "kind": "measure",
+    "file": "src/styles.css",
+    "find": "max-width: calc((var(--gutter) + 76) * 1ch + 0.5px);",
+    "replace": "max-width: calc((var(--gutter) + 76) * 1ch);",
+    "see": "A 76-cell row of tabs or joined text nodes wraps one word early, where a textarea with the same text keeps it on the row.",
+    "heldOut": false
+  },
+  {
+    "id": "revert-9867723-range-at-join",
+    "kind": "measure",
+    "file": "src/surface.ts",
+    "find": "  const start = domPoint(line, from, 'After')\n  const end = domPoint(line, to)\n  const range = document.createRange()\n  range.setStart(start.node, start.offset)\n  range.setEnd(end.node, end.offset)\n  const rects",
+    "replace": "  const start = domPoint(line, from)\n  const end = domPoint(line, to)\n  const range = document.createRange()\n  range.setStart(start.node, start.offset)\n  range.setEnd(end.node, end.offset)\n  const rects",
+    "see": "The caret drawn after a join at trailing spaces sits one cell left, and a caret at a join where the line wraps is drawn at the end of the upper row instead of the start of the lower one.",
+    "heldOut": false
+  },
+  {
+    "id": "revert-625b00c-backspace-row-change-goal",
+    "kind": "core",
+    "file": "src/core/editor.ts",
+    "find": "const keepsGoal =\n    !editor.caretAtRowEnd &&",
+    "replace": "const keepsGoal =\n    true &&",
+    "see": "Approximation: a Backspace from a caret drawn at the end of the upper row, which moves the caret to another row as the line rewraps, keeps the old goal x, so the next ArrowUp lands by the old x where a textarea aims at the caret x.",
+    "heldOut": false
+  },
+  {
+    "id": "revert-9e54137-click-stale-frame",
+    "kind": "timing",
+    "file": "src/surface.ts",
+    "find": "untilDrawn(revision, 8)",
+    "replace": "untilDrawn(revision, 0)",
+    "see": "A click within a frame of a keystroke is read against the rows drawn before it and lands in the wrong place, since the surface no longer waits for the frame that draws the core revision.",
+    "heldOut": true
+  },
+  {
+    "id": "revert-b18c9a8-altgr-chord",
+    "kind": "input",
+    "file": "src/keyboard.ts",
+    "find": "event.getModifierState('AltGraph') || (event.ctrlKey && event.altKey)",
+    "replace": "event.getModifierState('AltGraph')",
+    "see": "A character typed with AltGr on Windows (reported as Ctrl+Alt, such as @) is taken as a chord and cancelled, so it does not type.",
+    "heldOut": false
+  },
+  {
+    "id": "revert-3b1bf14-gutter-width",
+    "kind": "measure",
+    "file": "src/core/editor.ts",
+    "find": "Math.max(minLineNumberDigits, String(buffer.lines.length).length) +",
+    "replace": "minLineNumberDigits +",
+    "see": "Line numbers of five and six digits overflow the fixed-width gutter into the text.",
+    "heldOut": false
+  },
+  {
+    "id": "revert-cec6d50-enter-line-start-goal",
+    "kind": "core",
+    "file": "src/core/editor.ts",
+    "find": "Buffer.isInsidePiece(buffer)",
+    "replace": "buffer.caret.column < Buffer.lineEnd(buffer, buffer.caret.line)",
+    "see": "Enter at a line start or at a join keeps a stale goal column, so the next Down after Up on the first line lands a column too far right.",
+    "heldOut": false
+  },
+  {
+    "id": "revert-6c89fcd-enter-row-end-goal",
+    "kind": "core",
+    "file": "src/core/editor.ts",
+    "find": " && !editor.caretAtRowEnd",
+    "replace": "",
+    "see": "Enter at a caret drawn at the end of the upper row (after Up onto a shorter row) keeps the goal, so the next Up lands at the end of the line instead of its start.",
+    "heldOut": false
+  },
+  {
+    "id": "revert-da4cc5b-enter-inside-line-goal",
+    "kind": "core",
+    "file": "src/core/editor.ts",
+    "find": "? { ...typed, goalX: editor.goalX }",
+    "replace": "? typed",
+    "see": "Enter inside a line forgets the goal cell Up and Down aim for, where a textarea keeps it, so the next Up or Down lands in another column.",
+    "heldOut": false
+  }
+]

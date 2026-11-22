@@ -32,6 +32,8 @@ type Expectation = Readonly<{
   under?: string
   top?: string
   full?: boolean
+  title?: string
+  finder?: string
 }>
 
 type Step =
@@ -47,6 +49,8 @@ type Step =
   | Readonly<{ wheel: number }>
   | Readonly<{ resize: Readonly<{ width: number; height: number }> }>
   | Readonly<{ shot: string }>
+  | Readonly<{ reload: true }>
+  | Readonly<{ wait: number }>
   | Readonly<{ expect: Expectation }>
 
 const stepKeys = [
@@ -59,6 +63,8 @@ const stepKeys = [
   'wheel',
   'resize',
   'shot',
+  'reload',
+  'wait',
   'expect',
 ] as const
 
@@ -163,6 +169,12 @@ const parseStep = (value: unknown, index: number): Step => {
         : fail('click takes { row, cell } or { x, y }')
     case 'wheel':
       return { wheel: number(body, 'wheel') }
+    case 'reload':
+      return body === true ? { reload: true } : fail('reload takes true')
+    case 'wait':
+      return number(body, 'wait') > 0 && number(body, 'wait') <= 10_000
+        ? { wait: number(body, 'wait') }
+        : fail('wait takes milliseconds from 1 to 10000')
     case 'resize':
       if (isRecord(body)) {
         only(body, ['width', 'height'])
@@ -177,9 +189,18 @@ const parseStep = (value: unknown, index: number): Step => {
         : fail('resize takes { width, height }')
     case 'expect': {
       if (!isRecord(body)) {
-        return fail('expect takes { text?, status?, under?, top?, full? }')
+        return fail(
+          'expect takes { text?, status?, under?, top?, full?, title?, finder? }',
+        )
       }
-      const fields = ['text', 'status', 'under', 'top'] as const
+      const fields = [
+        'text',
+        'status',
+        'under',
+        'top',
+        'title',
+        'finder',
+      ] as const
       const unknown = Object.keys(body).filter(
         key => ![...fields, 'full'].includes(key),
       )
@@ -244,6 +265,46 @@ const describe = (step: Step): string => {
   return json.length <= 100
     ? json
     : `${json.slice(0, 80)}… (${json.length} chars, full step in steps.json)`
+}
+
+type Page = Nullpad['page']
+
+const finderText = (page: Page): Promise<string> =>
+  page.evaluate(() => {
+    const finder = document.querySelector('.finder')
+    if (finder === null) {
+      return 'closed'
+    }
+    const prompt = finder.querySelector('.pl')?.textContent ?? ''
+    const rows = Array.from(
+      finder.querySelectorAll('.row'),
+      row =>
+        `${row.classList.contains('sel') ? '> ' : '  '}${Array.from(
+          row.children,
+          cell => cell.textContent ?? '',
+        ).join(' | ')}`,
+    )
+    return [`prompt ${prompt}`, ...rows].join('\n')
+  })
+
+const checkPage = async (
+  page: Page,
+  expectation: Expectation,
+): Promise<Array<string>> => {
+  const misses: Array<string> = []
+  const title = await page.title()
+  if (expectation.title !== undefined && title !== expectation.title) {
+    misses.push(`title is "${title}", expected "${expectation.title}"`)
+  }
+  if (expectation.finder !== undefined) {
+    const finder = await finderText(page)
+    if (finder !== expectation.finder) {
+      misses.push(
+        `finder shows ${JSON.stringify(finder)}, expected ${JSON.stringify(expectation.finder)}`,
+      )
+    }
+  }
+  return misses
 }
 
 const check = (screen: Screen, expectation: Expectation): Array<string> => {
@@ -330,8 +391,19 @@ const play = async (
       path: join(out, `${step.shot}.png`),
       animations: 'disabled',
     })
+  } else if ('reload' in step) {
+    await nullpad.page.reload()
+    await nullpad.page.locator('#caret').waitFor({ timeout: 10_000 })
+    await nullpad.page.evaluate(() =>
+      document.fonts.ready.then(() => undefined),
+    )
+  } else if ('wait' in step) {
+    await nullpad.page.waitForTimeout(step.wait)
   } else {
-    return check(await nullpad.screen(), step.expect)
+    return [
+      ...check(await nullpad.screen(), step.expect),
+      ...(await checkPage(nullpad.page, step.expect)),
+    ]
   }
   return []
 }

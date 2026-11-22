@@ -1,0 +1,214 @@
+[
+  {
+    "type": "# Groceries"
+  },
+  {
+    "press": "Enter"
+  },
+  {
+    "type": "milk and eggs"
+  },
+  {
+    "expect": {
+      "text": "# Groceries\nmilk and eggs",
+      "status": "2:14 2L",
+      "title": "Groceries"
+    }
+  },
+  {
+    "wait": 1200
+  },
+  {
+    "reload": true
+  },
+  {
+    "expect": {
+      "text": "# Groceries\nmilk and eggs",
+      "status": "1:1 2L",
+      "title": "Groceries"
+    }
+  },
+  {
+    "shot": "1-reloaded"
+  },
+  {
+    "press": "Control+p"
+  },
+  {
+    "type": "Client call"
+  },
+  {
+    "expect": {
+      "finder": "prompt ❯Client call 0/1\n> + new note \"Client call\" in the top level"
+    }
+  },
+  {
+    "shot": "2-new-note-row"
+  },
+  {
+    "press": "Enter"
+  },
+  {
+    "expect": {
+      "text": "Client call",
+      "title": "Client call",
+      "status": "1:12 1L",
+      "finder": "closed"
+    }
+  },
+  {
+    "press": "Enter"
+  },
+  {
+    "type": "agenda"
+  },
+  {
+    "wait": 1200
+  },
+  {
+    "press": "Control+p"
+  },
+  {
+    "expect": {
+      "finder": "prompt ❯ filter or new note name2/2\n> Client call |  | now\n  Groceries |  | now"
+    }
+  },
+  {
+    "shot": "3-two-notes"
+  },
+  {
+    "press": "ArrowDown"
+  },
+  {
+    "press": "Enter"
+  },
+  {
+    "expect": {
+      "text": "# Groceries\nmilk and eggs",
+      "title": "Groceries",
+      "finder": "closed"
+    }
+  },
+  {
+    "press": "Control+p"
+  },
+  {
+    "type": "cli"
+  },
+  {
+    "expect": {
+      "finder": "prompt ❯cli 1/2\n> Client call |  | now\n  + new note \"cli\" in the top level"
+    }
+  },
+  {
+    "press": "Control+g"
+  },
+  {
+    "expect": {
+      "finder": "prompt → folder path, empty for the top level\n> the top level"
+    }
+  },
+  {
+    "type": "work/clients"
+  },
+  {
+    "expect": {
+      "finder": "prompt →work/clients \n> + new folder work/clients/"
+    }
+  },
+  {
+    "shot": "4-move-to-folder"
+  },
+  {
+    "press": "Enter"
+  },
+  {
+    "expect": {
+      "finder": "prompt ❯ filter or new note name2/2\n> ▸ work/ | 1\n  Client call | work/clients/ | now\n  Groceries |  | now"
+    }
+  },
+  {
+    "shot": "5-moved"
+  },
+  {
+    "type": "wo/"
+  },
+  {
+    "expect": {
+      "finder": "prompt ❯ filter or new note name1/1\n> ▸ clients/ | 1\n  Client call | clients/ | now"
+    }
+  },
+  {
+    "shot": "6-drilled-into-work"
+  },
+  {
+    "type": "cl/"
+  },
+  {
+    "expect": {
+      "finder": "prompt ❯ filter or new note name1/1\n> Client call |  | now"
+    }
+  },
+  {
+    "press": "Backspace"
+  },
+  {
+    "expect": {
+      "finder": "prompt ❯ filter or new note name1/1\n> ▸ clients/ | 1\n  Client call | clients/ | now"
+    }
+  },
+  {
+    "press": "Backspace"
+  },
+  {
+    "expect": {
+      "finder": "prompt ❯ filter or new note name2/2\n> ▸ work/ | 1\n  Client call | work/clients/ | now\n  Groceries |  | now"
+    }
+  },
+  {
+    "press": "Tab"
+  },
+  {
+    "expect": {
+      "finder": "prompt ❯ filter or new note name1/1\n> ▸ clients/ | 1\n  Client call | clients/ | now"
+    }
+  },
+  {
+    "press": "Escape"
+  },
+  {
+    "expect": {
+      "finder": "closed",
+      "text": "# Groceries\nmilk and eggs",
+      "title": "Groceries"
+    }
+  },
+  {
+    "press": "Control+p"
+  },
+  {
+    "type": "client"
+  },
+  {
+    "press": "Enter"
+  },
+  {
+    "expect": {
+      "text": "Client call\nagenda",
+      "title": "Client call",
+      "finder": "closed"
+    }
+  },
+  {
+    "shot": "7-status-shows-folder"
+  },
+  {
+    "reload": true
+  },
+  {
+    "expect": {
+      "text": "Client call\nagenda",
+      "title": "Client call"
+    }
+  }
+]

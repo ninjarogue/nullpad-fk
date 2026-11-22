@@ -21,6 +21,7 @@
     "test:typist": "playwright test typist",
     "test:scout": "TYPIST_SCOUT_MINUTES=5 playwright test typist",
     "test:ready": "NULLPAD_READY=1 TYPIST_SCOUT_MINUTES=5 playwright test",
+    "plant": "node e2e/plant/run.ts",
     "postinstall": "effect-tsgo patch --no-typescript --oxlint",
     "prepare": "test -e .git && git config core.hooksPath .githooks || true"
   },

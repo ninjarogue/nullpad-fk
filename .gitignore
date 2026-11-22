@@ -34,3 +34,6 @@ Thumbs.db
 
 # nullpad verification runs (e2e/drive.ts)
 verify-out/
+
+# planted-bug runs (e2e/plant/run.ts)
+plant-out/

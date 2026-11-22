@@ -98,6 +98,7 @@ On a machine without Playwright's Chromium, install it once with `pnpm exec play
 | `sweep.spec.ts`, `e2e/typist/sweeps.ts`                          | The sweeps: grids of scripts, each compared with a textarea. Some play on every push, the rest before a merge.                                                                                                                                    |
 | `typist.spec.ts`, `typist-flicker.spec.ts`, `e2e/typist/`        | The named scripts, which run on every push. The scout and the typist flicker checks, which run only with `TYPIST_SCOUT_MINUTES`. `run.ts` holds the comparison, `script.ts` the named scripts and accepted differences, and `scout.ts` the scout. |
 | `e2e/drive.ts`, `.claude/skills/verify-nullpad/`                 | Not a test. Plays a JSON list of steps on a fresh build with the fixture's driver, prints the screen after each step and saves evidence. The `verify-nullpad` skill says how, and its `features/*.json` are runnable proofs of each feature.      |
+| `e2e/plant/`                                                     | Not a test. The planted-bug robot, which measures the tests. See Planted bugs.                                                                                                                                                                    |
 | `e2e/reporters/require-tests.ts`                                 | Fails a run in which no test ran, so a filter or a skip cannot turn the gate green.                                                                                                                                                               |
 
 ### Add a scenario
@@ -202,6 +203,83 @@ Where a malformed sequence makes Chrome's textarea or EditContext disagree with 
 - A mark on a space.
 
 Each sweep shard and each scout shard reports how many mismatches each accepted difference covered.
+
+### Planted bugs
+
+The planted-bug robot measures the tests. It puts one bug at a time into a copy of the source, builds the copy, and runs the tests on that build. A bug that makes a test fail is caught. A bug that every test passes on is missed. Judge a change to the tests, or to how they run, by this table: the change must not catch fewer bugs.
+
+A bug is one row of a set. `e2e/plant/bugs.json` is the `blind` set, which a separate agent wrote. `e2e/plant/reverts.json` is the `reverts` set, which undoes past fixes.
+
+```json
+{
+  "id": "tab-three-spaces",
+  "kind": "core",
+  "file": "src/core/editor.ts",
+  "find": "Tab: editor => now(typeText('  ')(editor)),",
+  "replace": "Tab: editor => now(typeText('   ')(editor)),",
+  "see": "Tab types three spaces, not two.",
+  "heldOut": false
+}
+```
+
+- `kind` is `timing`, `measure`, `input`, `paint` or `core`.
+- `find` occurs exactly once in `file`, and the robot puts `replace` in its place.
+- `see` says what a person would notice.
+- `heldOut` marks a bug that whoever writes or trims tests does not look at. The totals count held-out bugs apart.
+
+A set that breaks one of these rules stops the run before anything builds, with one line for each fault.
+
+#### Run
+
+```sh
+pnpm plant --quick                     # every bug, each one stopped at its first failing test
+pnpm plant --matrix                    # every bug against every test
+pnpm plant --quick --set blind         # one set: blind, reverts, all (the default) or a .json file of your own
+pnpm plant --quick --only id-1,id-2    # only these bugs
+pnpm plant --quick --ready             # with the sweeps that run before a merge
+pnpm plant --quick -- typing -g Tab    # everything after -- goes to playwright test
+pnpm plant --quick --jobs 2            # two builds at once, where the default is one for each core
+pnpm plant --quick --out /tmp/plant-a  # another folder than plant-out/, so that two runs can go at once
+```
+
+A run has three steps.
+
+1. It copies every file that git does not ignore into a scratch folder for each bug, plants the bug, and builds the copy with `vite build`. The builds run at once.
+2. It runs the tests on the build without a bug. If one fails, the run stops there, because a table from tests that fail on their own means nothing.
+3. It runs the tests on one build at a time, each on a free port (`NULLPAD_PORT`), so that no run slows another into a failure.
+
+A quick run passes `--max-failures=1` to Playwright, so it says whether a bug is caught and how soon. Only a matrix run says which tests catch a bug.
+
+#### Verdicts
+
+| Verdict        | What happened                                                                                                                                                                          |
+| -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `caught`       | A test failed on the bug's build.                                                                                                                                                      |
+| `missed`       | Every test passed on the bug's build.                                                                                                                                                  |
+| `boots-dead`   | The editor did not come up, or the page logged an error while it loaded. Every test would fail, so the robot runs none and leaves the bug out of the counts of what each test catches. |
+| `stale`        | `find` occurs in `file` no times or several times. Fix the row.                                                                                                                        |
+| `inert`        | The build is the same, byte for byte, as the build without the bug. The bug sits in code that the build drops.                                                                         |
+| `build-failed` | `vite build` failed on the copy.                                                                                                                                                       |
+| `run-failed`   | Playwright failed without a failing test, such as when no test matched.                                                                                                                |
+
+The run exits with 0 when every bug is `caught`, `missed` or `boots-dead`, with 1 when the tests fail without a bug or a bug has another verdict, and with 2 on a wrong argument.
+
+#### Units
+
+The table counts units, not Playwright tests, because one test can hold many checks. A unit is a scenario (one Playwright test), a sweep row or a named script. `e2e/sweep.spec.ts` and `e2e/typist.spec.ts` record each row and each script with `recordUnit` from `e2e/plant/unit.ts`, as an annotation that Playwright writes to its JSON report. A test that fails with no failing unit of its own, such as a sweep shard that times out, counts as one failing scenario.
+
+#### Output
+
+A run prints one line for each bug as it finishes, then three tables.
+
+- Each bug with its verdict, its build time, its run time and the first unit that caught it.
+- In a matrix run, each unit with the number of bugs it catches and the number of bugs that only it catches. Keep a test only if it catches a planted bug that no other test catches.
+- For each set, the bugs caught out of the bugs caught and missed, by kind and by `heldOut`.
+
+`plant-out/` holds what the run saw. Git ignores it.
+
+- `catch.json` has the units of the run without a bug with their times, and each bug's verdict, times and failing units.
+- `baseline/` and `bugs/<id>/` each hold the build in `dist/` and Playwright's `report.json`. To see a bug as a person would, run `node e2e/drive.ts steps.json --dist plant-out/bugs/<id>/dist`.
 
 ## Process
 

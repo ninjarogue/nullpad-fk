@@ -313,22 +313,20 @@ test('Ctrl-G moves the highlighted note, not the first one, and Escape backs out
 test('a title match ranks above a match that is only in the folder path', async ({
   nullpad,
 }) => {
-  await nullpad.type('zebra crossing')
+  await nullpad.type('acme')
   await waitSaved(nullpad)
-  await moveNote(nullpad, 'zebra crossing', 'release')
+  await startNote(nullpad, 'unrelated stuff')
   await waitSaved(nullpad)
-  await startNote(nullpad, 'release checklist')
-  await waitSaved(nullpad)
-  await startNote(nullpad, 'zzz filler')
+  await moveNote(nullpad, 'unrelated stuff', 'acme')
   await waitSaved(nullpad)
 
   await openFinder(nullpad)
-  await nullpad.type('release')
+  await nullpad.type('acme')
   const rows = ((await nullpad.finder())?.rows ?? [])
     .map(row => row.text)
-    .filter(text => !text.startsWith('▸'))
-  expect(rows.slice(0, 2), 'title match first, path-only match second').toEqual(
-    ['release checklist', 'zebra crossing'],
+    .filter(text => !text.startsWith('▸') && !text.startsWith('+'))
+  expect(rows, 'the exact title match beats the newer path-only match').toEqual(
+    ['acme', 'unrelated stuff'],
   )
 })
 

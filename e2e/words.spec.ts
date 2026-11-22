@@ -61,6 +61,8 @@ const keys = [
 ] as const
 type Key = (typeof keys)[number]
 
+const nonWordKeys = keys.slice(2)
+
 const mulberry32 = (seed: number) => {
   let state = seed | 0
   return () => {
@@ -86,7 +88,8 @@ const keysFor = (text: string, seed: number): ReadonlyArray<Key> => {
       ? 'Control+ArrowRight'
       : roll < 0.6
         ? 'Control+ArrowLeft'
-        : (keys[2 + Math.floor(random() * 6)] ?? 'ArrowLeft')
+        : (nonWordKeys[Math.floor(random() * nonWordKeys.length)] ??
+          'ArrowLeft')
   })
   return [...forward, ...backward, ...mixed]
 }
@@ -113,7 +116,7 @@ const textareaCaret = (page: Page): Promise<Caret> =>
     }
   })
 
-const textareaPress = async (page: Page, key: Key): Promise<Caret> => {
+const textareaPressAsNullpad = async (page: Page, key: Key): Promise<Caret> => {
   const before = await textareaCaret(page)
   await page.keyboard.press(key)
   const after = await textareaCaret(page)
@@ -164,7 +167,7 @@ const firstDifference = async (
   for (const [at, key] of keys.entries()) {
     const [nullpad, textarea] = await Promise.all([
       pair.nullpad.keyboard.press(key).then(() => nullpadCaret(pair.nullpad)),
-      textareaPress(pair.textarea, key),
+      textareaPressAsNullpad(pair.textarea, key),
     ])
     if (nullpad.line !== textarea.line || nullpad.column !== textarea.column) {
       return [

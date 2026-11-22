@@ -31,6 +31,8 @@ export const segmenter = new Intl.Segmenter(undefined, {
   granularity: 'grapheme',
 })
 
+export const graphemeReach = 64
+
 type Piece = Readonly<{ from: number; to: number }>
 
 const pieceAt = (
@@ -65,8 +67,8 @@ const boundaryAtOrAfter = (line: Line, column: number): number => {
   if (column <= from || column >= to) {
     return column
   }
-  const start = Math.max(from, column - 64)
-  const end = Math.min(to, column + 64)
+  const start = Math.max(from, column - graphemeReach)
+  const end = Math.min(to, column + graphemeReach)
   const grapheme = segmenter
     .segment(line.text.slice(start, end))
     .containing(column - start)
@@ -218,15 +220,15 @@ const isLowSurrogate = (text: string, index: number): boolean => {
 
 export const spanAround = (
   buffer: Buffer,
-  from: number,
-  to: number,
+  fromCaret: number,
+  toCaret: number,
 ): Readonly<{ from: Position; to: Position }> => {
   const { line, column } = buffer.caret
   const { text } = lineAt(buffer, line)
   const clamp = (offset: number) =>
     Math.max(0, Math.min(text.length, column + offset))
-  const start = clamp(Math.min(from, to))
-  const end = clamp(Math.max(from, to))
+  const start = clamp(Math.min(fromCaret, toCaret))
+  const end = clamp(Math.max(fromCaret, toCaret))
   return {
     from: {
       line,
@@ -287,8 +289,3 @@ export const documentEnd = (buffer: Buffer): Position => {
   const line = buffer.lines.length - 1
   return { line, column: lineEnd(buffer, line) }
 }
-
-export const pieces = ({ text, joins }: Line): ReadonlyArray<string> =>
-  Array.map(Array.zip([0, ...joins], [...joins, text.length]), ([from, to]) =>
-    text.slice(from, to),
-  )

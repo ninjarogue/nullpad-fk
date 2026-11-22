@@ -24,7 +24,7 @@ export const Message = defineMessageUnion({
     isEdit: Schema.Boolean,
     reason: Schema.Literals(['Conflict', 'Unavailable']),
   },
-  CompletedRemoveNote: {},
+  CompletedRemoveNote: { isStoreAvailable: Schema.Boolean },
   CompletedRequestPersistence: {},
   CompletedReadClock: { now: Schema.Finite },
   CompletedRevealFinderRow: {},

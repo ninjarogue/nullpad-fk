@@ -10,10 +10,11 @@ import {
   update,
   view,
 } from './main'
-import { stashLeaving } from './storage'
+import { NoteStore, clearLeavingStash, stashLeaving } from './storage'
 
 // Effect's runMain stops the app on pagehide and an unloading page does not wait for IndexedDB, so this listener comes first and writes localStorage.
 window.addEventListener('pagehide', stashLeaving)
+window.addEventListener('pageshow', clearLeavingStash)
 
 const application = Runtime.makeApplication({
   Model,
@@ -23,6 +24,7 @@ const application = Runtime.makeApplication({
   view,
   subscriptions,
   container: document.getElementById('root'),
+  resources: NoteStore.layer,
   devTools: {
     Message,
   },

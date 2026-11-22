@@ -1,4 +1,13 @@
-import { Array, Clock, Effect, Option, Schema, Stream } from 'effect'
+import {
+  Array,
+  Clock,
+  Effect,
+  Equivalence,
+  Number,
+  Option,
+  Schema,
+  Stream,
+} from 'effect'
 import { SecureRandom } from 'effect/crypto'
 import { Command, Dom, type Runtime, Subscription, Update } from 'foldkit'
 import type { Document, HtmlBuilder } from 'foldkit/html'
@@ -24,26 +33,29 @@ import { locate, revealCaret, statusLine, surface } from './surface'
 export { Message }
 
 export const Flags = Schema.Struct({
-  notes: Schema.Array(Notes.Note),
+  maybeNotes: Schema.Option(Schema.Array(Notes.Note)),
   stashed: Schema.Array(Storage.Stashed),
   seed: Schema.String,
   now: Schema.Finite,
 })
 export type Flags = typeof Flags.Type
 
-export const flags: Effect.Effect<Flags> = Effect.gen(function* () {
-  const random = yield* SecureRandom.SecureRandom
-  const seed = yield* random.uuidV4()
-  const notes = yield* Storage.list.pipe(Effect.orElseSucceed(() => []))
-  const stashed = yield* Storage.takeStashed
-  const now = yield* Clock.currentTimeMillis
-  return { notes, stashed, seed, now }
-}).pipe(Effect.provide(BrowserCrypto.layerSecureRandom))
+export const flags: Effect.Effect<Flags, never, Storage.NoteStore> = Effect.gen(
+  function* () {
+    const random = yield* SecureRandom.SecureRandom
+    const seed = yield* random.uuidV4()
+    const store = yield* Storage.NoteStore
+    const maybeNotes = yield* Effect.option(store.list)
+    const stashed = yield* Storage.takeStashed
+    const now = yield* Clock.currentTimeMillis
+    return Flags.make({ maybeNotes, stashed, seed, now })
+  },
+).pipe(Effect.provide(BrowserCrypto.layerSecureRandom))
 
 const SaveState = Schema.TaggedUnion({
   Idle: {},
   Saving: {
-    held: Schema.Option(Storage.NoteChange),
+    maybeHeld: Schema.Option(Storage.NoteChange),
     sentText: Schema.String,
   },
 })
@@ -64,6 +76,7 @@ export const Model = Schema.Struct({
   notes: Schema.Array(Notes.Note),
   note: OpenNote,
   pending: Schema.Array(Storage.Draft),
+  store: Schema.Literals(['Saving', 'Unavailable']),
   finder: Schema.Option(Finder.Finder),
   edits: Schema.Int,
   seed: Schema.String,
@@ -73,7 +86,7 @@ export const Model = Schema.Struct({
 })
 export type Model = typeof Model.Type
 
-type UpdateReturn = Update.Return<Model, Message>
+type UpdateReturn = Update.Return<Model, Message, Storage.NoteStore>
 
 const newNoteId = (model: Model): Notes.NoteId =>
   Notes.NoteId.make(`${model.seed}-${model.created}`)
@@ -130,8 +143,11 @@ const SaveNote = Command.define('SaveNote', {
   },
   messages: [Message.SucceededSaveNote, Message.FailedSaveNote],
   execute: ({ draft, expectedRevision, isEdit }) =>
-    Storage.write(draft, expectedRevision).pipe(
-      Effect.map(note => Message.SucceededSaveNote({ note })),
+    Effect.gen(function* () {
+      const store = yield* Storage.NoteStore
+      const note = yield* store.write(draft, expectedRevision)
+      return Message.SucceededSaveNote({ note })
+    }).pipe(
       Effect.catch(error =>
         Effect.succeed(
           Message.FailedSaveNote({
@@ -150,9 +166,17 @@ const RemoveNote = Command.define('RemoveNote', {
   args: { id: Notes.NoteId, expectedRevision: Schema.Int },
   messages: [Message.CompletedRemoveNote],
   execute: ({ id, expectedRevision }) =>
-    Storage.remove(id, expectedRevision).pipe(
-      Effect.ignore,
-      Effect.as(Message.CompletedRemoveNote()),
+    Effect.gen(function* () {
+      const store = yield* Storage.NoteStore
+      yield* store.remove(id, expectedRevision)
+      return Message.CompletedRemoveNote({ isStoreAvailable: true })
+    }).pipe(
+      Effect.catchTag('StorageConflict', () =>
+        Effect.succeed(Message.CompletedRemoveNote({ isStoreAvailable: true })),
+      ),
+      Effect.orElseSucceed(() =>
+        Message.CompletedRemoveNote({ isStoreAvailable: false }),
+      ),
     ),
 })
 
@@ -218,7 +242,7 @@ const saveNow = (model: Model): UpdateReturn => {
           savedEdits: () => model.edits,
           save: () =>
             SaveState.cases.Saving.make({
-              held: Option.none(),
+              maybeHeld: Option.none(),
               sentText: draft.text,
             }),
         }),
@@ -267,7 +291,7 @@ const closeFinder = (model: Model): Model =>
 const conflictCopy = (model: Model): UpdateReturn =>
   saveNow(
     show(
-      modifyFields(model, { created: created => created + 1 }),
+      modifyFields(model, { created: Number.increment }),
       { id: newNoteId(model), folder: model.note.folder, revision: 0 },
       Notes.conflictCopy(Editor.text(model.editor)),
       'Start',
@@ -298,7 +322,7 @@ const createNote = (model: Model, folder: string, text: string): UpdateReturn =>
       saveNow(
         closeFinder(
           show(
-            modifyFields(left, { created: created => created + 1 }),
+            modifyFields(left, { created: Number.increment }),
             { id: newNoteId(left), folder, revision: 0 },
             text,
             'End',
@@ -460,7 +484,7 @@ const receiveChange = (
             modifyFields(open, {
               save: () =>
                 SaveState.cases.Saving.make({
-                  held: Option.some(laterChange(save.held, change)),
+                  maybeHeld: Option.some(laterChange(save.maybeHeld, change)),
                   sentText: save.sentText,
                 }),
             }),
@@ -472,7 +496,7 @@ const receiveChange = (
 const heldChange = (save: SaveState): Option.Option<Storage.NoteChange> =>
   SaveState.match(save, {
     Idle: () => Option.none(),
-    Saving: ({ held }) => held,
+    Saving: ({ maybeHeld }) => maybeHeld,
   })
 
 const confirmSave = (model: Model, note: Notes.Note): UpdateReturn => {
@@ -482,6 +506,7 @@ const confirmSave = (model: Model, note: Notes.Note): UpdateReturn => {
         revision: () => note.revision,
         save: () => SaveState.cases.Idle.make({}),
       }),
+    store: () => 'Saving',
   })
   return Option.match(heldChange(model.note.save), {
     onNone: () => saveIfDirty(confirmed),
@@ -525,7 +550,7 @@ const copyLeftNote = (model: Model, draft: Storage.Draft): UpdateReturn => {
     return { model: taken.model }
   }
   return {
-    model: modifyFields(taken.model, { created: created => created + 1 }),
+    model: modifyFields(taken.model, { created: Number.increment }),
     commands: [
       SaveNote({
         draft: {
@@ -565,7 +590,8 @@ const restoreStashed = (
     Option.exists(
       stored,
       ({ revision, text }) =>
-        revision === stashed.baseRevision + 1 && text === stashed.sentText,
+        revision === stashed.baseRevision + 1 &&
+        Option.contains(stashed.maybeSentText, text),
     )
   const draft = { id: stashed.id, folder: stashed.folder, text: stashed.text }
   if (Notes.isBlank(stashed.text)) {
@@ -591,7 +617,7 @@ const restoreStashed = (
   }
   if (!isStillBase || isRestored) {
     return {
-      model: modifyFields(model, { created: created => created + 1 }),
+      model: modifyFields(model, { created: Number.increment }),
       commands: [
         SaveNote({
           draft: {
@@ -618,12 +644,13 @@ const restoreStashed = (
   )
 }
 
-export const init: Runtime.ApplicationInit<Model, Message, Flags> = ({
-  notes,
-  stashed,
-  seed,
-  now,
-}) => {
+export const init: Runtime.ApplicationInit<
+  Model,
+  Message,
+  Flags,
+  Storage.NoteStore
+> = ({ maybeNotes, stashed, seed, now }) => {
+  const notes = Option.getOrElse(maybeNotes, () => [])
   const blank: Model = {
     editor: Editor.open(''),
     keyboard: 'Blurred',
@@ -636,6 +663,7 @@ export const init: Runtime.ApplicationInit<Model, Message, Flags> = ({
       save: SaveState.cases.Idle.make({}),
     },
     pending: [],
+    store: Option.isSome(maybeNotes) ? 'Saving' : 'Unavailable',
     finder: Option.none(),
     edits: 0,
     seed,
@@ -698,16 +726,20 @@ export const update = (model: Model, message: Message) =>
         : settled
     },
     FailedSaveNote: ({ draft, expectedRevision, isEdit, reason }) => {
-      if (draft.id !== model.note.id) {
+      const noted =
+        reason === 'Unavailable'
+          ? modifyFields(model, { store: () => 'Unavailable' })
+          : model
+      if (draft.id !== noted.note.id) {
         if (reason === 'Unavailable') {
-          return savePending(model, draft.id, expectedRevision)
+          return savePending(noted, draft.id, expectedRevision)
         }
-        return isEdit ? copyLeftNote(model, draft) : { model }
+        return isEdit ? copyLeftNote(noted, draft) : { model: noted }
       }
       return reason === 'Conflict'
-        ? conflictCopy(model)
+        ? conflictCopy(noted)
         : {
-            model: modifyFields(model, {
+            model: modifyFields(noted, {
               note: open =>
                 modifyFields(open, {
                   savedEdits: () => -1,
@@ -716,7 +748,11 @@ export const update = (model: Model, message: Message) =>
             }),
           }
     },
-    CompletedRemoveNote: () => ({ model }),
+    CompletedRemoveNote: ({ isStoreAvailable }) => ({
+      model: isStoreAvailable
+        ? model
+        : modifyFields(model, { store: () => 'Unavailable' }),
+    }),
     CompletedRequestPersistence: () => ({ model }),
     CompletedReadClock: ({ now }) => ({
       model: modifyFields(model, { now: () => now }),
@@ -749,19 +785,19 @@ const unsaved = ({
   Model,
   'editor' | 'note' | 'pending' | 'edits'
 >): ReadonlyArray<Storage.Stashed> => {
-  const sentText = SaveState.match(note.save, {
-    Idle: () => null,
-    Saving: ({ sentText }) => sentText,
+  const maybeSentText = SaveState.match(note.save, {
+    Idle: () => Option.none<string>(),
+    Saving: ({ sentText }) => Option.some(sentText),
   })
   const open =
-    edits !== note.savedEdits || sentText !== null
+    edits !== note.savedEdits || Option.isSome(maybeSentText)
       ? [
           {
             id: note.id,
             folder: note.folder,
             text: Editor.text(editor),
             baseRevision: note.revision,
-            sentText,
+            maybeSentText,
           },
         ]
       : []
@@ -770,14 +806,25 @@ const unsaved = ({
     ...Array.map(pending, draft => ({
       ...draft,
       baseRevision: -1,
-      sentText: null,
+      maybeSentText: Option.none<string>(),
     })),
   ]
 }
 
-export const subscriptions = Subscription.make<Model, Message>()(entry => ({
+export const subscriptions = Subscription.make<
+  Model,
+  Message,
+  Storage.NoteStore
+>()(entry => ({
   noteChanges: Subscription.persistentEntry(
-    Stream.map(Storage.watch, change => Message.ReceivedNoteChange({ change })),
+    Stream.unwrap(
+      Effect.gen(function* () {
+        const store = yield* Storage.NoteStore
+        return Stream.map(store.changes, change =>
+          Message.ReceivedNoteChange({ change }),
+        )
+      }),
+    ),
   ),
   pageExits: Subscription.persistentEntry(
     Stream.merge(
@@ -812,20 +859,10 @@ export const subscriptions = Subscription.make<Model, Message>()(entry => ({
         edits,
         seed,
       }),
-      keepAliveEquivalence: () => true,
+      keepAliveEquivalence: Equivalence.Struct({ seed: Equivalence.String }),
       dependenciesToStream: ({ seed }, readDependencies) =>
-        Stream.merge(
-          Stream.fromEffectDrain(
-            Storage.stashOnLeave(seed, () => unsaved(readDependencies())),
-          ),
-          Dom.streamFromEventFilterMap({
-            target: window,
-            type: 'pageshow',
-            filterMapEvent: () => {
-              Effect.runSync(Storage.clearStash(seed))
-              return Option.none()
-            },
-          }),
+        Stream.fromEffectDrain(
+          Storage.stashOnLeave(seed, () => unsaved(readDependencies())),
         ),
     },
   ),
@@ -852,6 +889,9 @@ export const view = (model: Model, h: HtmlBuilder<Message>): Document => {
               statusLine(
                 frame.status,
                 Notes.joinFolder(model.note.folder, Notes.fileName(title)),
+                model.store === 'Unavailable'
+                  ? Option.some('notes are not being saved')
+                  : Option.none(),
                 h,
               ),
               ...Option.match(model.finder, {

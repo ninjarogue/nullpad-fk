@@ -51,7 +51,10 @@ export const conflictCopy = (text: string): string =>
 
 export const normalizeFolder = (path: string): string =>
   Array.join(
-    Array.filter(Array.map(path.split('/'), String.trim), String.isNonEmpty),
+    Array.filter(
+      Array.map(path.split('/'), String.trim),
+      segment => segment !== '' && segment !== '.' && segment !== '..',
+    ),
     '/',
   )
 

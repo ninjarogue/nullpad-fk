@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test'
 
+import { recordUnit } from './plant/unit'
 import { compare, openPair } from './typist/run'
 import { show } from './typist/script'
 import { rowsOf, sweeps } from './typist/sweeps'
@@ -34,7 +35,7 @@ for (const sweep of sweeps) {
       const accepted = new Map<string, number>()
       const failures: Array<string> = []
       let threw = 0
-      for (const row of mine) {
+      const check = async (row: (typeof mine)[number]) => {
         const divergence = await compare(
           pair,
           row.script,
@@ -47,18 +48,29 @@ for (const sweep of sweeps) {
           return null
         })
         if (divergence === null) {
-          continue
+          return
         }
         if (divergence.accepted !== undefined) {
           accepted.set(
             divergence.accepted,
             (accepted.get(divergence.accepted) ?? 0) + 1,
           )
-          continue
+          return
         }
         failures.push(
           `${row.document} | ${row.placement} | ${show(row.move)} | differs after step ${divergence.at + 1} of ${row.script.length} | nullpad ${divergence.nullpad.line}:${divergence.nullpad.column} textarea ${divergence.textarea.line}:${divergence.textarea.column} | text same: ${divergence.nullpad.text === divergence.textarea.text}`,
         )
+      }
+      for (const row of mine) {
+        const began = Date.now()
+        const failuresBefore = failures.length
+        await check(row)
+        recordUnit(testInfo, {
+          kind: 'sweep row',
+          path: [sweep.name, row.document, row.placement, show(row.move)],
+          ms: Date.now() - began,
+          failed: failures.length > failuresBefore,
+        })
       }
       await pair.close()
       const acceptedSummary = [...accepted]

@@ -1,5 +1,6 @@
 import { type Browser, type TestInfo, expect, test } from '@playwright/test'
 
+import { recordUnit } from './plant/unit'
 import { type Divergence, type Snapshot, compare, openPair } from './typist/run'
 import { scoutScript } from './typist/scout'
 import {
@@ -34,14 +35,22 @@ const describe = (divergence: Divergence): string =>
 test('typist: every named script matches a textarea, with Backspace as an EditContext takes it, but for a known malformed sequence', async ({
   browser,
   baseURL,
-}) => {
+}, testInfo) => {
   const pair = await openPair(browser, baseURL ?? '')
   const failures: Array<string> = []
   for (const { name, script } of namedScripts) {
+    const began = Date.now()
     const divergence = await compare(pair, script)
-    if (divergence !== null && divergence.accepted === undefined) {
+    const failed = divergence !== null && divergence.accepted === undefined
+    if (failed) {
       failures.push(`named script "${name}"\n${describe(divergence)}`)
     }
+    recordUnit(testInfo, {
+      kind: 'named script',
+      path: [name],
+      ms: Date.now() - began,
+      failed,
+    })
   }
   await pair.close()
   expect(failures, failures.join('\n\n')).toEqual([])

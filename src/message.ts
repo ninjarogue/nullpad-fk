@@ -3,8 +3,8 @@ import { defineMessageUnion } from 'foldkit/message'
 
 import { Answer } from './core/editor'
 import { Input } from './core/input'
-import { Note, NoteId } from './core/notes'
-import { NoteChange } from './storage'
+import { Note } from './core/notes'
+import { Draft, NoteChange } from './storage'
 
 export const Message = defineMessageUnion({
   ReceivedInput: { input: Input },
@@ -19,7 +19,9 @@ export const Message = defineMessageUnion({
   CompletedWaitBeforeSave: { edits: Schema.Int },
   SucceededSaveNote: { note: Note },
   FailedSaveNote: {
-    id: NoteId,
+    draft: Draft,
+    expectedRevision: Schema.Int,
+    isEdit: Schema.Boolean,
     reason: Schema.Literals(['Conflict', 'Unavailable']),
   },
   CompletedRemoveNote: {},

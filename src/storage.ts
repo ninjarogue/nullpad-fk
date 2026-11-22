@@ -17,7 +17,12 @@ export class StorageUnavailable extends Data.TaggedError('StorageUnavailable')<{
   readonly cause: unknown
 }> {}
 
-export type Draft = Pick<Note, 'id' | 'folder' | 'text'>
+export const Draft = Schema.Struct({
+  id: NoteId,
+  folder: Schema.String,
+  text: Schema.String,
+})
+export type Draft = typeof Draft.Type
 
 const storeName = 'notes'
 

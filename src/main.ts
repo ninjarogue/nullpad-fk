@@ -33,11 +33,18 @@ export const flags: Effect.Effect<Flags> = Effect.gen(function* () {
   return { notes, seed, now }
 }).pipe(Effect.provide(BrowserCrypto.layerSecureRandom))
 
+const SaveState = Schema.TaggedUnion({
+  Idle: {},
+  Saving: { held: Schema.Option(Storage.NoteChange) },
+})
+type SaveState = typeof SaveState.Type
+
 const OpenNote = Schema.Struct({
   id: Notes.NoteId,
   folder: Schema.String,
   revision: Schema.Int,
   savedEdits: Schema.Int,
+  save: SaveState,
 })
 type OpenNote = typeof OpenNote.Type
 
@@ -46,6 +53,7 @@ export const Model = Schema.Struct({
   keyboard: Keyboard,
   notes: Schema.Array(Notes.Note),
   note: OpenNote,
+  pending: Schema.Array(Storage.Draft),
   finder: Schema.Option(Finder.Finder),
   edits: Schema.Int,
   seed: Schema.String,
@@ -73,6 +81,7 @@ const show = (
       folder: note.folder,
       revision: note.revision,
       savedEdits: model.edits,
+      save: SaveState.cases.Idle.make({}),
     }),
   })
 
@@ -90,7 +99,9 @@ export const init: Runtime.ApplicationInit<Model, Message, Flags> = ({
       folder: '',
       revision: 0,
       savedEdits: 0,
+      save: SaveState.cases.Idle.make({}),
     },
+    pending: [],
     finder: Option.none(),
     edits: 0,
     seed,
@@ -135,19 +146,20 @@ const WaitBeforeSave = Command.define('WaitBeforeSave', {
 
 const SaveNote = Command.define('SaveNote', {
   args: {
-    id: Notes.NoteId,
-    folder: Schema.String,
-    text: Schema.String,
+    draft: Storage.Draft,
     expectedRevision: Schema.Int,
+    isEdit: Schema.Boolean,
   },
   messages: [Message.SucceededSaveNote, Message.FailedSaveNote],
-  execute: ({ expectedRevision, ...draft }) =>
+  execute: ({ draft, expectedRevision, isEdit }) =>
     Storage.write(draft, expectedRevision).pipe(
       Effect.map(note => Message.SucceededSaveNote({ note })),
       Effect.catch(error =>
         Effect.succeed(
           Message.FailedSaveNote({
-            id: draft.id,
+            draft,
+            expectedRevision,
+            isEdit,
             reason:
               error._tag === 'StorageConflict' ? 'Conflict' : 'Unavailable',
           }),
@@ -191,45 +203,70 @@ const RevealFinderRow = Command.define('RevealFinderRow', {
 
 const isDirty = (model: Model): boolean => model.edits !== model.note.savedEdits
 
-const saveNow = (model: Model): UpdateReturn => {
-  if (Editor.isBlank(model.editor)) {
-    return { model }
-  }
-  const { note } = model
-  return {
-    model: modifyFields(model, {
-      note: open =>
-        modifyFields(open, {
-          revision: revision => revision + 1,
-          savedEdits: () => model.edits,
+const draftOf = (model: Model): Storage.Draft => ({
+  id: model.note.id,
+  folder: model.note.folder,
+  text: Editor.text(model.editor),
+})
+
+const saveNow = (model: Model): UpdateReturn =>
+  Editor.isBlank(model.editor) || model.note.save._tag === 'Saving'
+    ? { model }
+    : {
+        model: modifyFields(model, {
+          note: open =>
+            modifyFields(open, {
+              savedEdits: () => model.edits,
+              save: () => SaveState.cases.Saving.make({ held: Option.none() }),
+            }),
         }),
-    }),
-    commands: [
-      SaveNote({
-        id: note.id,
-        folder: note.folder,
-        text: Editor.text(model.editor),
-        expectedRevision: note.revision,
-      }),
-    ],
-  }
-}
+        commands: [
+          SaveNote({
+            draft: draftOf(model),
+            expectedRevision: model.note.revision,
+            isEdit: true,
+          }),
+        ],
+      }
 
 const saveIfDirty = (model: Model): UpdateReturn =>
   isDirty(model) ? saveNow(model) : { model }
 
 const leave = (model: Model): UpdateReturn => {
-  const { id, revision } = model.note
-  return Editor.isBlank(model.editor) && revision > 0
-    ? {
-        model: modifyFields(model, {
-          notes: notes => Notes.without(notes, id),
-          note: open => modifyFields(open, { revision: () => 0 }),
-        }),
-        commands: [RemoveNote({ id })],
-      }
-    : saveIfDirty(model)
+  const { id, revision, save } = model.note
+  if (Editor.isBlank(model.editor)) {
+    return revision > 0 || save._tag === 'Saving'
+      ? {
+          model: modifyFields(model, {
+            notes: notes => Notes.without(notes, id),
+            note: open => modifyFields(open, { revision: () => 0 }),
+          }),
+          commands: [RemoveNote({ id })],
+        }
+      : { model }
+  }
+  if (isDirty(model) && save._tag === 'Saving') {
+    return {
+      model: modifyFields(model, {
+        pending: pending => [
+          ...Array.filter(pending, draft => draft.id !== id),
+          draftOf(model),
+        ],
+      }),
+    }
+  }
+  return saveIfDirty(model)
 }
+
+const takePending = (
+  model: Model,
+  id: Notes.NoteId,
+): Readonly<{ model: Model; draft: Option.Option<Storage.Draft> }> => ({
+  model: modifyFields(model, {
+    pending: pending => Array.filter(pending, draft => draft.id !== id),
+  }),
+  draft: Array.findFirst(model.pending, draft => draft.id === id),
+})
 
 const closeFinder = (model: Model): Model =>
   modifyFields(model, { finder: () => Option.none() })
@@ -291,7 +328,8 @@ const moveNote = (
   if (id === model.note.id) {
     return saveNow(
       modifyFields(moved, {
-        note: open => modifyFields(open, { folder: () => folder }),
+        note: open =>
+          modifyFields(open, { folder: () => folder, savedEdits: () => -1 }),
       }),
     )
   }
@@ -303,10 +341,9 @@ const moveNote = (
         model: moved,
         commands: [
           SaveNote({
-            id,
-            folder,
-            text: note.text,
+            draft: { id, folder, text: note.text },
             expectedRevision: note.revision,
+            isEdit: false,
           }),
         ],
       }),
@@ -362,36 +399,47 @@ const receiveInput = (model: Model, input: Input): UpdateReturn =>
         : respond(model, Editor.feed(model.editor, input)),
   })
 
-const receiveChange = (
-  model: Model,
+const laterChange = (
+  held: Option.Option<Storage.NoteChange>,
   change: Storage.NoteChange,
-): UpdateReturn =>
+): Storage.NoteChange =>
+  Option.match(held, {
+    onNone: () => change,
+    onSome: earlier =>
+      earlier._tag === 'Saved' &&
+      change._tag === 'Saved' &&
+      earlier.note.revision > change.note.revision
+        ? earlier
+        : change,
+  })
+
+const changedId = (change: Storage.NoteChange): Notes.NoteId =>
+  Storage.NoteChange.match(change, {
+    Saved: ({ note }) => note.id,
+    Removed: ({ id }) => id,
+  })
+
+const applyChange = (model: Model, change: Storage.NoteChange): UpdateReturn =>
   Storage.NoteChange.match(change, {
     Saved: ({ note }) => {
-      const listed = modifyFields(model, {
-        notes: notes => Notes.upsert(notes, note),
-      })
       if (note.id !== model.note.id || note.revision <= model.note.revision) {
-        return { model: listed }
+        return { model }
       }
       return isDirty(model)
-        ? conflictCopy(listed)
-        : { model: show(listed, note, note.text, 'Start') }
+        ? conflictCopy(model)
+        : { model: show(model, note, note.text, 'Start') }
     },
     Removed: ({ id }) => {
-      const listed = modifyFields(model, {
-        notes: notes => Notes.without(notes, id),
-      })
       if (id !== model.note.id) {
-        return { model: listed }
+        return { model }
       }
       return {
         model: isDirty(model)
-          ? modifyFields(listed, {
+          ? modifyFields(model, {
               note: open => modifyFields(open, { revision: () => 0 }),
             })
           : show(
-              listed,
+              model,
               { id, folder: model.note.folder, revision: 0 },
               '',
               'Start',
@@ -399,6 +447,91 @@ const receiveChange = (
       }
     },
   })
+
+const receiveChange = (
+  model: Model,
+  change: Storage.NoteChange,
+): UpdateReturn => {
+  const listed = modifyFields(model, {
+    notes: notes =>
+      Storage.NoteChange.match(change, {
+        Saved: ({ note }) => Notes.upsert(notes, note),
+        Removed: ({ id }) => Notes.without(notes, id),
+      }),
+  })
+  const { save } = model.note
+  return save._tag === 'Saving' && changedId(change) === model.note.id
+    ? {
+        model: modifyFields(listed, {
+          note: open =>
+            modifyFields(open, {
+              save: () =>
+                SaveState.cases.Saving.make({
+                  held: Option.some(laterChange(save.held, change)),
+                }),
+            }),
+        }),
+      }
+    : applyChange(listed, change)
+}
+
+const heldChange = (save: SaveState): Option.Option<Storage.NoteChange> =>
+  SaveState.match(save, {
+    Idle: () => Option.none(),
+    Saving: ({ held }) => held,
+  })
+
+const confirmSave = (model: Model, note: Notes.Note): UpdateReturn => {
+  const confirmed = modifyFields(model, {
+    note: open =>
+      modifyFields(open, {
+        revision: () => note.revision,
+        save: () => SaveState.cases.Idle.make({}),
+      }),
+  })
+  return Option.match(heldChange(model.note.save), {
+    onNone: () => saveIfDirty(confirmed),
+    onSome: change =>
+      Update.combine(confirmed, [
+        stepModel => applyChange(stepModel, change),
+        saveIfDirty,
+      ]),
+  })
+}
+
+const savePending = (
+  model: Model,
+  id: Notes.NoteId,
+  expectedRevision: number,
+): UpdateReturn => {
+  const taken = takePending(model, id)
+  return Option.match(taken.draft, {
+    onNone: () => ({ model: taken.model }),
+    onSome: pending => ({
+      model: taken.model,
+      commands: [SaveNote({ draft: pending, expectedRevision, isEdit: true })],
+    }),
+  })
+}
+
+const copyLeftNote = (model: Model, draft: Storage.Draft): UpdateReturn => {
+  const taken = takePending(model, draft.id)
+  const latest = Option.getOrElse(taken.draft, () => draft)
+  return {
+    model: modifyFields(taken.model, { created: created => created + 1 }),
+    commands: [
+      SaveNote({
+        draft: {
+          id: newNoteId(taken.model),
+          folder: latest.folder,
+          text: Notes.conflictCopy(latest.text),
+        },
+        expectedRevision: 0,
+        isEdit: true,
+      }),
+    ],
+  }
+}
 
 export const update = (model: Model, message: Message) =>
   Message.match<UpdateReturn>(message, {
@@ -431,23 +564,35 @@ export const update = (model: Model, message: Message) =>
     SucceededSaveNote: ({ note }) => {
       const listed = modifyFields(model, {
         notes: notes => Notes.upsert(notes, note),
+        persistence: () => 'Requested',
       })
+      const settled =
+        note.id === model.note.id
+          ? confirmSave(listed, note)
+          : savePending(listed, note.id, note.revision)
       return model.persistence === 'Unrequested'
         ? {
-            model: modifyFields(listed, { persistence: () => 'Requested' }),
-            commands: [RequestPersistence()],
+            model: settled.model,
+            commands: [...(settled.commands ?? []), RequestPersistence()],
           }
-        : { model: listed }
+        : settled
     },
-    FailedSaveNote: ({ id, reason }) => {
-      if (id !== model.note.id) {
-        return { model }
+    FailedSaveNote: ({ draft, expectedRevision, isEdit, reason }) => {
+      if (draft.id !== model.note.id) {
+        if (reason === 'Unavailable') {
+          return savePending(model, draft.id, expectedRevision)
+        }
+        return isEdit ? copyLeftNote(model, draft) : { model }
       }
       return reason === 'Conflict'
         ? conflictCopy(model)
         : {
             model: modifyFields(model, {
-              note: open => modifyFields(open, { savedEdits: () => -1 }),
+              note: open =>
+                modifyFields(open, {
+                  savedEdits: () => -1,
+                  save: () => SaveState.cases.Idle.make({}),
+                }),
             }),
           }
     },

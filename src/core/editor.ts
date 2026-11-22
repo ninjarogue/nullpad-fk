@@ -2,6 +2,7 @@ import { Array, Option, Order, Schema } from 'effect'
 
 import * as Buffer from './buffer'
 import { Input, type Modifiers, type NamedKey } from './input'
+import * as Words from './words'
 
 /** Vim adds Normal, Insert and Visual here. Plain is the default typing mode. */
 export const Mode = Schema.Literals(['Plain'])
@@ -364,6 +365,27 @@ const step =
         )
   }
 
+/**
+ * Ctrl+Left and Ctrl+Right move by word as Chrome's text field does on Linux, on every system: Windows would stop at the
+ * start of the next word instead. A word move that stays keeps the goal; one that moves clears it.
+ */
+const wordStep =
+  (direction: 'Forward' | 'Backward') =>
+  (editor: Editor): Plan => {
+    const buffer = settled(editor)
+    return now(
+      Option.match(
+        direction === 'Forward'
+          ? Words.nextWordEnd(buffer)
+          : Words.previousWordStart(buffer),
+        {
+          onNone: () => editor,
+          onSome: caret => moveTo(editor, caret, false),
+        },
+      ),
+    )
+  }
+
 /** Delete erases what ArrowRight would step over, so it removes the grapheme the browser draws as one. */
 const deleteForward = (editor: Editor): Plan => {
   const buffer = settled(editor)
@@ -458,8 +480,10 @@ const plainKeys: Readonly<
   Backspace: editor =>
     now(eraseTo(editor, Buffer.backspaceTarget(settled(editor)))),
   Delete: deleteForward,
-  ArrowLeft: step('Backward'),
-  ArrowRight: step('Forward'),
+  ArrowLeft: (editor, { ctrl }) =>
+    ctrl ? wordStep('Backward')(editor) : step('Backward')(editor),
+  ArrowRight: (editor, { ctrl }) =>
+    ctrl ? wordStep('Forward')(editor) : step('Forward')(editor),
   ArrowUp: vertical(-1),
   ArrowDown: vertical(1),
   Home: (editor, { ctrl }) =>

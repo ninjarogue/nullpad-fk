@@ -358,10 +358,6 @@ const textStart = (line: HTMLElement): number => {
   )
 }
 
-/** Chrome aims Up and Down from the last whole pixel before the caret's boundary, counted from the text's start. */
-const aimFrom = (boundary: number): number =>
-  Math.max(0, Math.ceil(boundary) - 1)
-
 /**
  * Up, Down and paging: from the caret's row, `distance` pixels down (or up) at x `aim` from the text's left edge.
  * Chrome pages row by row and steps from the first row to the start of the text and from the last row to its end, so a
@@ -378,7 +374,9 @@ const verticalAnswer = (
 ): Answer => {
   const start = textStart(line)
   const caret = caretBox(line, from.column, from.atRowEnd)
-  const aim = Option.getOrElse(goal, () => aimFrom(caret.left - start))
+  const aim = Option.getOrElse(goal, () =>
+    aimAt(line, from.column, from.atRowEnd),
+  )
   const target = caret.top + sheet.rowHeight / 2 + distance
   const edgeRow = stride === 'Page' ? sheet.rowHeight : 0
   const first = sheet.surface.querySelector<HTMLElement>('.line')
@@ -434,6 +432,82 @@ const selectionMove = (
   return moved
 }
 
+/** The column where the caret's row starts. A caret drawn at the end of the upper row is in that row. */
+const rowStartOf = (
+  line: HTMLElement,
+  column: number,
+  atRowEnd: boolean,
+): Option.Option<number> =>
+  selectionMove(
+    line,
+    atRowEnd && wrapsAt(line, column)
+      ? graphemeBefore(lineText(line), column)
+      : column,
+    'backward',
+    'lineboundary',
+  )
+
+const advances = document.createElement('canvas').getContext('2d')
+
+/** The float sum of the advances of `text` in the line's font, measured on its own. */
+const advanceSum = (line: HTMLElement, text: string): Option.Option<number> => {
+  if (advances === null) {
+    return Option.none()
+  }
+  const style = getComputedStyle(line)
+  advances.font = `${style.fontStyle} ${style.fontWeight} ${style.fontSize} ${style.fontFamily}`
+  return Option.some(advances.measureText(text).width)
+}
+
+/** How far the drawn text from `from` to `to` on one row reaches past the text's start, as the browser drew it. */
+const drawnReach = (
+  line: HTMLElement,
+  from: number,
+  to: number,
+  start: number,
+): number => {
+  if (to <= from) {
+    return 0
+  }
+  const range = document.createRange()
+  const first = domPoint(line, from, 'After')
+  const last = domPoint(line, to)
+  range.setStart(first.node, first.offset)
+  range.setEnd(last.node, last.offset)
+  return range.getBoundingClientRect().right - start
+}
+
+/**
+ * Where Chrome aims Up and Down from, in whole pixels from the text's start: the advances from the start of the
+ * caret's row to the caret, summed as floats and rounded to 1/64 px as Chrome places its caret, kept a pixel inside the
+ * column, then rounded down. The drawn rect bounds that sum only to 1/64 px, so a canvas sum within that 1/64 px
+ * settles it. Where the canvas strays further it measured what the row does not draw, such as a tab, which a canvas
+ * draws as a space, or half of a cluster that a join splits, which the row draws whole.
+ */
+const aimAt = (
+  line: HTMLElement,
+  column: number,
+  atRowEnd: boolean,
+): number => {
+  const start = textStart(line)
+  const rowStart = Option.getOrElse(rowStartOf(line, column, atRowEnd), () => 0)
+  const drawn = drawnReach(line, rowStart, column, start)
+  const caret = Option.match(
+    advanceSum(line, lineText(line).slice(rowStart, column)),
+    {
+      onNone: () => drawn,
+      onSome: sum => {
+        const placed = Math.round(sum * 64) / 64
+        return Math.abs(placed - drawn) <= 1 / 64 + 1e-6 ? placed : drawn
+      },
+    },
+  )
+  return Math.max(
+    0,
+    Math.floor(Math.min(caret, textEdges(line).right - start - 1)),
+  )
+}
+
 const at = (line: HTMLElement, column: number, atRowEnd: boolean): Answer => ({
   landing: { _tag: 'At', line: indexOf(line), column, atRowEnd },
   aim: 0,
@@ -446,21 +520,13 @@ const rowEdgeAnswer = (
   atRowEnd: boolean,
   edge: 'Start' | 'End',
 ): Answer => {
-  const upstream = atRowEnd && wrapsAt(line, column)
-  if (edge === 'End' && upstream) {
+  if (edge === 'End' && atRowEnd && wrapsAt(line, column)) {
     return at(line, column, true)
   }
-  const from =
-    edge === 'Start' && upstream
-      ? graphemeBefore(lineText(line), column)
-      : column
   return Option.match(
-    selectionMove(
-      line,
-      from,
-      edge === 'Start' ? 'backward' : 'forward',
-      'lineboundary',
-    ),
+    edge === 'Start'
+      ? rowStartOf(line, column, atRowEnd)
+      : selectionMove(line, column, 'forward', 'lineboundary'),
     {
       onNone: () => stay(0),
       onSome: landed =>
@@ -527,12 +593,14 @@ const pointAnswer = (
   })
 }
 
-const pageDistance = (sheet: Sheet): number => {
-  const rows = Math.floor(
-    (sheet.viewBottom - sheet.viewTop) / sheet.rowHeight + 0.01,
-  )
-  return Math.max(1, Math.floor((rows * 7) / 8)) * sheet.rowHeight
-}
+/** Chrome pages a text box by seven eighths of its client height in whole pixels, a whole row at a time. */
+const pageDistance = (sheet: Sheet): number =>
+  Math.max(
+    1,
+    Math.floor(
+      Math.floor((sheet.surface.clientHeight * 7) / 8) / sheet.rowHeight,
+    ),
+  ) * sheet.rowHeight
 
 const answer = (sheet: Sheet, query: Query): Answer =>
   Query.match(query, {

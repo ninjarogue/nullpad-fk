@@ -30,3 +30,4 @@ Preconditions: the baseline in [README.md](./README.md).
 - A huge turn, such as 100000, scrolls only onto lines already drawn, then the next frame catches up. Check the screen after the step, not mid-turn.
 - `text` in an `expect` covers only the rows on screen. To check a far line, scroll to it first.
 - A `shot` proves nothing by itself. Check the screen with `expect` `full` and `top`, and look at the PNG.
+- `full` reads the screen after the scroll has settled. A blank frame that shows for a moment during the turn and is gone by the next frame does not fail it. `e2e/flicker.spec.ts` watches pixels during the turn for that.

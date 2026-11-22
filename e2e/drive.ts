@@ -77,7 +77,25 @@ const parseStep = (value: unknown, index: number): Step => {
   if (kinds.length !== 1 || kind === undefined) {
     return fail(`needs exactly one of ${stepKeys.join(', ')}`)
   }
+  const allowed: ReadonlyArray<string> = [
+    kind,
+    ...(kind === 'press' ? ['times'] : []),
+    ...(kind === 'compose' ? ['replacing'] : []),
+  ]
+  const extra = Object.keys(value).filter(key => !allowed.includes(key))
+  if (extra.length > 0) {
+    return fail(`${kind} takes no field ${extra.join(', ')}`)
+  }
   const body = value[kind]
+  const only = (
+    record: Record<string, unknown>,
+    names: ReadonlyArray<string>,
+  ) => {
+    const unknown = Object.keys(record).filter(key => !names.includes(key))
+    if (unknown.length > 0) {
+      fail(`${kind} takes only ${names.join(', ')}, not ${unknown.join(', ')}`)
+    }
+  }
   const text = (): string =>
     typeof body === 'string' ? body : fail(`${kind} takes a string`)
   const number = (field: unknown, name: string): number =>
@@ -107,6 +125,12 @@ const parseStep = (value: unknown, index: number): Step => {
       if (replacing === undefined) {
         return { compose: text() }
       }
+      if (isRecord(replacing)) {
+        only(replacing, ['start', 'end'])
+        if (Number(replacing['start']) > Number(replacing['end'])) {
+          fail('replacing.start comes after replacing.end')
+        }
+      }
       return isRecord(replacing)
         ? {
             compose: text(),
@@ -118,6 +142,9 @@ const parseStep = (value: unknown, index: number): Step => {
         : fail('replacing takes { start, end }')
     }
     case 'click':
+      if (isRecord(body)) {
+        only(body, 'row' in body ? ['row', 'cell'] : ['x', 'y'])
+      }
       if (isRecord(body) && 'row' in body) {
         return {
           click: {
@@ -137,6 +164,9 @@ const parseStep = (value: unknown, index: number): Step => {
     case 'wheel':
       return { wheel: number(body, 'wheel') }
     case 'resize':
+      if (isRecord(body)) {
+        only(body, ['width', 'height'])
+      }
       return isRecord(body)
         ? {
             resize: {

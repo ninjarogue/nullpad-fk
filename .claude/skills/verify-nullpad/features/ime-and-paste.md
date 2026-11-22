@@ -23,6 +23,7 @@ Preconditions: the baseline in [README.md](./README.md).
 - **Commit.** `{"commit": "日"}` gives `ab日` at `1:4`.
 - **Replace typed letters.** `{"type": "ka"}`, `{"compose": "か", "replacing": {"start": 3, "end": 5}}`, `{"commit": "か"}` turn `ka` into `か`: `ab日か` at `1:5`.
 - **Paste.** `{"paste": "one\ntwo"}` gives `ab日かone` and `two` at `2:4 2L`.
+- **Windows line ends.** `{"paste": "\r\nCR\r\nLF"}` adds lines `CR` and `LF` with no `\r` left in the text, at `4:3 4L`.
 
 ## Gotchas
 

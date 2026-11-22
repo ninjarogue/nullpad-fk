@@ -38,5 +38,41 @@
     "expect": {
       "status": "2:7 2L"
     }
+  },
+  {
+    "resize": {
+      "width": 400,
+      "height": 600
+    }
+  },
+  {
+    "press": "Control+End"
+  },
+  {
+    "paste": "\nlorem ipsum dolor sit amet consectetur lorem ipsum dolor sit amet consectetur lorem ipsum dolor sit amet consectetur lorem ipsum dolor sit amet consectetur"
+  },
+  {
+    "click": {
+      "row": 3,
+      "cell": 2
+    }
+  },
+  {
+    "expect": {
+      "status": "3:30 3L",
+      "under": "n"
+    }
+  },
+  {
+    "click": {
+      "row": 4,
+      "cell": 0
+    }
+  },
+  {
+    "expect": {
+      "status": "3:62 3L",
+      "under": "a"
+    }
   }
 ]

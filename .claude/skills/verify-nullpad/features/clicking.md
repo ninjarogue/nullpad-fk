@@ -24,7 +24,9 @@ Preconditions: the baseline in [README.md](./README.md).
 - **Click past a line end.** `{"click": {"row": 1, "cell": 40}}` lands at `2:7`, the end of line 2.
 - **Click below the text.** Ctrl+Home, then `{"click": {"x": 500, "y": 500}}` lands at `2:7`, the end of the note.
 
-Clicks on wrapped rows and after a wheel turn have no proof file yet. Read the screen printed by the step before the click, click a row, and `expect` the line number that row shows in its gutter.
+- **Wrapped row.** `{"resize": {"width": 400, "height": 600}}` and a 155-letter line pasted as line 3. A click on row 3 cell 2, the second row of line 3, lands at `3:30` on `n`. A click on row 4 cell 0 lands at `3:62` on `a`, the start of that row.
+
+A click after a wheel turn has no proof file. Read the screen printed by the step before the click, click a row, and check `status` (line and column), not only the gutter number, because every row of a wrapped line shows the same line.
 
 ## Gotchas
 

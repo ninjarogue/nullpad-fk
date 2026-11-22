@@ -5,7 +5,7 @@ One file per thing a person does in nullpad. Read this index, then drive the mat
 ## Baseline
 
 - Every run starts on an empty note: one empty line, status `1:1 1L`, cursor on row 0 cell 0.
-- The window is 1000 by 600 unless the run passes `--width` and `--height`. At 1000 wide a row holds about 110 cells.
+- The window is 1000 by 600 unless the run passes `--width` and `--height`. At 1000 wide a row holds 76 cells.
 - `node e2e/drive.ts --doctor` ends with `ok`.
 
 ## Conventions

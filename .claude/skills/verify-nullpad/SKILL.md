@@ -59,7 +59,7 @@ Each `expect` field is an exact match:
 - `status` is the status line, `line:column lineCount L`. The column counts letters from 1.
 - `under` is the character the block cursor covers, `" "` at a line end or on a space.
 - `top` is the line number of the first line on screen.
-- `full: true` fails when the drawn rows leave more than a row of the text area blank, the check for blank screen after a scroll.
+- `full: true` fails when the drawn rows leave more than a row of the text area blank, the check for a screen left blank after a scroll settles. A blank frame in the middle of a turn needs `e2e/flicker.spec.ts`, which watches pixels.
 
 After each step the runner prints one line, such as:
 

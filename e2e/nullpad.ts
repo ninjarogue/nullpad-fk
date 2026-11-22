@@ -277,8 +277,21 @@ export const openFresh = async (page: Page, path = '/'): Promise<void> => {
     })
     await cdp.detach()
   }
-  await page.goto(path)
-  await page.locator('#caret').waitFor()
+  await page.goto(path, { waitUntil: 'domcontentloaded' })
+  await page.evaluate(
+    () =>
+      new Promise<void>(resolve => {
+        const look = () => {
+          const box = document.getElementById('caret')?.getBoundingClientRect()
+          if (box !== undefined && box.width > 0 && box.height > 0) {
+            resolve()
+          } else {
+            requestAnimationFrame(look)
+          }
+        }
+        look()
+      }),
+  )
 }
 
 export type FinderRow = Readonly<{

@@ -2,6 +2,7 @@ import { Array, Option, Order, Schema } from 'effect'
 
 import * as Buffer from './buffer'
 import { Input, type Modifiers, type NamedKey } from './input'
+import * as Notes from './notes'
 import * as Words from './words'
 
 export const Mode = Schema.Literals(['Plain'])
@@ -115,6 +116,38 @@ export const open = (text: string): Editor => ({
 })
 
 export const text = (editor: Editor): string => Buffer.toText(editor.buffer)
+
+export const reopen = (
+  editor: Editor,
+  text: string,
+  caretAt: 'Start' | 'End',
+): Editor => {
+  const opened = open(text)
+  return {
+    ...opened,
+    buffer:
+      caretAt === 'End'
+        ? Buffer.moveTo(opened.buffer, Buffer.documentEnd(opened.buffer))
+        : opened.buffer,
+    screenRows: editor.screenRows,
+    drawnRevision: editor.drawnRevision + 1,
+  }
+}
+
+export const sameText = (a: Editor, b: Editor): boolean =>
+  a.buffer.lines === b.buffer.lines
+
+const firstFilledLine = (editor: Editor): string =>
+  Option.match(
+    Array.findFirst(editor.buffer.lines, line => /\S/u.test(line.text)),
+    { onNone: () => '', onSome: line => line.text },
+  )
+
+export const isBlank = (editor: Editor): boolean =>
+  firstFilledLine(editor) === ''
+
+export const title = (editor: Editor): string =>
+  Notes.title(firstFilledLine(editor))
 
 export const graphemeReach = Buffer.graphemeReach
 

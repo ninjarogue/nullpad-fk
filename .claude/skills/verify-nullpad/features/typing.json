@@ -67,7 +67,33 @@
   {
     "expect": {
       "text": "oo   bar",
+      "status": "1:1 1L",
       "under": "o"
+    }
+  },
+  {
+    "press": "End"
+  },
+  {
+    "press": "Enter"
+  },
+  {
+    "type": "next"
+  },
+  {
+    "press": "ArrowUp"
+  },
+  {
+    "press": "End"
+  },
+  {
+    "press": "Delete"
+  },
+  {
+    "expect": {
+      "text": "oo   barnext",
+      "status": "1:9 1L",
+      "under": "n"
     }
   }
 ]

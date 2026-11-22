@@ -37,23 +37,29 @@ node e2e/drive.ts steps.json --video    # also records video.webm
 node e2e/drive.ts steps.json --width 600 --height 400 --out verify-out/my-check
 ```
 
-A step is an object with exactly one of these keys. Unknown keys or fields fail the run before the browser opens.
+A step is an object with exactly one of these keys. A malformed step (an unknown key or field, a wrong type, `times` below 1, an empty list) exits 2 before anything builds. A key name Playwright does not know fails only when that step plays.
 
-| Step                                                          | What a person does                                                                               |
-| ------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
-| `{"type": "abc"}`                                             | Types each character as a key press.                                                             |
-| `{"press": "ArrowUp", "times": 3}`                            | Presses a key (Playwright key names, chords as `Control+Home`). `times` is optional.             |
-| `{"paste": "a\nb"}`                                           | Pastes from the clipboard with Ctrl+V.                                                           |
-| `{"compose": "に", "replacing": {"start": 0, "end": 1}}`      | Shows IME preedit text. `replacing` is optional and counts UTF-16 units of the EditContext text. |
-| `{"commit": "日"}`                                            | Ends the composition, inserting the text.                                                        |
-| `{"click": {"row": 2, "cell": 5}}`                            | Clicks drawn row 2 (0 is the top row on screen) at cell 5.                                       |
-| `{"click": {"x": 120, "y": 40}}`                              | Clicks a page pixel, for clicks off the text such as below the last line.                        |
-| `{"wheel": 300}`                                              | Turns the mouse wheel by that many pixels over the text, and waits for the scroll to end.        |
-| `{"resize": {"width": 600, "height": 400}}`                   | Resizes the window.                                                                              |
-| `{"shot": "before-fix"}`                                      | Saves a screenshot as `before-fix.png`.                                                          |
-| `{"expect": {"text": "…", "status": "2:4 3L", "under": "o"}}` | Checks the screen. Any field may be left out. A miss prints `FAIL` and stops the run.            |
+| Step                                                                                     | What a person does                                                                                    |
+| ---------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `{"type": "abc"}`                                                                        | Types each character as a key press.                                                                  |
+| `{"press": "ArrowUp", "times": 3}`                                                       | Presses a key (Playwright key names, chords as `Control+Home`). `times` is optional.                  |
+| `{"paste": "a\nb"}`                                                                      | Pastes from the clipboard with Ctrl+V.                                                                |
+| `{"compose": "に", "replacing": {"start": 0, "end": 1}}`                                 | Shows IME preedit text. `replacing` is optional and counts UTF-16 units of the EditContext text.      |
+| `{"commit": "日"}`                                                                       | Ends the composition, inserting the text.                                                             |
+| `{"click": {"row": 2, "cell": 5}}`                                                       | Clicks drawn row 2 (0 is the top row on screen) at cell 5.                                            |
+| `{"click": {"x": 120, "y": 40}}`                                                         | Clicks a page pixel, for clicks off the text such as below the last line.                             |
+| `{"wheel": 300}`                                                                         | Turns the mouse wheel by that many pixels over the text, and waits for the scroll to end.             |
+| `{"resize": {"width": 600, "height": 400}}`                                              | Resizes the window.                                                                                   |
+| `{"shot": "before-fix"}`                                                                 | Saves a screenshot as `before-fix.png`. Names use letters, digits, `-` and `_`. Proves nothing alone. |
+| `{"expect": {"text": "…", "status": "2:4 3L", "under": "o", "top": "40", "full": true}}` | Checks the screen. Give any of the fields. A miss prints `FAIL` and stops the run.                    |
 
-`text` is every drawn line joined with `\n`, so it covers only lines on screen. `status` is the status line, `line:column lineCount L`. `under` is the character the block cursor covers, `" "` at a line end.
+Each `expect` field is an exact match:
+
+- `text` is every line on screen joined with `\n`, wrapped rows rejoined. It leaves out IME preedit and lines scrolled off screen.
+- `status` is the status line, `line:column lineCount L`. The column counts letters from 1.
+- `under` is the character the block cursor covers, `" "` at a line end or on a space.
+- `top` is the line number of the first line on screen.
+- `full: true` fails when the drawn rows leave more than a row of the text area blank, the check for blank screen after a scroll.
 
 After each step the runner prints one line, such as:
 
@@ -85,7 +91,7 @@ Each run writes to `verify-out/<time>/` (gitignored), or to `--out`:
 - `final.png`, plus one PNG per `shot` step. Open them with the Read tool to look at them.
 - `video.webm` with `--video`.
 
-The last line is `PASS evidence in <folder>` or `FAIL evidence in <folder>`. The exit code is 0 on a pass, 1 on a failed `expect`, a thrown step or any page error, and 2 on bad steps.
+The last line is `PASS evidence in <folder>` or `FAIL evidence in <folder>`. The exit code is 0 on a pass, 1 on a failed `expect`, a thrown step or any page error, 2 on bad steps or options, and 130 or 143 when interrupted. Read `FAIL` lines for a missed `expect` and `ERROR` lines for a step that threw.
 
 Proof standards:
 
@@ -100,4 +106,4 @@ Proof standards:
 
 The runner stops the `vite preview` it started (by its own process group), closes its browser and deletes its scratch build, even when a step fails. It never kills a process it did not start. It keeps `verify-out/`. Delete old runs there by hand when you no longer need them.
 
-If a run is killed with SIGKILL, find its server with `pgrep -af "vite preview --outDir /tmp/nullpad-verify-"` and stop only that pid, then remove its `/tmp/nullpad-verify-*` folder.
+Ctrl+C, SIGTERM and SIGHUP clean up the same way and keep the evidence written so far. Only SIGKILL leaks. Then find the server with `pgrep -af "vite preview --outDir /tmp/nullpad-verify-<id>"`. It shows three processes (pnpm, node and the pnpm binary) in one process group. Stop that group with `kill -- -<pgid>` (`ps -o pgid= <pid>` gives it), then remove that `/tmp/nullpad-verify-<id>` folder.

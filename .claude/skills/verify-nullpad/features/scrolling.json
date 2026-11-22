@@ -4,14 +4,35 @@
   },
   {
     "expect": {
-      "status": "200:9 200L"
+      "status": "200:9 200L",
+      "top": "176",
+      "full": true
     }
   },
   {
     "press": "Control+Home"
   },
   {
-    "wheel": 2000
+    "expect": {
+      "top": "1"
+    }
+  },
+  {
+    "wheel": 100000
+  },
+  {
+    "expect": {
+      "top": "176",
+      "full": true
+    }
+  },
+  {
+    "wheel": -3000
+  },
+  {
+    "expect": {
+      "full": true
+    }
   },
   {
     "shot": "scrolled"
@@ -22,7 +43,8 @@
   {
     "expect": {
       "status": "1:2 200L",
-      "under": "l"
+      "under": "l",
+      "top": "1"
     }
   }
 ]

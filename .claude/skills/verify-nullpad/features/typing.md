@@ -26,6 +26,7 @@ Preconditions: the baseline in [README.md](./README.md).
 - **Backspace at a line start.** Home and Backspace join the lines into `foo   bar` at `1:5 1L`.
 - **Whole-letter Backspace.** End, a typed family emoji and one Backspace leave `foo   bar` at `1:10 1L`, with no part of the emoji behind.
 - **Delete.** Home and Delete give `oo   bar`, the cursor on `o`.
+- **Delete at a line end.** A new line `next`, then Up, End and Delete join it into `oo   barnext` at `1:9 1L`, the cursor on `n`.
 
 ## Gotchas
 

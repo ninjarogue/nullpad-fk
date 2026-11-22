@@ -33,6 +33,18 @@
     }
   },
   {
+    "press": "End"
+  },
+  {
+    "expect": {
+      "status": "1:12 3L",
+      "under": " "
+    }
+  },
+  {
+    "press": "Home"
+  },
+  {
     "press": "Control+ArrowRight"
   },
   {
@@ -66,11 +78,80 @@
     }
   },
   {
-    "press": "Control+a"
+    "press": "Home"
+  },
+  {
+    "press": "ArrowDown"
   },
   {
     "expect": {
       "status": "3:12 3L"
+    }
+  },
+  {
+    "press": "Control+Home"
+  },
+  {
+    "press": "ArrowUp"
+  },
+  {
+    "expect": {
+      "status": "1:1 3L"
+    }
+  },
+  {
+    "press": "Control+a"
+  },
+  {
+    "expect": {
+      "status": "1:1 3L"
+    }
+  },
+  {
+    "resize": {
+      "width": 400,
+      "height": 600
+    }
+  },
+  {
+    "press": "Control+a"
+  },
+  {
+    "press": "Control+End"
+  },
+  {
+    "paste": "\nlorem ipsum dolor sit amet consectetur lorem ipsum dolor sit amet consectetur lorem ipsum dolor sit amet consectetur lorem ipsum dolor sit amet consectetur"
+  },
+  {
+    "expect": {
+      "status": "4:156 4L"
+    }
+  },
+  {
+    "press": "Home"
+  },
+  {
+    "expect": {
+      "status": "4:130 4L",
+      "under": "d"
+    }
+  },
+  {
+    "press": "ArrowUp"
+  },
+  {
+    "expect": {
+      "status": "4:97 4L",
+      "under": "s"
+    }
+  },
+  {
+    "press": "End"
+  },
+  {
+    "expect": {
+      "status": "4:130 4L",
+      "under": " "
     }
   }
 ]

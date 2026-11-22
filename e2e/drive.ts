@@ -30,6 +30,8 @@ type Expectation = Readonly<{
   text?: string
   status?: string
   under?: string
+  top?: string
+  full?: boolean
 }>
 
 type Step =
@@ -86,12 +88,20 @@ const parseStep = (value: unknown, index: number): Step => {
     case 'type':
     case 'paste':
     case 'commit':
-    case 'shot':
       return { [kind]: text() } as Step
-    case 'press':
-      return value['times'] === undefined
-        ? { press: text() }
-        : { press: text(), times: number(value['times'], 'times') }
+    case 'shot':
+      return /^[\w-]+$/u.test(text())
+        ? { shot: text() }
+        : fail('shot takes a name of letters, digits, - and _')
+    case 'press': {
+      const times = value['times']
+      if (times === undefined) {
+        return { press: text() }
+      }
+      return Number.isInteger(times) && Number(times) > 0
+        ? { press: text(), times: Number(times) }
+        : fail('times takes a whole number above 0')
+    }
     case 'compose': {
       const replacing = value['replacing']
       if (replacing === undefined) {
@@ -137,16 +147,21 @@ const parseStep = (value: unknown, index: number): Step => {
         : fail('resize takes { width, height }')
     case 'expect': {
       if (!isRecord(body)) {
-        return fail('expect takes { text?, status?, under? }')
+        return fail('expect takes { text?, status?, under?, top?, full? }')
       }
-      const fields = ['text', 'status', 'under'] as const
+      const fields = ['text', 'status', 'under', 'top'] as const
       const unknown = Object.keys(body).filter(
-        key => !(fields as ReadonlyArray<string>).includes(key),
+        key => ![...fields, 'full'].includes(key),
       )
       if (unknown.length > 0) {
         return fail(`expect has no field ${unknown.join(', ')}`)
       }
-      const expectation: Record<string, string> = {}
+      const expectation: Record<string, string | boolean> = {}
+      if (body['full'] === true) {
+        expectation['full'] = true
+      } else if (body['full'] !== undefined) {
+        fail('expect.full takes true')
+      }
       for (const name of fields) {
         const field = body[name]
         if (typeof field === 'string') {
@@ -166,6 +181,9 @@ const parseSteps = (json: string): ReadonlyArray<Step> => {
   const value: unknown = JSON.parse(json)
   if (!Array.isArray(value)) {
     throw new Error('steps must be a JSON array')
+  }
+  if (value.length === 0) {
+    throw new Error('steps is empty: nothing to prove')
   }
   return value.map(parseStep)
 }
@@ -218,6 +236,22 @@ const check = (screen: Screen, expectation: Expectation): Array<string> => {
   if (expectation.under !== undefined && under !== expectation.under) {
     misses.push(
       `cursor is on ${JSON.stringify(under ?? null)}, expected ${JSON.stringify(expectation.under)}`,
+    )
+  }
+  const top = screen.rows.find(row => row.number !== null)?.number
+  if (expectation.top !== undefined && top !== expectation.top) {
+    misses.push(
+      `the top line on screen is ${top ?? 'none'}, expected ${expectation.top}`,
+    )
+  }
+  const drawnHeight = screen.rows.length * screen.rowHeight
+  const areaHeight = screen.area.bottom - screen.area.top
+  if (
+    expectation.full === true &&
+    drawnHeight < areaHeight - screen.rowHeight
+  ) {
+    misses.push(
+      `rows fill ${drawnHeight}px of the ${areaHeight}px text area: blank screen`,
     )
   }
   return misses
@@ -386,6 +420,20 @@ const run = async (
   }
   const pageErrors: Array<string> = []
   let failed = false
+  const stopServer = () => {
+    if (owned.server?.pid !== undefined && owned.server.exitCode === null) {
+      process.kill(-owned.server.pid, 'SIGTERM')
+    }
+  }
+  const interrupted = (signal: NodeJS.Signals) => {
+    stopServer()
+    rmSync(scratch, { recursive: true, force: true })
+    console.log(`${signal}: stopped the server, kept the evidence in ${out}`)
+    process.exit(signal === 'SIGINT' ? 130 : 143)
+  }
+  process.once('SIGINT', interrupted)
+  process.once('SIGTERM', interrupted)
+  process.once('SIGHUP', interrupted)
   try {
     if (options.dist === undefined) {
       execFileSync(
@@ -488,9 +536,7 @@ const run = async (
     log(`ERROR ${error instanceof Error ? error.message : String(error)}`)
   } finally {
     await owned.browser?.close()
-    if (owned.server?.pid !== undefined && owned.server.exitCode === null) {
-      process.kill(-owned.server.pid, 'SIGTERM')
-    }
+    stopServer()
     rmSync(scratch, { recursive: true, force: true })
   }
   for (const error of pageErrors) {
@@ -523,13 +569,30 @@ const main = async (): Promise<number> => {
     )
     return 2
   }
+  const size = (name: string, raw: string): number => {
+    const parsed = Number(raw)
+    if (!Number.isInteger(parsed) || parsed < 200 || parsed > 4000) {
+      throw new Error(`--${name} takes a whole number of pixels, 200 to 4000`)
+    }
+    return parsed
+  }
+  const width = size('width', values.width)
+  const height = size('height', values.height)
+  if (
+    values.dist !== undefined &&
+    !existsSync(join(resolve(values.dist), 'index.html'))
+  ) {
+    throw new Error(
+      `--dist ${values.dist} holds no index.html; build into it with pnpm exec vite build --outDir <folder>`,
+    )
+  }
   const steps = parseSteps(readFileSync(source === '-' ? 0 : source, 'utf8'))
   const stamp = new Date().toISOString().replaceAll(/[:.]/g, '-')
   return run(steps, {
     out: resolve(values.out ?? join(repo, 'verify-out', stamp)),
     dist: values.dist === undefined ? undefined : resolve(values.dist),
-    width: Number(values.width),
-    height: Number(values.height),
+    width,
+    height,
     video: values.video,
   })
 }

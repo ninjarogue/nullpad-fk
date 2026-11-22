@@ -21,9 +21,8 @@ Preconditions: the baseline in [README.md](./README.md).
 
 - **Preedit.** `{"type": "ab"}`, `{"compose": "に"}`. The step line ends `composing "に"`, and the text is still `ab` at `1:3`, because preedit is not text yet.
 - **Commit.** `{"commit": "日"}` gives `ab日` at `1:4`.
-- **Paste.** `{"paste": "one\ntwo"}` gives `ab日one` and `two` at `2:4 2L`.
-
-Replacing typed letters (`compose` with `replacing`) has no proof file yet. See `e2e/ime.spec.ts` for compositions that do.
+- **Replace typed letters.** `{"type": "ka"}`, `{"compose": "か", "replacing": {"start": 3, "end": 5}}`, `{"commit": "か"}` turn `ka` into `か`: `ab日か` at `1:5`.
+- **Paste.** `{"paste": "one\ntwo"}` gives `ab日かone` and `two` at `2:4 2L`.
 
 ## Gotchas
 

@@ -25,6 +25,7 @@ export { Message }
 
 export const Flags = Schema.Struct({
   notes: Schema.Array(Notes.Note),
+  stashed: Schema.Array(Storage.Stashed),
   seed: Schema.String,
   now: Schema.Finite,
 })
@@ -34,13 +35,17 @@ export const flags: Effect.Effect<Flags> = Effect.gen(function* () {
   const random = yield* SecureRandom.SecureRandom
   const seed = yield* random.uuidV4()
   const notes = yield* Storage.list.pipe(Effect.orElseSucceed(() => []))
+  const stashed = yield* Storage.takeStashed
   const now = yield* Clock.currentTimeMillis
-  return { notes, seed, now }
+  return { notes, stashed, seed, now }
 }).pipe(Effect.provide(BrowserCrypto.layerSecureRandom))
 
 const SaveState = Schema.TaggedUnion({
   Idle: {},
-  Saving: { held: Schema.Option(Storage.NoteChange) },
+  Saving: {
+    held: Schema.Option(Storage.NoteChange),
+    sentText: Schema.String,
+  },
 })
 type SaveState = typeof SaveState.Type
 
@@ -89,38 +94,6 @@ const show = (
       save: SaveState.cases.Idle.make({}),
     }),
   })
-
-export const init: Runtime.ApplicationInit<Model, Message, Flags> = ({
-  notes,
-  seed,
-  now,
-}) => {
-  const blank: Model = {
-    editor: Editor.open(''),
-    keyboard: 'Blurred',
-    notes,
-    note: {
-      id: Notes.NoteId.make(`${seed}-0`),
-      folder: '',
-      revision: 0,
-      savedEdits: 0,
-      save: SaveState.cases.Idle.make({}),
-    },
-    pending: [],
-    finder: Option.none(),
-    edits: 0,
-    seed,
-    created: 1,
-    now,
-    persistence: 'Unrequested',
-  }
-  return {
-    model: Option.match(Notes.newest(notes), {
-      onNone: () => blank,
-      onSome: note => show(blank, note, note.text, 'Start'),
-    }),
-  }
-}
 
 const Locate = Command.define('Locate', {
   args: { query: Editor.Query, revision: Schema.Int },
@@ -243,7 +216,11 @@ const saveNow = (model: Model): UpdateReturn => {
       note: open =>
         modifyFields(open, {
           savedEdits: () => model.edits,
-          save: () => SaveState.cases.Saving.make({ held: Option.none() }),
+          save: () =>
+            SaveState.cases.Saving.make({
+              held: Option.none(),
+              sentText: draft.text,
+            }),
         }),
     }),
     commands: [
@@ -484,6 +461,7 @@ const receiveChange = (
               save: () =>
                 SaveState.cases.Saving.make({
                   held: Option.some(laterChange(save.held, change)),
+                  sentText: save.sentText,
                 }),
             }),
         }),
@@ -560,6 +538,119 @@ const copyLeftNote = (model: Model, draft: Storage.Draft): UpdateReturn => {
       }),
     ],
   }
+}
+
+const storedNote = (
+  model: Model,
+  id: Notes.NoteId,
+): Option.Option<Notes.Note> =>
+  Array.findFirst(model.notes, note => note.id === id)
+
+const restoreStashed = (
+  model: Model,
+  stashed: Storage.Stashed,
+): UpdateReturn => {
+  const stored = storedNote(model, stashed.id)
+  const storedRevision = Option.match(stored, {
+    onNone: () => 0,
+    onSome: ({ revision }) => revision,
+  })
+  if (Option.exists(stored, ({ text }) => text === stashed.text)) {
+    return { model }
+  }
+  const isRestored =
+    model.note.id === stashed.id && model.note.save._tag === 'Saving'
+  const isStillBase =
+    storedRevision === stashed.baseRevision ||
+    Option.exists(
+      stored,
+      ({ revision, text }) =>
+        revision === stashed.baseRevision + 1 && text === stashed.sentText,
+    )
+  const draft = { id: stashed.id, folder: stashed.folder, text: stashed.text }
+  if (Notes.isBlank(stashed.text)) {
+    const listed = modifyFields(model, {
+      notes: notes => Notes.without(notes, stashed.id),
+    })
+    return isStillBase && Option.isSome(stored)
+      ? {
+          model:
+            model.note.id === stashed.id
+              ? show(
+                  listed,
+                  { id: stashed.id, folder: stashed.folder, revision: 0 },
+                  '',
+                  'Start',
+                )
+              : listed,
+          commands: [
+            RemoveNote({ id: stashed.id, expectedRevision: storedRevision }),
+          ],
+        }
+      : { model }
+  }
+  if (!isStillBase || isRestored) {
+    return {
+      model: modifyFields(model, { created: created => created + 1 }),
+      commands: [
+        SaveNote({
+          draft: {
+            ...draft,
+            id: newNoteId(model),
+            text: Notes.conflictCopy(stashed.text),
+          },
+          expectedRevision: 0,
+          isEdit: true,
+        }),
+      ],
+    }
+  }
+  const shown = show(
+    model,
+    { id: stashed.id, folder: stashed.folder, revision: storedRevision },
+    stashed.text,
+    'Start',
+  )
+  return saveNow(
+    modifyFields(shown, {
+      note: open => modifyFields(open, { savedEdits: () => -1 }),
+    }),
+  )
+}
+
+export const init: Runtime.ApplicationInit<Model, Message, Flags> = ({
+  notes,
+  stashed,
+  seed,
+  now,
+}) => {
+  const blank: Model = {
+    editor: Editor.open(''),
+    keyboard: 'Blurred',
+    notes,
+    note: {
+      id: Notes.NoteId.make(`${seed}-0`),
+      folder: '',
+      revision: 0,
+      savedEdits: 0,
+      save: SaveState.cases.Idle.make({}),
+    },
+    pending: [],
+    finder: Option.none(),
+    edits: 0,
+    seed,
+    created: 1,
+    now,
+    persistence: 'Unrequested',
+  }
+  const opened = Option.match(Notes.newest(notes), {
+    onNone: () => blank,
+    onSome: note => show(blank, note, note.text, 'Start'),
+  })
+  return Update.combine(
+    opened,
+    Array.map(stashed, found => (model: Model) => restoreStashed(model, found)),
+  )
 }
 
 export const update = (model: Model, message: Message) =>
@@ -649,7 +740,42 @@ export const update = (model: Model, message: Message) =>
     ClickedFinderBackdrop: () => ({ model: closeFinder(model) }),
   })
 
-export const subscriptions = Subscription.make<Model, Message>()(() => ({
+const unsaved = ({
+  editor,
+  note,
+  pending,
+  edits,
+}: Pick<
+  Model,
+  'editor' | 'note' | 'pending' | 'edits'
+>): ReadonlyArray<Storage.Stashed> => {
+  const sentText = SaveState.match(note.save, {
+    Idle: () => null,
+    Saving: ({ sentText }) => sentText,
+  })
+  const open =
+    edits !== note.savedEdits || sentText !== null
+      ? [
+          {
+            id: note.id,
+            folder: note.folder,
+            text: Editor.text(editor),
+            baseRevision: note.revision,
+            sentText,
+          },
+        ]
+      : []
+  return [
+    ...open,
+    ...Array.map(pending, draft => ({
+      ...draft,
+      baseRevision: -1,
+      sentText: null,
+    })),
+  ]
+}
+
+export const subscriptions = Subscription.make<Model, Message>()(entry => ({
   noteChanges: Subscription.persistentEntry(
     Stream.map(Storage.watch, change => Message.ReceivedNoteChange({ change })),
   ),
@@ -669,6 +795,39 @@ export const subscriptions = Subscription.make<Model, Message>()(() => ({
         mapEvent: () => Message.LeftPage(),
       }),
     ),
+  ),
+  unsavedStash: entry(
+    {
+      editor: Editor.Editor,
+      note: OpenNote,
+      pending: Schema.Array(Storage.Draft),
+      edits: Schema.Int,
+      seed: Schema.String,
+    },
+    {
+      modelToDependencies: ({ editor, note, pending, edits, seed }) => ({
+        editor,
+        note,
+        pending,
+        edits,
+        seed,
+      }),
+      keepAliveEquivalence: () => true,
+      dependenciesToStream: ({ seed }, readDependencies) =>
+        Stream.merge(
+          Stream.fromEffectDrain(
+            Storage.stashOnLeave(seed, () => unsaved(readDependencies())),
+          ),
+          Dom.streamFromEventFilterMap({
+            target: window,
+            type: 'pageshow',
+            filterMapEvent: () => {
+              Effect.runSync(Storage.clearStash(seed))
+              return Option.none()
+            },
+          }),
+        ),
+    },
   ),
 }))
 

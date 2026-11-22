@@ -259,18 +259,16 @@ export const screenOf = async (page: Page): Promise<Screen> => {
 }
 
 export const openFresh = async (page: Page): Promise<void> => {
-  await page.evaluate(
-    () =>
-      new Promise<void>(done => {
-        try {
-          const request = indexedDB.deleteDatabase('nullpad')
-          request.addEventListener('success', () => done())
-          request.addEventListener('error', () => done())
-        } catch {
-          done()
-        }
-      }),
-  )
+  const { origin } = new URL(page.url())
+  await page.goto('about:blank')
+  if (origin !== 'null') {
+    const cdp = await page.context().newCDPSession(page)
+    await cdp.send('Storage.clearDataForOrigin', {
+      origin,
+      storageTypes: 'indexeddb,local_storage',
+    })
+    await cdp.detach()
+  }
   await page.goto('/')
   await page.locator('#caret').waitFor()
 }

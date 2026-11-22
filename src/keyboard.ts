@@ -94,6 +94,7 @@ const fromKeyDown = (event: KeyboardEvent): Option.Option<Input> => {
   const isAltGraph =
     event.getModifierState('AltGraph') || (event.ctrlKey && event.altKey)
   const isChord =
+    // oxlint-disable-next-line typescript/no-misused-spread -- a chord takes a key that types one code point
     [...key].length === 1 && (event.ctrlKey || event.metaKey) && !isAltGraph
   return isChord && !browserChords.has(key.toLowerCase())
     ? Option.some(

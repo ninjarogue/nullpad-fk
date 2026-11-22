@@ -79,6 +79,7 @@ pnpm test:ready                     # builds, then runs the push gate, every swe
 pnpm test:e2e -g "huge wheel"       # tests whose name matches
 pnpm test:e2e --trace on            # keeps a trace of each test; open one with pnpm exec playwright show-trace
 NULLPAD_DIST=/path/to/dist pnpm test:e2e   # tests a build made elsewhere, such as an old commit, without building
+NULLPAD_PORT=4400 pnpm test:e2e            # serves the build on another port than 4317, so that two runs can go at once
 ```
 
 Without `NULLPAD_DIST`, Playwright builds the working tree into `dist/` first, so a run always tests the current source. Traces are off by default. Pass `--trace retain-on-failure` to keep them for failing tests only.

@@ -258,6 +258,14 @@ export const screenOf = async (page: Page): Promise<Screen> => {
   return readScreen(page)
 }
 
+export const openTab = async (page: Page): Promise<Nullpad> => {
+  const tab = await page.context().newPage()
+  await tab.goto('/')
+  await tab.locator('#caret').waitFor()
+  await tab.evaluate(() => document.fonts.ready.then(() => undefined))
+  return driver(tab, await page.context().newCDPSession(tab))
+}
+
 export const openFresh = async (page: Page): Promise<void> => {
   const { origin } = new URL(page.url())
   await page.goto('about:blank')
@@ -273,12 +281,79 @@ export const openFresh = async (page: Page): Promise<void> => {
   await page.locator('#caret').waitFor()
 }
 
+export type FinderRow = Readonly<{
+  text: string
+  folder: string
+  selected: boolean
+}>
+
+export type FinderScreen = Readonly<{
+  mode: string
+  query: string
+  count: string
+  header: string
+  rows: ReadonlyArray<FinderRow>
+  folders: ReadonlyArray<Readonly<{ name: string; on: boolean }>>
+}>
+
+const readFinder = (page: Page): Promise<FinderScreen | null> =>
+  page.evaluate(() => {
+    const finder = document.querySelector('.finder')
+    if (finder === null) {
+      return null
+    }
+    const text = (selector: string) =>
+      finder.querySelector(selector)?.textContent ?? ''
+    const query = [...(finder.querySelector('.query')?.childNodes ?? [])]
+      .filter(
+        node =>
+          !(node instanceof HTMLElement) ||
+          (!node.classList.contains('fcur') &&
+            !node.classList.contains('placeholder')),
+      )
+      .map(node => node.textContent)
+      .join('')
+    return {
+      mode: text('.prompt .bt'),
+      query,
+      count: text('.cnt'),
+      header: text('.results .bt'),
+      rows: [...finder.querySelectorAll('.rl .row')].map(row => ({
+        text: row.querySelector('.t')?.textContent ?? '',
+        folder: row.querySelector('.fd')?.textContent ?? '',
+        selected: row.classList.contains('sel'),
+      })),
+      folders: [...finder.querySelectorAll('.folders button')].map(button => ({
+        name: [...button.childNodes]
+          .filter(node => node instanceof Text)
+          .map(node => node.textContent)
+          .join(''),
+        on: button.classList.contains('on'),
+      })),
+    }
+  })
+
 export const driver = (page: Page, cdp: CDPSession) => {
   const screen = () => screenOf(page)
   return {
     page,
     cdp,
     screen,
+    title: () => page.title(),
+    file: async () => {
+      await settle(page)
+      return page.locator('.status .file').innerText()
+    },
+    finder: async () => {
+      await settle(page)
+      return readFinder(page)
+    },
+    reload: async () => {
+      await page.reload()
+      await page.locator('#caret').waitFor()
+      await page.evaluate(() => document.fonts.ready.then(() => undefined))
+      await settle(page)
+    },
     text: async () => textOf(await screen()),
     status: async () => (await screen()).status,
     cursor: async () => (await screen()).cursor,

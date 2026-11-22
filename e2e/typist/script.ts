@@ -11,10 +11,6 @@ export type TypistKey =
   | 'Delete'
   | 'Enter'
 
-/**
- * A text step is typed key by key when it is all ASCII, otherwise inserted as an IME or emoji picker does.
- * An insert step is always inserted that way.
- */
 export type Step =
   | Readonly<{ kind: 'text'; text: string }>
   | Readonly<{ kind: 'insert'; text: string }>
@@ -49,12 +45,10 @@ export const mulberry32 = (seed: number) => {
   }
 }
 
-/** The seed of sequence `index` of a run, so one sequence replays alone from its own seed. */
 export const sequenceSeed = (runSeed: number, index: number): number =>
   Math.floor(mulberry32(runSeed ^ Math.imul(index + 1, 0x9e3779b1))() * 2 ** 31)
 
 export const ZWJ = '‍'
-/** Scripts that once broke, kept as named cases. */
 export const namedScripts: ReadonlyArray<
   Readonly<{ name: string; script: Script }>
 > = [
@@ -843,14 +837,6 @@ export const namedScripts: ReadonlyArray<
 
 type Difference = Readonly<{ name: string; pattern: RegExp }>
 
-/**
- * Malformed sequences where nullpad follows Intl.Segmenter and Chrome's textarea, or its EditContext for Backspace,
- * does not: where a caret left inside a grapheme settles after inserted text, and how much Backspace takes. A mismatch
- * counts as accepted only when the text before the step, the textarea's text after it or the piece a Backspace was
- * judged on holds one of these, never by nullpad's own text, so a bug that leaves a malformed sequence behind is not
- * excused.
- */
-/** A flag letter followed by a mark, a ZWJ or a skin tone, which no flag has. */
 const markOnFlagLetter = /\p{Regional_Indicator}[\p{M}‍\u{1f3fb}-\u{1f3ff}]/u
 
 export const acceptedDifferences: ReadonlyArray<Difference> = [
@@ -889,7 +875,6 @@ export const acceptedDifference = (
     texts.some(value => pattern.test(value)),
   )?.name
 
-/** Delta debugging: the shortest script, by removing chunks then single steps, that still fails. */
 export const shrink = async (
   script: Script,
   fails: (candidate: Script) => Promise<boolean>,

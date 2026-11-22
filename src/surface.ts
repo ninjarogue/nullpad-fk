@@ -24,13 +24,10 @@ const segmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' })
 
 type Box = Readonly<{ left: number; top: number; width: number }>
 
-/** JetBrains Mono advances 0.6 em a character: the width of the caret past the end of a line. */
 const monospaceAdvance = 0.6
 
-/** The narrowest the caret gets, at the edge of the text column, where Chrome draws its own caret. */
 const thinnest = 2
 
-/** The drawn geometry the queries read: where the text column sits and how tall a row is. */
 type Sheet = Readonly<{
   surface: HTMLElement
   rowHeight: number
@@ -75,10 +72,6 @@ const lineText = (line: HTMLElement): string =>
     '',
   )
 
-/**
- * The DOM point of a column, in the text node that holds it. At a join it is the end of the node before, or with side
- * `After` the start of the node after, so a range that starts at a join measures the text after it.
- */
 const domPoint = (
   line: HTMLElement,
   column: number,
@@ -107,7 +100,6 @@ const domPoint = (
   return Option.getOrElse(found.point, () => ({ node: line, offset: 0 }))
 }
 
-/** The column of a DOM point inside a drawn line. A point inside the preedit is at the caret, where it is drawn. */
 const columnOf = (line: HTMLElement, node: Node, offset: number): number => {
   const children = Array.fromIterable(line.childNodes)
   const stop =
@@ -171,7 +163,6 @@ const graphemeBefore = (text: string, column: number): number => {
   )
 }
 
-/** The left edge of a line's text and the right edge of its column, in viewport pixels. */
 const textEdges = (
   line: HTMLElement,
 ): Readonly<{ left: number; right: number; top: number }> => {
@@ -184,7 +175,6 @@ const textEdges = (
   }
 }
 
-/** Whether the line wraps at this column: the text after it is drawn on a lower row than the text before it. */
 const wrapsAt = (line: HTMLElement, column: number): boolean => {
   const text = lineText(line)
   if (column <= 0 || column >= text.length) {
@@ -202,11 +192,6 @@ const wrapsAt = (line: HTMLElement, column: number): boolean => {
   )
 }
 
-/**
- * Where the caret is drawn: on the grapheme after it, or after the one before it when it ends its line, or ends its
- * row and the core asks for the end of the upper row. It never crosses the column's right edge: a caret among spaces
- * that hang past it, or after a row that fills it, narrows to fit at the edge, where Chrome draws its own.
- */
 const caretBox = (
   line: HTMLElement,
   column: number,
@@ -259,7 +244,6 @@ const caretBox = (
   )
 }
 
-/** The browser's caret position at a viewport point, as a line and column, if the point falls on drawn text. */
 const pointAt = (
   x: number,
   y: number,
@@ -274,10 +258,6 @@ const pointAt = (
   }))
 }
 
-/**
- * A landing at a point. Where its line wraps it is drawn at the end of the upper row when the point is above the wrap
- * and `side` is `Hit`, and always when `side` is `Upper`; `Lower` draws it at the start of the lower row.
- */
 const landAt = (
   found: Readonly<{ line: HTMLElement; column: number }>,
   y: number,
@@ -297,13 +277,11 @@ const landAt = (
 
 type AppScroll = { readonly distance: number; shownAt: number }
 
-/** The scrolls the app made on its own, for a key or a click, that the screen has yet to show or showed in the last second. */
 const appScrolls: { recent: ReadonlyArray<AppScroll> } = { recent: [] }
 
 /**
- * Runs a scroll the app makes on its own and returns how far it went. The app scrolls after a patch, inside a frame,
- * and that frame is on screen no sooner than the next frame begins. `shownAt` is that moment on the clock of
- * `Event.timeStamp`.
+ * The app scrolls after a patch, inside a frame, and that frame is on screen no sooner than the next frame begins.
+ * `shownAt` is that moment on the clock of `Event.timeStamp`.
  */
 const scrollApp = (surface: HTMLElement, scroll: () => void): number => {
   const before = surface.scrollTop
@@ -323,13 +301,11 @@ const scrollApp = (surface: HTMLElement, scroll: () => void): number => {
   return distance
 }
 
-/** How far the app had scrolled on its own that the screen did not show yet at `time`. */
 const unshownAt = (time: number): number =>
   Array.reduce(appScrolls.recent, 0, (pixels, { distance, shownAt }) =>
     time < shownAt ? pixels + distance : pixels,
   )
 
-/** Scrolls the least that brings viewport y on screen, and returns where that y is drawn now. */
 const bringOnScreen = (sheet: Sheet, y: number): number => {
   const below = y - (sheet.viewBottom - 1)
   const above = sheet.viewTop + 1 - y
@@ -347,7 +323,6 @@ const stay = (aim: number): Answer => ({ landing: { _tag: 'Stay' }, aim })
 const lastLineIndex = (surface: HTMLElement): number =>
   Number(surface.dataset['lastLine'])
 
-/** Where a line's text starts, read from its first grapheme as the browser laid it out, or the column's edge. */
 const textStart = (line: HTMLElement): number => {
   const text = lineText(line)
   return Option.match(
@@ -359,7 +334,6 @@ const textStart = (line: HTMLElement): number => {
 }
 
 /**
- * Up, Down and paging: from the caret's row, `distance` pixels down (or up) at x `aim` from the text's left edge.
  * Chrome pages row by row and steps from the first row to the start of the text and from the last row to its end, so a
  * page that reaches either row goes on to that edge. Where a line wraps, Chrome draws a PageUp landing at the end of
  * the upper row and a PageDown landing at the start of the lower row, whichever side the caret started on.
@@ -410,7 +384,6 @@ const verticalAnswer = (
   })
 }
 
-/** One grapheme along the line, or to its row's start or end, as the browser moves its own caret. */
 const selectionMove = (
   line: HTMLElement,
   column: number,
@@ -432,7 +405,6 @@ const selectionMove = (
   return moved
 }
 
-/** The column where the caret's row starts. A caret drawn at the end of the upper row is in that row. */
 const rowStartOf = (
   line: HTMLElement,
   column: number,
@@ -449,7 +421,6 @@ const rowStartOf = (
 
 const advances = document.createElement('canvas').getContext('2d')
 
-/** The float sum of the advances of `text` in the line's font, measured on its own. */
 const advanceSum = (line: HTMLElement, text: string): Option.Option<number> => {
   if (advances === null) {
     return Option.none()
@@ -459,7 +430,6 @@ const advanceSum = (line: HTMLElement, text: string): Option.Option<number> => {
   return Option.some(advances.measureText(text).width)
 }
 
-/** How far the drawn text from `from` to `to` on one row reaches past the text's start, as the browser drew it. */
 const drawnReach = (
   line: HTMLElement,
   from: number,
@@ -513,7 +483,6 @@ const at = (line: HTMLElement, column: number, atRowEnd: boolean): Answer => ({
   aim: 0,
 })
 
-/** A row edge. A caret drawn at the end of the upper row starts Home from inside that row. */
 const rowEdgeAnswer = (
   line: HTMLElement,
   column: number,
@@ -535,10 +504,6 @@ const rowEdgeAnswer = (
   )
 }
 
-/**
- * The line at viewport y and the pixels from its top down to y. An undrawn line counts as one row, as the spacers draw
- * it, and so does each row below the last line of the text.
- */
 const lineAt = (
   sheet: Sheet,
   y: number,
@@ -573,10 +538,6 @@ const lineAt = (
   return inUndrawnRow(indexOf(last) + 1 + rowsBelow)
 }
 
-/**
- * A click on a line, `y` pixels below its top: the text column catches every x. A line scrolled off screen since the
- * click scrolls back to show the point.
- */
 const pointAnswer = (
   sheet: Sheet,
   line: HTMLElement,
@@ -665,7 +626,6 @@ const drawnRevision = (): number =>
     onSome: surface => Number(surface.dataset['revision']),
   })
 
-/** Waits, a few frames at most, until the screen shows `revision`. */
 const untilDrawn = (revision: number, frames: number): Effect.Effect<void> =>
   drawnRevision() >= revision || frames === 0
     ? Effect.void
@@ -673,7 +633,6 @@ const untilDrawn = (revision: number, frames: number): Effect.Effect<void> =>
         Effect.flatMap(() => untilDrawn(revision, frames - 1)),
       )
 
-/** The browser's answer to a query, read from a screen that shows every input before it. */
 export const locate = (query: Query, revision: number): Effect.Effect<Answer> =>
   untilDrawn(revision, 8).pipe(
     Effect.map(() =>
@@ -684,7 +643,6 @@ export const locate = (query: Query, revision: number): Effect.Effect<Answer> =>
     ),
   )
 
-/** Moves the drawn caret to the caret's place in the drawn text. The view draws the text; this draws only the caret. */
 const drawCaret = (surface: HTMLElement): void => {
   const caret = surface.querySelector<HTMLElement>('#caret')
   if (caret === null) {
@@ -710,10 +668,8 @@ const drawCaret = (surface: HTMLElement): void => {
   })
 }
 
-/** When an input last asked for the caret on screen, on the clock of `Event.timeStamp`. */
 const lastReveal = { askedAt: 0 }
 
-/** Scrolls the drawn caret on screen once the screen shows it: as little as it takes, or its row to the top. */
 export const revealCaret = (align: 'Nearest' | 'Top'): Effect.Effect<void> =>
   Effect.sync(() => {
     lastReveal.askedAt = performance.now()
@@ -732,7 +688,6 @@ export const revealCaret = (align: 'Nearest' | 'Top'): Effect.Effect<void> =>
     ),
   )
 
-/** The first line at the top of the screen, counting undrawn lines as one row each, as the spacers draw them. */
 const topLine = (surface: HTMLElement, sheet: Sheet): number => {
   const lines = Array.fromIterable(
     surface.querySelectorAll<HTMLElement>('.line'),
@@ -773,7 +728,6 @@ const wheelPixels = (surface: HTMLElement, event: WheelEvent): number => {
       : event.deltaY
 }
 
-/** The scroll offsets at which the text area shows only drawn lines, from the first drawn line's top to the last's bottom. */
 const drawnScrollRange = (
   surface: HTMLElement,
 ): Readonly<{ min: number; max: number }> => {
@@ -826,13 +780,10 @@ const observe = (surface: HTMLElement): Stream.Stream<SurfaceMessage> =>
             Queue.offerUnsafe(queue, Message.ScrolledSurface({ top }))
           const reportTop = () => report(topLine(surface, sheetOf(surface)))
           /**
-           * Scrolls the wheel's pending distance from the main thread when the drawn lines cover the place it lands.
-           * When they do not, the screen stays put, the core is told the line there, and the patch that draws it
-           * scrolls. Chrome scrolls a wheel turn on its compositor, ahead of the drawn lines, and paints blank screen
-           * until they arrive; scrolled here, every painted frame shows drawn lines. A patch that still does not cover
-           * the place drops the turn, so it never scrolls after a later key. Chrome hands over a wheel turn at the next
-           * frame, after keys pressed later than it, so a turn made before an input last asked for the caret on screen
-           * is dropped too: that input's reveal is the later scroll.
+           * Chrome scrolls a wheel turn on its compositor, ahead of the drawn lines, and paints blank screen until they arrive;
+           * scrolled here, every painted frame shows drawn lines. Chrome hands over a wheel turn at the next frame, after keys
+           * pressed later than it, so a turn made before an input last asked for the caret on screen is dropped: that input's
+           * reveal is the later scroll.
            */
           const scrollPending = (whenUndrawn: 'AskCore' | 'Drop') => {
             dropTurnsBeforeReveal()
@@ -934,7 +885,6 @@ const observe = (surface: HTMLElement): Stream.Stream<SurfaceMessage> =>
     }),
   )
 
-/** Reports the screen height in rows, the line at its top, and clicks; draws the caret after each patch. */
 export const SurfacePort = Mount.defineStream('SurfacePort', {
   messages: [
     Message.ResizedScreen,
@@ -974,20 +924,11 @@ const lineView = (
     ),
   )
 
-/**
- * The view of each drawn line, rebuilt only when its parts, place or caret change. The core keeps a line's parts while
- * the line is unchanged, so a keypress rebuilds one line however many are drawn.
- */
 const lazyLine = createKeyedLazy()
 
 const spacer = (lines: number, h: HtmlBuilder<Message>): Html =>
   h.div([h.Class('spacer'), h.Style({ '--lines': String(lines) })])
 
-/**
- * The scrolling text: a spacer for the lines above, one `white-space: pre-wrap` div per drawn line, keyed by line id,
- * whose pieces are separate text nodes and whose number its `data-n` draws in the gutter, a spacer for the lines
- * below, and `#caret`, which SurfacePort places. The browser wraps the lines.
- */
 export const surface = (
   frame: Frame,
   keyboard: Keyboard,

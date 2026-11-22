@@ -100,7 +100,6 @@ const play = async (
   expect(failures, failures.join('\n\n')).toEqual([])
 }
 
-/** Sequence indexes `shard`, `shard + shards`, and so on, until `minutes` pass from the first one asked for. */
 function* sequencesUntil(shard: number, minutes: number) {
   const deadline = Date.now() + minutes * 60_000
   for (let index = shard; Date.now() < deadline; index += shards) {

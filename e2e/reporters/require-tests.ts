@@ -5,7 +5,6 @@ import type {
   TestResult,
 } from '@playwright/test/reporter'
 
-/** Fails a run in which no test ran as expected, so a filter or a skip cannot turn the gate green. */
 export default class RequireTests implements Reporter {
   private passed = 0
 

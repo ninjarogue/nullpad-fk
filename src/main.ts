@@ -21,7 +21,6 @@ export const init: Runtime.ApplicationInit<Model, Message> = () => ({
   model: { editor: Editor.open(''), keyboard: 'Blurred', path: 'untitled.md' },
 })
 
-/** Answers the editor's query from the screen, once the screen shows every input before it. */
 const Locate = Command.define('Locate', {
   args: { query: Editor.Query, revision: Schema.Int },
   messages: [Message.CompletedLocate],
@@ -54,7 +53,6 @@ const respond = (
   ],
 })
 
-/** Every arm is one core call, plus the Commands its Outcome asks for. */
 export const update = (model: Model, message: Message) =>
   Message.match<Update.Return<Model, Message>>(message, {
     ReceivedInput: ({ input }) =>

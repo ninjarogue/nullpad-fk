@@ -9,10 +9,6 @@ import {
   text,
 } from './script'
 
-/**
- * Every document, placed the same ways, then moved the same ways: one script for each document, each placement of the
- * cursor, and each move of that placement. A row is `[...setup, ...keys, ...move]`.
- */
 export type Sweep = Readonly<{
   name: string
   scripts: number
@@ -23,10 +19,6 @@ export type Sweep = Readonly<{
   >
 }>
 
-/**
- * `from` is the index of the last step before the move. A row compares there, where its placement left the cursor, and
- * after every step of the move.
- */
 export type Row = Readonly<{
   document: string
   placement: string
@@ -148,7 +140,6 @@ const letters: ReadonlyArray<Readonly<{ name: string; text: string }>> = [
   { name: 'virama U+094D', text: '\u094D' },
 ]
 
-/** A document in two parts, so it can be built whole, joined across a line break, or with one part typed in front. */
 type Parts = Readonly<{ name: string; head: string; tail: string }>
 
 const parts: ReadonlyArray<Parts> = [
@@ -219,7 +210,6 @@ const documentsOf = (builds: ReadonlyArray<Build>): Sweep['documents'] =>
     })),
   )
 
-/** Each move types `y` after the key, so the text shows exactly where the cursor stood. */
 const thenY = (...names: ReadonlyArray<TypistKey>): ReadonlyArray<Script> =>
   names.map(name => [key(name), text('y')])
 

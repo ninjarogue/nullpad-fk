@@ -2,13 +2,9 @@ import { Array, Option } from 'effect'
 
 import type * as Buffer from './buffer'
 
+/** The segmenter runs on the ICU that Chrome ships on every system, so it splits a line as Chrome's text field does. */
 const segmenter = new Intl.Segmenter(undefined, { granularity: 'word' })
 
-/**
- * Where two of a line's word segments meet, as Intl.Segmenter splits the line, with the segment on each side. The
- * segmenter runs on the ICU that Chrome ships on every system, so it splits a line as Chrome's text field does. `after`
- * is empty at the line end.
- */
 type Boundary = Readonly<{ column: number; before: string; after: string }>
 
 const boundariesOf = (text: string): ReadonlyArray<Boundary> => {
@@ -30,14 +26,9 @@ const isAlphanumeric = (point: string): boolean =>
 
 const isPunctuation = (point: string): boolean => /^[\p{P}\p{S}]$/u.test(point)
 
-/** Anything drawn but a space, a tab or a no-break space. Chrome reads a control or format character as a space. */
 const isWordCharacter = (point: string): boolean =>
   point !== '' && !/^[ \t \p{C}]$/u.test(point)
 
-/**
- * Ctrl+Right stops at the line end, after a word before punctuation, and after anything but a space before a space or
- * a word. A run of punctuation and emoji is one word.
- */
 const endsWord = ({ before, after }: Boundary): boolean => {
   if (after === '') {
     return true
@@ -48,10 +39,6 @@ const endsWord = ({ before, after }: Boundary): boolean => {
     : isWordCharacter(last)
 }
 
-/**
- * Ctrl+Left stops before a word, and before punctuation unless the segment before it starts with punctuation and does
- * not end in a letter or digit, as `_x_` does.
- */
 const startsWord = ({ before, after }: Boundary): boolean => {
   const first = firstPoint(after)
   return isPunctuation(first)
@@ -63,9 +50,8 @@ const lineText = (buffer: Buffer.Buffer, line: number): string =>
   buffer.lines[line]?.text ?? ''
 
 /**
- * Where Ctrl+Right takes the caret, as in Chrome's text field on Linux: the end of the word, or the end of the line.
- * From the end of a line it goes to the start of the next, unless that line starts with a space: then to the end of its
- * first word. None at the end of the text.
+ * As in Chrome's text field on Linux, from the end of a line Ctrl+Right goes to the start of the next, unless that line
+ * starts with a space: then to the end of its first word.
  */
 export const nextWordEnd = (
   buffer: Buffer.Buffer,
@@ -92,11 +78,6 @@ export const nextWordEnd = (
     : endIn(line + 1, 0)
 }
 
-/**
- * Where Ctrl+Left takes the caret, as in Chrome's text field on Linux: the start of the word, or the start of the line.
- * From the start of a line it goes on to the end of the line above, where Chrome goes only from an empty line: a key
- * that does nothing reads as broken. None at the start of the text.
- */
 export const previousWordStart = (
   buffer: Buffer.Buffer,
 ): Option.Option<Buffer.Position> => {

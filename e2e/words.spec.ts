@@ -71,11 +71,6 @@ const mulberry32 = (seed: number) => {
   }
 }
 
-/**
- * Ctrl+Right from the start to the end, Ctrl+Left back to the start with ArrowLeft between,
- * then a seeded mix of word, letter, row and line moves, so word moves start from many columns and Up, Down, Home and
- * End read the goal and row each word move leaves.
- */
 const keysFor = (text: string, seed: number): ReadonlyArray<Key> => {
   const stops = text.split(/\s+/u).length + text.split('\n').length + 4
   const forward = Array.from({ length: stops }, (): Key => 'Control+ArrowRight')
@@ -103,7 +98,6 @@ const nullpadCaret = async (page: Page): Promise<Caret> => {
   return { line: status.line, column: status.column }
 }
 
-/** The textarea's caret as nullpad's status line shows one: line, then graphemes before it plus one. */
 const textareaCaret = (page: Page): Promise<Caret> =>
   page.evaluate(() => {
     const area = document.querySelector('textarea')
@@ -119,10 +113,6 @@ const textareaCaret = (page: Page): Promise<Caret> =>
     }
   })
 
-/**
- * A key on the textarea, as nullpad means it: where the textarea's Ctrl+Left stays at the start of a line below the
- * first, nullpad goes on to the end of the line above, as Left does.
- */
 const textareaPress = async (page: Page, key: Key): Promise<Caret> => {
   const before = await textareaCaret(page)
   await page.keyboard.press(key)
@@ -160,7 +150,6 @@ const load = async (pair: Pair, text: string) => {
 
 const show = (key: Key) => `<${key.replace('Control+', 'C-')}>`
 
-/** Runs `keys` on both from the start of `text` and returns the first step after which the carets differ. */
 const firstDifference = async (
   pair: Pair,
   text: string,

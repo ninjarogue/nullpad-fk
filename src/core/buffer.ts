@@ -4,9 +4,8 @@ export const LineId = Schema.Int.pipe(Schema.brand('LineId'))
 export type LineId = typeof LineId.Type
 
 /**
- * `joins` are the columns where an erase joined this line and the next, ascending and strictly inside the text.
- * As in a Chrome text field, editing never lets a grapheme span a join: the caret can stop on one,
- * and text typed there goes before it. The screen still draws the line whole.
+ * As in a Chrome text field, editing never lets a grapheme span a join: the caret can stop on one, and text typed there
+ * goes before it.
  */
 export const Line = Schema.Struct({
   id: LineId,
@@ -15,22 +14,12 @@ export const Line = Schema.Struct({
 })
 export type Line = typeof Line.Type
 
-/**
- * `column` is a UTF-16 offset into the line, never inside a surrogate pair. After text inserted without a keypress
- * it may sit inside a grapheme, where Chrome leaves its caret; `settle` moves it to the next boundary before any
- * command runs.
- */
 export const Position = Schema.Struct({
   line: Schema.Int,
   column: Schema.Int,
 })
 export type Position = typeof Position.Type
 
-/**
- * The text and the caret. Only the functions in this file build one, and they keep:
- * at least one line, no line break inside a line, the caret inside the text, ids unique and never reused.
- * An edit replaces only the Line objects it touches, so `id` is a stable render key.
- */
 export const Buffer = Schema.Struct({
   lines: Schema.NonEmptyArray(Line),
   caret: Position,
@@ -44,7 +33,6 @@ export const segmenter = new Intl.Segmenter(undefined, {
 
 type Piece = Readonly<{ from: number; to: number }>
 
-/** The text between the joins around a column. `side` picks the piece before or after a join that sits on it. */
 const pieceAt = (
   { text, joins }: Line,
   column: number,
@@ -64,11 +52,6 @@ const pieceAt = (
   ),
 })
 
-/**
- * The grapheme boundary before `column` inside the piece before it, as Intl.Segmenter finds them: where Backspace
- * starts deleting, so it takes a whole letter, accent, conjunct or jamo syllable, never one code point of it. The
- * piece is segmented from its start, so a flag pair or a long run of marks is read whole.
- */
 const boundaryBefore = (line: Line, column: number): number => {
   const { from } = pieceAt(line, column, 'Before')
   const grapheme = segmenter
@@ -77,10 +60,6 @@ const boundaryBefore = (line: Line, column: number): number => {
   return from + (grapheme?.index ?? 0)
 }
 
-/**
- * The next grapheme boundary at or after `column` inside its piece, as Intl.Segmenter finds them. Only the text near
- * the column is segmented, so a long line costs nothing.
- */
 const boundaryAtOrAfter = (line: Line, column: number): number => {
   const { from, to } = pieceAt(line, column, 'After')
   if (column <= from || column >= to) {
@@ -116,7 +95,6 @@ const splitLines = (text: string): Array.NonEmptyReadonlyArray<string> => {
 const lineAt = (buffer: Buffer, index: number): Line =>
   buffer.lines[index] ?? buffer.lines[0]
 
-/** Typing replaces one line with one line, so that case copies the line array once instead of three times. */
 const replaceLines = (
   buffer: Buffer,
   from: number,
@@ -150,10 +128,6 @@ export const toText = (buffer: Buffer): string =>
     '\n',
   )
 
-/**
- * Inserts at the caret, before a join there. A line break splits the line. The caret ends right after the inserted
- * text, even inside a grapheme it made (🇺 typed before 🇸), as Chrome's does.
- */
 export const insert = (buffer: Buffer, text: string): Buffer => {
   const { line, column } = buffer.caret
   const current = lineAt(buffer, line)
@@ -193,10 +167,7 @@ export const insert = (buffer: Buffer, text: string): Buffer => {
 const isBefore = (a: Position, b: Position): boolean =>
   a.line < b.line || (a.line === b.line && a.column < b.column)
 
-/**
- * Removes the text between two positions, in either order. Removing a line break leaves a join where it was.
- * The caret ends at the earlier position, or after the grapheme the removal joined, as Chrome's does.
- */
+/** The caret ends at the earlier position, or after the grapheme the removal joined, as Chrome's does. */
 export const erase = (buffer: Buffer, from: Position, to: Position): Buffer => {
   const [start, end] = isBefore(to, from) ? [to, from] : [from, to]
   const first = lineAt(buffer, start.line)
@@ -223,7 +194,6 @@ export const erase = (buffer: Buffer, from: Position, to: Position): Buffer => {
   }
 }
 
-/** The caret moved to the next boundary at or after it, where Chrome starts every command. */
 export const settle = (buffer: Buffer): Buffer => {
   const { line, column } = buffer.caret
   const settled = boundaryAtOrAfter(lineAt(buffer, line), column)
@@ -232,7 +202,6 @@ export const settle = (buffer: Buffer): Buffer => {
     : { ...buffer, caret: { line, column: settled } }
 }
 
-/** Moves the caret, clamped into the text. */
 export const moveTo = (buffer: Buffer, position: Position): Buffer => {
   const line = Math.max(0, Math.min(buffer.lines.length - 1, position.line))
   const column = Math.max(
@@ -247,10 +216,6 @@ const isLowSurrogate = (text: string, index: number): boolean => {
   return unit >= 0xdc00 && unit <= 0xdfff
 }
 
-/**
- * The span of the caret's line from `from` to `to` UTF-16 units away from the caret, negative before it, clamped to
- * the line and widened so it never cuts a surrogate pair.
- */
 export const spanAround = (
   buffer: Buffer,
   from: number,
@@ -271,7 +236,6 @@ export const spanAround = (
   }
 }
 
-/** Where Backspace starts deleting from the caret: the start of the letter before it, or the end of the line above. */
 export const backspaceTarget = (buffer: Buffer): Position => {
   const { line, column } = buffer.caret
   if (column > 0) {
@@ -283,10 +247,10 @@ export const backspaceTarget = (buffer: Buffer): Position => {
 }
 
 /**
- * Whether erasing from `from` to `to` leaves the caret in the piece that holds it. Chrome holds a caret in the piece
- * before it, or its line's first piece at the line start, and ends an erase in the piece before where it starts, or the
- * line's first piece when it starts at a line start, so Delete on an empty line leaves it. Backspace that joins a line,
- * even an empty one, onto the line above stays in the piece only when that line is empty.
+ * Chrome holds a caret in the piece before it, or its line's first piece at the line start, and ends an erase in the
+ * piece before where it starts, or the line's first piece when it starts at a line start, so Delete on an empty line
+ * leaves it. Backspace that joins a line, even an empty one, onto the line above stays in the piece only when that line
+ * is empty.
  */
 export const keepsCaretPiece = (
   buffer: Buffer,
@@ -305,13 +269,11 @@ export const keepsCaretPiece = (
   )
 }
 
-/** The start of the next line, where Delete at a line end erases to, or the caret itself on the last line. */
 export const nextLineStart = (buffer: Buffer): Position =>
   buffer.caret.line < buffer.lines.length - 1
     ? { line: buffer.caret.line + 1, column: 0 }
     : buffer.caret
 
-/** Whether the caret sits strictly inside a piece of its line: not at the line's start or end, nor on a join. */
 export const isInsidePiece = (buffer: Buffer): boolean => {
   const { line, column } = buffer.caret
   const { text, joins } = lineAt(buffer, line)
@@ -326,7 +288,6 @@ export const documentEnd = (buffer: Buffer): Position => {
   return { line, column: lineEnd(buffer, line) }
 }
 
-/** The line's text split at its joins, each piece drawn as its own text node so the browser keeps them apart. */
 export const pieces = ({ text, joins }: Line): ReadonlyArray<string> =>
   Array.map(Array.zip([0, ...joins], [...joins, text.length]), ([from, to]) =>
     text.slice(from, to),

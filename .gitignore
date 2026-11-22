@@ -31,3 +31,6 @@ Thumbs.db
 
 # Claude Code worktrees
 .claude/worktrees/
+
+# nullpad verification runs (e2e/drive.ts)
+verify-out/

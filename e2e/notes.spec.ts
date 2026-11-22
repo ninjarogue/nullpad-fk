@@ -286,7 +286,6 @@ test('Ctrl-G moves the highlighted note, not the first one, and Escape backs out
   await nullpad.press('Escape')
   finder = await nullpad.finder()
   expect(finder?.mode, 'Escape in move mode returns to find mode').toBe('notes')
-  await nullpad.press('ArrowDown')
   expect(
     (await nullpad.finder())?.rows.findIndex(row => row.selected),
     'the highlight is on the second note again',

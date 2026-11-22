@@ -8,6 +8,10 @@ const slowestGrowth = 8
 const floorMilliseconds = 200
 
 test.describe.configure({ mode: 'parallel' })
+test.skip(
+  process.env['NULLPAD_READY'] === undefined,
+  'runs before a merge, pnpm test:ready',
+)
 
 for (const input of slowInputs) {
   test(`slow input: ${input.name}, grows in line with its size, from n=${input.n} to n=${growth * input.n}`, async ({

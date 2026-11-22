@@ -1,12 +1,6 @@
 import { acceptedDifferences } from './markdown/differences'
 import { examples } from './markdown/examples'
-import {
-  type Grid,
-  type Unit,
-  countRows,
-  grids,
-  noteOf,
-} from './markdown/grids'
+import { type Unit, countRows, grids, noteOf } from './markdown/grids'
 import { referenceHtml } from './markdown/reference'
 import { expect, test } from './pane'
 
@@ -15,6 +9,7 @@ const beforeAMerge = process.env['NULLPAD_READY'] !== undefined
 const longestReport = 40
 
 test.describe.configure({ mode: 'parallel' })
+test.skip(!beforeAMerge, 'runs before a merge, pnpm test:ready')
 
 type Verdict = Readonly<{
   failures: ReadonlyArray<string>
@@ -72,16 +67,8 @@ const judge = (unit: Unit, shown: string): Verdict => {
   return { failures, accepted }
 }
 
-const skipUnlessReady = (grid: Grid): void => {
-  test.skip(
-    grid.runs === 'before a merge' && !beforeAMerge,
-    'runs before a merge, pnpm test:ready',
-  )
-}
-
 for (const grid of grids) {
   test(`markdown grid: ${grid.name}, holds ${grid.rows} rows`, () => {
-    skipUnlessReady(grid)
     const rows = countRows(grid.units())
     expect(
       rows,
@@ -93,7 +80,6 @@ for (const grid of grids) {
     test(`markdown grid: ${grid.name}, shard ${shard + 1} of ${shards}`, async ({
       pane,
     }, testInfo) => {
-      skipUnlessReady(grid)
       const mine = grid.units().filter((_, index) => index % shards === shard)
       test.skip(mine.length === 0, 'fewer parts than shards')
       test.setTimeout(60_000 + mine.length * 5_000)

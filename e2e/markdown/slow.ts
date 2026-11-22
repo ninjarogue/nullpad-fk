@@ -49,6 +49,12 @@ export const slowInputs: ReadonlyArray<SlowInput> = [
       (_, index) => `a${repeated('`', 1 + (index % 64))}`,
     ).join(''),
   ),
+  input('a backtick and a letter, n times', 40_000, n => repeated('`a', n)),
+  input(
+    'n openers of * that no _ closer matches, then n closers of _',
+    2_500,
+    n => `${repeated('*a ', n)}${repeated('b_ ', n)}`,
+  ),
   input(
     'one run of n backticks, then a and one backtick',
     5_000,

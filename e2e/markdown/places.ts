@@ -1,5 +1,5 @@
 import { examples } from './examples'
-import { comment, grids, isolated, noteOf } from './grids'
+import { comment, isolated } from './grids'
 import { entityTable } from './reference'
 
 export type Place = Readonly<{ line: number; column: number }>
@@ -500,31 +500,6 @@ const chunked = <A>(
 
 export const placeNotes = (): ReadonlyArray<PlaceNote> => {
   const fromExamples = sharing(examples().map(example => example.markdown))
-  const fromGrids = grids
-    .filter(grid => grid.runs === 'every push')
-    .flatMap(grid => {
-      const units = grid.units()
-      const batches = units
-        .filter(unit => unit.sentinel !== undefined)
-        .filter((_, index) => index % 4 === 0)
-        .map(unit => ({ label: unit.label, markdown: noteOf(unit) }))
-      const singles = sharing(
-        units
-          .filter(unit => unit.sentinel === undefined)
-          .map(unit => noteOf(unit)),
-      )
-      return [
-        ...batches,
-        ...chunked(singles.shared, examplesPerNote * 10).map((part, index) => ({
-          label: `${grid.name}, rows together, part ${index + 1}`,
-          markdown: joinedBy(part),
-        })),
-        ...singles.alone.map(markdown => ({
-          label: `${grid.name}, alone`,
-          markdown,
-        })),
-      ]
-    })
   return [
     ...chunked(fromExamples.shared, examplesPerNote).map((part, index) => ({
       label: `spec examples, part ${index + 1}`,
@@ -534,6 +509,5 @@ export const placeNotes = (): ReadonlyArray<PlaceNote> => {
       label: `spec example that cannot share a note, ${index + 1}`,
       markdown,
     })),
-    ...fromGrids,
   ]
 }

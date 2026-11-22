@@ -356,8 +356,23 @@ test('ArrowRight off the end of the bottom row scrolls the next row of the same 
   ).toEqual({ inside: true, row: visible - 1, cell: 0, top: '2' })
 })
 
-/** A textarea's page: seven eighths of the screen's rows, rounded down, as Chrome measured at every height. */
-const pageRows = (rows: number) => Math.floor((rows * 7) / 8)
+/**
+ * A textarea as tall as the text area pages by seven eighths of its height in whole pixels, a whole row at a time, as
+ * Chrome measured at every height from 200 to 1000 px.
+ */
+const textareaPageRows = async (nullpad: Nullpad) => {
+  const { height, rowHeight } = await nullpad.page.evaluate(() => {
+    const surface = document.querySelector<HTMLElement>('.surface')
+    if (surface === null) {
+      throw new Error('nullpad is not on screen: no .surface')
+    }
+    return {
+      height: surface.clientHeight,
+      rowHeight: Number.parseFloat(getComputedStyle(surface).lineHeight),
+    }
+  })
+  return Math.floor(Math.floor((height * 7) / 8) / rowHeight)
+}
 
 const pageStop = async (nullpad: Nullpad) => {
   const screen = await nullpad.screen()
@@ -374,7 +389,7 @@ test('PageDown and PageUp move the cursor a textarea page and scroll its row to 
 }) => {
   await nullpad.paste(numberedLines(200))
   await nullpad.press('Control+Home')
-  const page = pageRows((await nullpad.screen()).rows.length)
+  const page = await textareaPageRows(nullpad)
   await nullpad.press('ArrowDown')
   await nullpad.press('ArrowRight', 3)
   const path = []
@@ -402,7 +417,7 @@ test('PageDown on the last page goes to the end of the note, and PageUp from the
 }) => {
   await nullpad.paste(numberedLines(200))
   const visible = (await nullpad.screen()).rows.length
-  const page = pageRows(visible)
+  const page = await textareaPageRows(nullpad)
   const lastTop = 200 - visible + 1
   await nullpad.press('ArrowUp', 3)
   await nullpad.press('Home')
@@ -453,10 +468,7 @@ test('PageDown and PageUp in a note that fits on screen go to its end and its st
 test('PageDown aims at the cell the cursor is in, not at one an earlier move kept, as a textarea does', async ({
   nullpad,
 }) => {
-  const empty = await nullpad.screen()
-  const page = pageRows(
-    Math.floor((empty.area.bottom - empty.area.top) / empty.rowHeight),
-  )
+  const page = await textareaPageRows(nullpad)
   await nullpad.paste(
     numberedLines(200)
       .split('\n')
@@ -507,7 +519,7 @@ test('PageUp that reaches the first row goes to the start of the note, as a text
 }) => {
   await nullpad.paste(numberedLines(200))
   await nullpad.press('Control+Home')
-  const page = pageRows((await nullpad.screen()).rows.length)
+  const page = await textareaPageRows(nullpad)
   await nullpad.press('ArrowDown', page)
   await nullpad.press('ArrowRight', 3)
   await nullpad.press('PageUp')
@@ -517,10 +529,7 @@ test('PageUp that reaches the first row goes to the start of the note, as a text
 test('PageDown that reaches the last row goes to the end of the note, as a textarea does', async ({
   nullpad,
 }) => {
-  const empty = await nullpad.screen()
-  const page = pageRows(
-    Math.floor((empty.area.bottom - empty.area.top) / empty.rowHeight),
-  )
+  const page = await textareaPageRows(nullpad)
   await nullpad.paste(numberedLines(page + 1))
   await nullpad.press('Control+Home')
   await nullpad.press('ArrowRight', 3)
@@ -535,10 +544,7 @@ test('PageDown that reaches the last row goes to the end of the note, as a texta
 test('PageUp that lands at the start of a wrapped row puts the cursor at the end of the row above, as a textarea does', async ({
   nullpad,
 }) => {
-  const empty = await nullpad.screen()
-  const page = pageRows(
-    Math.floor((empty.area.bottom - empty.area.top) / empty.rowHeight),
-  )
+  const page = await textareaPageRows(nullpad)
   await nullpad.paste(`${'a'.repeat(200)}\n${numberedLines(page)}`)
   await nullpad.press('Home')
   await nullpad.press('PageUp')
@@ -557,10 +563,7 @@ test('PageUp that lands at the start of a wrapped row puts the cursor at the end
 test('PageDown that lands at the start of a wrapped row keeps the cursor there, as a textarea does', async ({
   nullpad,
 }) => {
-  const empty = await nullpad.screen()
-  const page = pageRows(
-    Math.floor((empty.area.bottom - empty.area.top) / empty.rowHeight),
-  )
+  const page = await textareaPageRows(nullpad)
   await nullpad.paste(
     `${numberedLines(page - 1)}\n${'a'.repeat(200)}\n${numberedLines(page)}`,
   )
@@ -572,6 +575,75 @@ test('PageDown that lands at the start of a wrapped row keeps the cursor there, 
     column: 153,
     lineCount: 2 * page,
   })
+})
+
+const unbroken = 'abcdefghij'.repeat(600)
+
+const pageLanding = async (nullpad: Nullpad) => {
+  const screen = await nullpad.screen()
+  return {
+    line: screen.status.line,
+    column: screen.status.column,
+    row: screen.cursor?.row,
+    cell: screen.cursor?.cell,
+  }
+}
+
+test('PageDown from the end of a row that lands where the line wraps puts the cursor at the start of the lower row, as a textarea does', async ({
+  nullpad,
+}) => {
+  await nullpad.paste(unbroken)
+  await nullpad.press('Control+Home')
+  const page = await textareaPageRows(nullpad)
+  await nullpad.press('End')
+  await nullpad.press('PageDown')
+  expect(
+    await pageLanding(nullpad),
+    'the lower row starts the screen with the cursor on its first cell',
+  ).toEqual({ line: 1, column: 76 * (page + 1) + 1, row: 0, cell: 0 })
+  await nullpad.press('Home')
+  expect(await nullpad.status(), 'Home stays at the row start').toEqual({
+    line: 1,
+    column: 76 * (page + 1) + 1,
+    lineCount: 1,
+  })
+  await nullpad.press('End')
+  expect(
+    await nullpad.status(),
+    'End goes to the end of the lower row',
+  ).toEqual({ line: 1, column: 76 * (page + 2) + 1, lineCount: 1 })
+})
+
+test('PageDown from the end of a line that fills its row, landing where a line wraps, puts the cursor at the start of the lower row, as a textarea does', async ({
+  nullpad,
+}) => {
+  await nullpad.paste(`${'x'.repeat(76)}\n${unbroken}`)
+  await nullpad.press('Control+Home')
+  const page = await textareaPageRows(nullpad)
+  await nullpad.press('End')
+  await nullpad.press('PageDown')
+  expect(await pageLanding(nullpad)).toEqual({
+    line: 2,
+    column: 76 * page + 1,
+    row: 0,
+    cell: 0,
+  })
+  await nullpad.press('End')
+  expect(
+    await nullpad.status(),
+    'End goes to the end of the lower row',
+  ).toEqual({ line: 2, column: 76 * (page + 1) + 1, lineCount: 2 })
+})
+
+test('PageUp after a PageDown that landed where a line wraps pages from the lower row, as a textarea does', async ({
+  nullpad,
+}) => {
+  await nullpad.paste(unbroken)
+  await nullpad.press('Control+Home')
+  await nullpad.press('End')
+  await nullpad.press('PageDown')
+  await nullpad.press('PageUp')
+  expect(await nullpad.status()).toEqual({ line: 1, column: 77, lineCount: 1 })
 })
 
 test('Ctrl+End from a short line lands at the end of the last line', async ({
@@ -613,6 +685,99 @@ test('ArrowUp onto a word-wrapped row lands after its trailing space, as a texta
   expect((await nullpad.text()).split('\n')[0]).toBe(
     `${'word '.repeat(15)}Z${'word '.repeat(15)}`,
   )
+})
+
+test('ArrowDown from the end of a line onto a row of emoji lands after the emoji under the cursor, as a textarea does', async ({
+  nullpad,
+}) => {
+  await nullpad.paste(`${'x'.repeat(75)}\n${'😀a'.repeat(57)}`)
+  await nullpad.press('Control+Home')
+  await nullpad.press('End')
+  await nullpad.press('ArrowDown')
+  await nullpad.type('Z')
+  expect((await nullpad.text()).split('\n')[1]).toBe(
+    `${'😀a'.repeat(24)}😀Za${'😀a'.repeat(32)}`,
+  )
+})
+
+test('PageDown from inside a line onto a row of emoji lands after the emoji under the cursor, as a textarea does', async ({
+  nullpad,
+}) => {
+  const emojiRow = `${'😀a'.repeat(24)}😀`
+  await nullpad.paste(
+    ['x'.repeat(76), ...Array.from({ length: 60 }, () => emojiRow)].join('\n'),
+  )
+  await nullpad.press('Control+Home')
+  await nullpad.press('ArrowRight', 75)
+  await nullpad.press('PageDown')
+  const landed = await nullpad.status()
+  expect(
+    landed.column,
+    'the cell PageDown lands in: after the 25th emoji, 49 letters in',
+  ).toBe(50)
+  expect(landed.line, 'the line PageDown lands on').toBe(
+    1 + (await textareaPageRows(nullpad)),
+  )
+})
+
+test('ArrowDown onto a CJK character after an emoji lands on the side of it nearer the cursor, as a textarea does', async ({
+  nullpad,
+}) => {
+  await nullpad.paste('xxxxx\nba🚀中a')
+  await nullpad.press('Control+Home')
+  await nullpad.press('End')
+  await nullpad.press('ArrowDown')
+  await nullpad.type('Z')
+  expect(await nullpad.text(), 'from the end of the line').toBe(
+    'xxxxx\nba🚀中Za',
+  )
+  await nullpad.press('Control+Home')
+  await nullpad.type('xxxxx')
+  await nullpad.press('ArrowDown')
+  await nullpad.type('Y')
+  expect(await nullpad.text(), 'from inside the line').toBe(
+    'xxxxxxxxxx\nba🚀中YZa',
+  )
+})
+
+test('PageDown moves the cursor as far as in a textarea as tall as the text area', async ({
+  nullpad,
+  browser,
+}) => {
+  await nullpad.page.setViewportSize({ width: 1280, height: 800 })
+  const { height, rowHeight } = await nullpad.page.evaluate(() => {
+    const surface = document.querySelector<HTMLElement>('.surface')
+    if (surface === null) {
+      throw new Error('nullpad is not on screen: no .surface')
+    }
+    return {
+      height: surface.clientHeight,
+      rowHeight: getComputedStyle(surface).lineHeight,
+    }
+  })
+  const note = numberedLines(100)
+  await nullpad.paste(note)
+  await nullpad.press('Control+Home')
+  await nullpad.press('PageDown')
+  const oracle = await browser.newPage({
+    viewport: { width: 1280, height: 800 },
+  })
+  await oracle.setContent(
+    `<textarea style="display:block;margin:0;padding:0;border:0;resize:none;height:${height}px;line-height:${rowHeight}"></textarea>`,
+  )
+  await oracle.locator('textarea').fill(note)
+  await oracle.locator('textarea').focus()
+  await oracle.keyboard.press('Control+Home')
+  await oracle.keyboard.press('PageDown')
+  const textareaLine = await oracle.evaluate(() => {
+    const area = document.querySelector('textarea')
+    return area?.value.slice(0, area.selectionStart).split('\n').length ?? 0
+  })
+  await oracle.close()
+  expect(
+    (await nullpad.status()).line,
+    `the line a ${height}px textarea pages to`,
+  ).toBe(textareaLine)
 })
 
 test('Home and End on a wrapped line go to the start and end of the row the cursor is on, as a textarea does', async ({

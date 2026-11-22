@@ -322,3 +322,330 @@ test('a click sent right after typing lands by the text as typed, not by the fra
     ).toBe('line one\nline two\n# Heading|')
   }
 })
+
+/** A long note with the cursor on line 1 and the mouse over the text, ready for a wheel turn. */
+const longNoteAtTop = async (nullpad: Nullpad) => {
+  await nullpad.paste(numberedLines(400))
+  await nullpad.press('Control+Home')
+  await nullpad.page.mouse.move(400, 300)
+  return nullpad.screen()
+}
+
+/** A wheel turn and key presses handed to the browser back to back, with no wait between them. */
+const wheelThenKeys = (
+  nullpad: Nullpad,
+  deltaY: number,
+  keys: ReadonlyArray<'x' | 'ArrowDown' | 'ArrowUp'>,
+) =>
+  Promise.all([
+    nullpad.cdp.send('Input.dispatchMouseEvent', {
+      type: 'mouseWheel',
+      x: 400,
+      y: 300,
+      deltaX: 0,
+      deltaY,
+    }),
+    ...keys.flatMap(key => {
+      const event =
+        key === 'x'
+          ? { key: 'x', code: 'KeyX', windowsVirtualKeyCode: 88, text: 'x' }
+          : {
+              key,
+              code: key,
+              windowsVirtualKeyCode: key === 'ArrowUp' ? 38 : 40,
+            }
+      return [
+        nullpad.cdp.send('Input.dispatchKeyEvent', {
+          type: key === 'x' ? 'keyDown' : 'rawKeyDown',
+          ...event,
+        }),
+        nullpad.cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', ...event }),
+      ]
+    }),
+  ])
+
+const settleScroll = async (nullpad: Nullpad) => {
+  await nullpad.page.waitForTimeout(600)
+  await nullpad.screen()
+  return nullpad.screen()
+}
+
+test('a letter typed right after a big wheel turn brings the cursor and the letter back on screen', async ({
+  nullpad,
+}) => {
+  const start = await longNoteAtTop(nullpad)
+  for (let trial = 1; trial <= 4; trial++) {
+    await nullpad.press('Control+Home')
+    await wheelThenKeys(nullpad, start.rowHeight * 40, ['x'])
+    const after = await settleScroll(nullpad)
+    expect(
+      after.cursor?.inside,
+      `trial ${trial}: the cursor is on screen`,
+    ).toBe(true)
+    expect(
+      linesOf(after)[0],
+      `trial ${trial}: the letter's line is on screen`,
+    ).toMatch(/^x+line 1$/)
+    await nullpad.press('Backspace')
+  }
+})
+
+test('a letter and ArrowDown sent right after a big wheel turn leave the cursor on line 2', async ({
+  nullpad,
+}) => {
+  const start = await longNoteAtTop(nullpad)
+  for (let trial = 1; trial <= 4; trial++) {
+    await nullpad.press('Control+Home')
+    await wheelThenKeys(nullpad, start.rowHeight * 200, ['x', 'ArrowDown'])
+    const after = await settleScroll(nullpad)
+    expect(after.status.line, `trial ${trial}: the cursor line`).toBe(2)
+    expect(
+      after.cursor?.inside,
+      `trial ${trial}: the cursor is on screen`,
+    ).toBe(true)
+    await nullpad.press('Control+Home')
+    await nullpad.press('Delete')
+  }
+})
+
+/**
+ * Presses `x` and then the mouse button at `point`, and says whether the button went down on the frame from before the
+ * letter. It did when both left within 12 ms: the letter's frame is on screen 16 ms after the letter at the soonest. A
+ * busy machine can take longer, and then nothing says which frame the click was made on.
+ */
+const letterThenClick = async (
+  nullpad: Nullpad,
+  point: Readonly<{ x: number; y: number }>,
+) => {
+  await nullpad.page.mouse.move(point.x, point.y)
+  const sent = performance.now()
+  await nullpad.page.keyboard.press('x')
+  await nullpad.page.mouse.down()
+  const clickedOldFrame = performance.now() - sent < 12
+  await nullpad.page.mouse.up()
+  return clickedOldFrame
+}
+
+const expectSomeCounted = (trials: number) =>
+  expect(
+    trials,
+    'trials whose click left within 12 ms of the letter',
+  ).toBeGreaterThan(0)
+
+test('a click sent right after a letter lands on the line that was on screen where it clicked', async ({
+  nullpad,
+}) => {
+  const start = await longNoteAtTop(nullpad)
+  let counted = 0
+  for (let trial = 1; trial <= 4; trial++) {
+    await nullpad.press('Control+Home')
+    await nullpad.wheel(start.rowHeight * 40)
+    const scrolled = await nullpad.screen()
+    expect(scrolled.cursor, `trial ${trial}: line 1 is off screen`).toBeNull()
+    const target = scrolled.rows[Math.floor(scrolled.rows.length / 2)]
+    if (target === undefined || target.number === null) {
+      throw new Error('no numbered row in the middle of the screen')
+    }
+    const clickedOldFrame = await letterThenClick(nullpad, {
+      x: target.left + 2.25 * scrolled.cell,
+      y: (target.top + target.bottom) / 2,
+    })
+    const after = await settleScroll(nullpad)
+    if (clickedOldFrame) {
+      counted += 1
+      expect(
+        after.status.line,
+        `trial ${trial}: the cursor is on the line clicked`,
+      ).toBe(Number(target.number))
+    }
+    await nullpad.press('Control+Home')
+    expect(
+      linesOf(await nullpad.screen())[0],
+      `trial ${trial}: the letter`,
+    ).toBe('xline 1')
+    await nullpad.press('Delete')
+  }
+  expectSomeCounted(counted)
+})
+
+/** A long note with the cursor at its end and the mouse over the text. */
+const longNoteAtEnd = async (nullpad: Nullpad) => {
+  await nullpad.paste(numberedLines(400))
+  await nullpad.page.mouse.move(400, 300)
+  return nullpad.screen()
+}
+
+/** A wheel turn handed to the browser, without the wait for its scroll that `nullpad.wheel` adds. */
+const turnWheel = (nullpad: Nullpad, deltaY: number) =>
+  nullpad.cdp.send('Input.dispatchMouseEvent', {
+    type: 'mouseWheel',
+    x: 400,
+    y: 300,
+    deltaX: 0,
+    deltaY,
+  })
+
+const numberedRow = (screen: Screen, row: number) => {
+  const drawn = screen.rows[row]
+  if (drawn === undefined || drawn.number === null) {
+    throw new Error(`no numbered row ${row} on screen`)
+  }
+  return {
+    number: Number(drawn.number),
+    x: drawn.left + 2.25 * screen.cell,
+    y: (drawn.top + drawn.bottom) / 2,
+  }
+}
+
+test('a click right after a wheel turn lands on the line the turn scrolled under the pointer', async ({
+  nullpad,
+}) => {
+  const start = await longNoteAtTop(nullpad)
+  const turn = 10
+  for (let trial = 1; trial <= 4; trial++) {
+    await nullpad.press('Control+Home')
+    await nullpad.wheel(start.rowHeight * turn)
+    const target = numberedRow(await nullpad.screen(), 4 * trial)
+    await turnWheel(nullpad, start.rowHeight * turn)
+    await nullpad.page.mouse.click(target.x, target.y)
+    const after = await settleScroll(nullpad)
+    expect(
+      after.status.line,
+      `trial ${trial}: the cursor is on the line the turn scrolled there`,
+    ).toBe(target.number + turn)
+    expect(
+      after.cursor?.inside,
+      `trial ${trial}: the cursor is on screen`,
+    ).toBe(true)
+  }
+})
+
+test('a click right after a wheel turn too far to be drawn at once lands on a line that was under the pointer', async ({
+  nullpad,
+}) => {
+  const start = await longNoteAtTop(nullpad)
+  const far = 136
+  for (let trial = 1; trial <= 4; trial++) {
+    await nullpad.press('Control+Home')
+    await nullpad.press('ArrowDown')
+    await nullpad.wheel(start.rowHeight * far)
+    const target = numberedRow(await nullpad.screen(), 4 * trial)
+    await turnWheel(nullpad, start.rowHeight * far)
+    await nullpad.page.mouse.click(target.x, target.y)
+    const after = await settleScroll(nullpad)
+    expect(
+      [target.number, target.number + far],
+      `trial ${trial}: the cursor is on the line under the pointer before the turn or after it`,
+    ).toContain(after.status.line)
+    expect(
+      after.cursor?.inside,
+      `trial ${trial}: the cursor is on screen`,
+    ).toBe(true)
+  }
+})
+
+test('a letter typed right after a wheel turn far up from the end of the note brings the cursor back on screen', async ({
+  nullpad,
+}) => {
+  const start = await longNoteAtEnd(nullpad)
+  for (let trial = 1; trial <= 4; trial++) {
+    await nullpad.press('Control+End')
+    await turnWheel(nullpad, -start.rowHeight * 230)
+    await nullpad.page.keyboard.type('x')
+    const after = await settleScroll(nullpad)
+    expect(
+      after.cursor?.inside,
+      `trial ${trial}: the cursor is on screen`,
+    ).toBe(true)
+    expect(
+      linesOf(after).at(-1),
+      `trial ${trial}: the letter's line is on screen`,
+    ).toMatch(/^line 400x+$/)
+  }
+})
+
+test('a click sent right after a letter that scrolled the screen far lands on the line that was on screen where it clicked', async ({
+  nullpad,
+}) => {
+  const start = await longNoteAtEnd(nullpad)
+  let counted = 0
+  for (const [trial, rows] of [136, 136, 270, 270].entries()) {
+    await nullpad.press('Control+End')
+    await nullpad.wheel(-start.rowHeight * rows)
+    const scrolled = await nullpad.screen()
+    expect(scrolled.cursor, `trial ${trial}: line 400 is off screen`).toBeNull()
+    const target = numberedRow(scrolled, 3 + 5 * trial)
+    const clickedOldFrame = await letterThenClick(nullpad, target)
+    const after = await settleScroll(nullpad)
+    if (clickedOldFrame) {
+      counted += 1
+      expect(
+        after.status.line,
+        `trial ${trial}: the cursor is on the line clicked`,
+      ).toBe(target.number)
+    }
+    expect(
+      after.cursor?.inside,
+      `trial ${trial}: the cursor is on screen`,
+    ).toBe(true)
+  }
+  expectSomeCounted(counted)
+})
+
+test('a click made once a key has brought the cursor back on screen after a wheel turn lands on the line shown where it clicked', async ({
+  nullpad,
+}) => {
+  const start = await longNoteAtEnd(nullpad)
+  for (const [trial, key] of (
+    ['x', 'ArrowLeft', 'ArrowDown', 'x', 'ArrowLeft', 'ArrowDown'] as const
+  ).entries()) {
+    await nullpad.press('Control+End')
+    await nullpad.press('ArrowUp')
+    await turnWheel(nullpad, -start.rowHeight * 90)
+    await nullpad.page.keyboard.press(key)
+    const revealed = await nullpad.screen()
+    expect(
+      revealed.cursor?.inside,
+      `trial ${trial}: ${key} brought the cursor on screen`,
+    ).toBe(true)
+    const target = numberedRow(revealed, 3 + 2 * trial)
+    await nullpad.page.mouse.click(target.x, target.y)
+    const after = await settleScroll(nullpad)
+    expect(
+      after.status.line,
+      `trial ${trial}: the cursor is on the line shown where it clicked`,
+    ).toBe(target.number)
+  }
+})
+
+test('a wheel turn dropped for a key that could not move the cursor stays dropped when the next turn comes', async ({
+  nullpad,
+}) => {
+  const start = await longNoteAtTop(nullpad)
+  for (let trial = 1; trial <= 4; trial++) {
+    await nullpad.press('Control+Home')
+    await wheelThenKeys(nullpad, start.rowHeight * 200, ['ArrowUp'])
+    await turnWheel(nullpad, start.rowHeight * 3)
+    const after = await settleScroll(nullpad)
+    expect(
+      after.rows[0]?.number,
+      `trial ${trial}: only the second turn scrolled`,
+    ).toBe('4')
+  }
+})
+
+test('a wheel turn right after a key scrolls the screen', async ({
+  nullpad,
+}) => {
+  const start = await longNoteAtTop(nullpad)
+  for (let trial = 1; trial <= 4; trial++) {
+    await nullpad.press('Control+Home')
+    await nullpad.page.keyboard.press('ArrowUp')
+    await turnWheel(nullpad, start.rowHeight * 3)
+    const after = await settleScroll(nullpad)
+    expect(
+      after.rows[0]?.number,
+      `trial ${trial}: the turn scrolled three rows`,
+    ).toBe('4')
+  }
+})

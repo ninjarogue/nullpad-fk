@@ -174,10 +174,10 @@ const SaveNote = Command.define('SaveNote', {
 })
 
 const RemoveNote = Command.define('RemoveNote', {
-  args: { id: Notes.NoteId },
+  args: { id: Notes.NoteId, expectedRevision: Schema.Int },
   messages: [Message.CompletedRemoveNote],
-  execute: ({ id }) =>
-    Storage.remove(id).pipe(
+  execute: ({ id, expectedRevision }) =>
+    Storage.remove(id, expectedRevision).pipe(
       Effect.ignore,
       Effect.as(Message.CompletedRemoveNote()),
     ),
@@ -214,42 +214,53 @@ const draftOf = (model: Model): Storage.Draft => ({
   text: Editor.text(model.editor),
 })
 
-const saveNow = (model: Model): UpdateReturn =>
-  Editor.isBlank(model.editor) || model.note.save._tag === 'Saving'
-    ? { model }
-    : {
-        model: modifyFields(model, {
-          note: open =>
-            modifyFields(open, {
-              savedEdits: () => model.edits,
-              save: () => SaveState.cases.Saving.make({ held: Option.none() }),
-            }),
+const removeBlank = (model: Model): UpdateReturn => {
+  const { id, revision } = model.note
+  return {
+    model: modifyFields(model, {
+      notes: notes => Notes.without(notes, id),
+      note: open =>
+        modifyFields(open, {
+          revision: () => 0,
+          savedEdits: () => model.edits,
         }),
-        commands: [
-          SaveNote({
-            draft: draftOf(model),
-            expectedRevision: model.note.revision,
-            isEdit: true,
-          }),
-        ],
-      }
+    }),
+    commands:
+      revision > 0 ? [RemoveNote({ id, expectedRevision: revision })] : [],
+  }
+}
+
+const saveNow = (model: Model): UpdateReturn => {
+  if (model.note.save._tag === 'Saving') {
+    return { model }
+  }
+  if (Editor.isBlank(model.editor)) {
+    return removeBlank(model)
+  }
+  const draft = draftOf(model)
+  return {
+    model: modifyFields(model, {
+      note: open =>
+        modifyFields(open, {
+          savedEdits: () => model.edits,
+          save: () => SaveState.cases.Saving.make({ held: Option.none() }),
+        }),
+    }),
+    commands: [
+      SaveNote({
+        draft,
+        expectedRevision: model.note.revision,
+        isEdit: true,
+      }),
+    ],
+  }
+}
 
 const saveIfDirty = (model: Model): UpdateReturn =>
   isDirty(model) ? saveNow(model) : { model }
 
 const leave = (model: Model): UpdateReturn => {
-  const { id, revision, save } = model.note
-  if (Editor.isBlank(model.editor)) {
-    return revision > 0 || save._tag === 'Saving'
-      ? {
-          model: modifyFields(model, {
-            notes: notes => Notes.without(notes, id),
-            note: open => modifyFields(open, { revision: () => 0 }),
-          }),
-          commands: [RemoveNote({ id })],
-        }
-      : { model }
-  }
+  const { id, save } = model.note
   if (isDirty(model) && save._tag === 'Saving') {
     return {
       model: modifyFields(model, {
@@ -512,16 +523,29 @@ const savePending = (
   const taken = takePending(model, id)
   return Option.match(taken.draft, {
     onNone: () => ({ model: taken.model }),
-    onSome: pending => ({
-      model: taken.model,
-      commands: [SaveNote({ draft: pending, expectedRevision, isEdit: true })],
-    }),
+    onSome: pending =>
+      Notes.isBlank(pending.text)
+        ? {
+            model: modifyFields(taken.model, {
+              notes: notes => Notes.without(notes, id),
+            }),
+            commands: [RemoveNote({ id, expectedRevision })],
+          }
+        : {
+            model: taken.model,
+            commands: [
+              SaveNote({ draft: pending, expectedRevision, isEdit: true }),
+            ],
+          },
   })
 }
 
 const copyLeftNote = (model: Model, draft: Storage.Draft): UpdateReturn => {
   const taken = takePending(model, draft.id)
   const latest = Option.getOrElse(taken.draft, () => draft)
+  if (Notes.isBlank(latest.text)) {
+    return { model: taken.model }
+  }
   return {
     model: modifyFields(taken.model, { created: created => created + 1 }),
     commands: [

@@ -109,13 +109,47 @@ export const read = (
     decodeNote,
   )
 
+const whenRevision = (
+  id: NoteId,
+  expectedRevision: number,
+  change: (store: IDBObjectStore) => void,
+): Effect.Effect<void, StorageConflict | StorageUnavailable> =>
+  Effect.flatMap(begin('readwrite'), transaction =>
+    Effect.callback<void, StorageConflict | StorageUnavailable>(resume => {
+      const store = transaction.objectStore(storeName)
+      const outcome = { isConflict: false }
+      const current = store.get(id)
+      current.addEventListener('success', () => {
+        const stored = Option.match(decodeRevision(current.result), {
+          onNone: () => 0,
+          onSome: ({ revision }) => revision,
+        })
+        if (stored === expectedRevision) {
+          change(store)
+        } else {
+          outcome.isConflict = true
+          transaction.abort()
+        }
+      })
+      transaction.addEventListener('complete', () => resume(Effect.void))
+      transaction.addEventListener('abort', () =>
+        resume(
+          Effect.fail(
+            outcome.isConflict
+              ? new StorageConflict({ id })
+              : unavailable(transaction.error),
+          ),
+        ),
+      )
+    }),
+  )
+
 export const write = (
   draft: Draft,
   expectedRevision: number,
 ): Effect.Effect<Note, StorageConflict | StorageUnavailable> =>
   Effect.gen(function* () {
     const modified = yield* Clock.currentTimeMillis
-    const transaction = yield* begin('readwrite')
     const note: Note = {
       id: draft.id,
       folder: draft.folder,
@@ -123,49 +157,18 @@ export const write = (
       revision: expectedRevision + 1,
       modified,
     }
-    yield* Effect.callback<void, StorageConflict | StorageUnavailable>(
-      resume => {
-        const store = transaction.objectStore(storeName)
-        const outcome = { isConflict: false }
-        const current = store.get(note.id)
-        current.addEventListener('success', () => {
-          const stored = Option.match(decodeRevision(current.result), {
-            onNone: () => 0,
-            onSome: ({ revision }) => revision,
-          })
-          if (stored === expectedRevision) {
-            store.put(note)
-          } else {
-            outcome.isConflict = true
-            transaction.abort()
-          }
-        })
-        transaction.addEventListener('complete', () => resume(Effect.void))
-        transaction.addEventListener('abort', () =>
-          resume(
-            Effect.fail(
-              outcome.isConflict
-                ? new StorageConflict({ id: note.id })
-                : unavailable(transaction.error),
-            ),
-          ),
-        )
-      },
-    )
+    yield* whenRevision(note.id, expectedRevision, store => store.put(note))
     yield* broadcast(NoteChange.cases.Saved.make({ note }))
     return note
   })
 
-export const remove = (id: NoteId): Effect.Effect<void, StorageUnavailable> =>
-  Effect.flatMap(begin('readwrite'), transaction =>
-    Effect.callback<void, StorageUnavailable>(resume => {
-      transaction.objectStore(storeName).delete(id)
-      transaction.addEventListener('complete', () => resume(Effect.void))
-      transaction.addEventListener('abort', () =>
-        resume(Effect.fail(unavailable(transaction.error))),
-      )
-    }),
-  ).pipe(Effect.andThen(broadcast(NoteChange.cases.Removed.make({ id }))))
+export const remove = (
+  id: NoteId,
+  expectedRevision: number,
+): Effect.Effect<void, StorageConflict | StorageUnavailable> =>
+  whenRevision(id, expectedRevision, store => store.delete(id)).pipe(
+    Effect.andThen(broadcast(NoteChange.cases.Removed.make({ id }))),
+  )
 
 export const watch: Stream.Stream<NoteChange> = Dom.streamFromEventFilterMap({
   target: channel,

@@ -37,6 +37,9 @@ const cutToLength = (text: string): string => {
       ).trimEnd()}…`
 }
 
+export const isBlank = (text: string): boolean =>
+  Option.isNone(firstFilledLine(text))
+
 export const title = (text: string): string =>
   Option.match(firstFilledLine(text), {
     onNone: () => 'Untitled',

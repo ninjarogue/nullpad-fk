@@ -26,8 +26,10 @@ const isAlphanumeric = (point: string): boolean =>
 
 const isPunctuation = (point: string): boolean => /^[\p{P}\p{S}]$/u.test(point)
 
+const readsAsSpace = (point: string): boolean => /^[ \t \p{C}]$/u.test(point)
+
 const isWordCharacter = (point: string): boolean =>
-  point !== '' && !/^[ \t \p{C}]$/u.test(point)
+  point !== '' && !readsAsSpace(point)
 
 const endsWord = ({ before, after }: Boundary): boolean => {
   if (after === '') {
@@ -78,17 +80,20 @@ export const nextWordEnd = (
     : endIn(line + 1, 0)
 }
 
+const endOfLineAbove = (
+  buffer: Buffer.Buffer,
+  line: number,
+): Option.Option<Buffer.Position> =>
+  line > 0
+    ? Option.some({ line: line - 1, column: lineText(buffer, line - 1).length })
+    : Option.none()
+
 export const previousWordStart = (
   buffer: Buffer.Buffer,
 ): Option.Option<Buffer.Position> => {
   const { line, column } = buffer.caret
   if (column === 0) {
-    return line > 0
-      ? Option.some({
-          line: line - 1,
-          column: lineText(buffer, line - 1).length,
-        })
-      : Option.none()
+    return endOfLineAbove(buffer, line)
   }
   return Option.some({
     line,

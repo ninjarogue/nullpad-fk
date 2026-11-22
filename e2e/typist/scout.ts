@@ -146,7 +146,7 @@ export const scoutScript = (seed: number): Script => {
     random() < 0.25
       ? [insert(proseLine(random))]
       : pick(random, sweep.documents).setup
-  const steps: Array<Step> = [...setup, ...pick(random, sweep.placements).keys]
+  const steps: Array<Step> = [...setup, ...pick(random, sweep.placements).steps]
   const wandering = 4 + Math.floor(random() * 7)
   for (let drawn = 0; drawn < wandering; drawn++) {
     const roll = random()

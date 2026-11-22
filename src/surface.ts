@@ -9,6 +9,7 @@ import {
   type Mode,
   type PaintedLine,
   Query,
+  graphemeReach,
 } from './core/editor'
 import type { Keyboard } from './keyboard'
 import { Message } from './message'
@@ -24,9 +25,9 @@ const segmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' })
 
 type Box = Readonly<{ left: number; top: number; width: number }>
 
-const monospaceAdvance = 0.6
+const jetBrainsMonoAdvanceEm = 0.6
 
-const thinnest = 2
+const minCaretWidthPx = 2
 
 type Sheet = Readonly<{
   surface: HTMLElement
@@ -143,7 +144,9 @@ const rangeRect = (
 const graphemeAfter = (text: string, column: number): number =>
   Option.match(
     Option.fromNullishOr(
-      segmenter.segment(text.slice(column, column + 64)).containing(0),
+      segmenter
+        .segment(text.slice(column, column + graphemeReach))
+        .containing(0),
     ),
     {
       onNone: () => column,
@@ -152,7 +155,7 @@ const graphemeAfter = (text: string, column: number): number =>
   )
 
 const graphemeBefore = (text: string, column: number): number => {
-  const start = Math.max(0, column - 64)
+  const start = Math.max(0, column - graphemeReach)
   return Option.match(
     Option.fromNullishOr(
       segmenter
@@ -199,14 +202,14 @@ const caretBox = (
 ): Box => {
   const edges = textEdges(line)
   const style = getComputedStyle(line)
-  const cell = pixels(style.fontSize) * monospaceAdvance
+  const cell = pixels(style.fontSize) * jetBrainsMonoAdvanceEm
   const row = pixels(style.lineHeight)
   const fitted = ({ left, top, width }: Box): Box => {
-    const inside = Math.min(left, edges.right - thinnest)
+    const inside = Math.min(left, edges.right - minCaretWidthPx)
     return {
       left: inside,
       top: edges.top + Math.floor((top - edges.top + row / 2) / row) * row,
-      width: Math.max(thinnest, Math.min(width, edges.right - inside)),
+      width: Math.max(minCaretWidthPx, Math.min(width, edges.right - inside)),
     }
   }
   const ghost = Array.findFirst(Array.fromIterable(line.childNodes), isGhost)
@@ -261,7 +264,7 @@ const pointAt = (
 const landAt = (
   found: Readonly<{ line: HTMLElement; column: number }>,
   y: number,
-  side: 'Hit' | 'Upper' | 'Lower' = 'Hit',
+  side: 'ByPointY' | 'Upper' | 'Lower' = 'ByPointY',
 ): Landing => {
   const { line, column } = found
   const upper =
@@ -274,6 +277,8 @@ const landAt = (
       ))
   return { _tag: 'At', line: indexOf(line), column, atRowEnd: upper }
 }
+
+const appScrollMemoryMs = 1000
 
 type AppScroll = { readonly distance: number; shownAt: number }
 
@@ -294,7 +299,7 @@ const scrollApp = (surface: HTMLElement, scroll: () => void): number => {
       made.shownAt = nextFrame
       appScrolls.recent = Array.filter(
         appScrolls.recent,
-        ({ shownAt }) => shownAt > nextFrame - 1000,
+        ({ shownAt }) => shownAt > nextFrame - appScrollMemoryMs,
       )
     })
   }
@@ -318,7 +323,10 @@ const bringOnScreen = (sheet: Sheet, y: number): number => {
         })
 }
 
-const stay = (aim: number): Answer => ({ landing: { _tag: 'Stay' }, aim })
+const stay = (aimFromTextLeft: number): Answer => ({
+  landing: { _tag: 'Stay' },
+  aimFromTextLeft,
+})
 
 const lastLineIndex = (surface: HTMLElement): number =>
   Number(surface.dataset['lastLine'])
@@ -361,14 +369,14 @@ const verticalAnswer = (
     indexOf(first) === 0 &&
     target < first.getBoundingClientRect().top + edgeRow
   ) {
-    return { landing: { _tag: 'TextStart' }, aim }
+    return { landing: { _tag: 'TextStart' }, aimFromTextLeft: aim }
   }
   if (
     last !== undefined &&
     indexOf(last) === lastLineIndex(sheet.surface) &&
     target > last.getBoundingClientRect().bottom - edgeRow
   ) {
-    return { landing: { _tag: 'TextEnd' }, aim }
+    return { landing: { _tag: 'TextEnd' }, aimFromTextLeft: aim }
   }
   const y = bringOnScreen(sheet, target)
   return Option.match(pointAt(start + aim, y), {
@@ -377,9 +385,9 @@ const verticalAnswer = (
       landing: landAt(
         found,
         y,
-        stride === 'Row' ? 'Hit' : distance < 0 ? 'Upper' : 'Lower',
+        stride === 'Row' ? 'ByPointY' : distance < 0 ? 'Upper' : 'Lower',
       ),
-      aim,
+      aimFromTextLeft: aim,
     }),
   })
 }
@@ -405,6 +413,15 @@ const selectionMove = (
   return moved
 }
 
+const columnInCaretRow = (
+  line: HTMLElement,
+  column: number,
+  atRowEnd: boolean,
+): number =>
+  atRowEnd && wrapsAt(line, column)
+    ? graphemeBefore(lineText(line), column)
+    : column
+
 const rowStartOf = (
   line: HTMLElement,
   column: number,
@@ -412,9 +429,7 @@ const rowStartOf = (
 ): Option.Option<number> =>
   selectionMove(
     line,
-    atRowEnd && wrapsAt(line, column)
-      ? graphemeBefore(lineText(line), column)
-      : column,
+    columnInCaretRow(line, column, atRowEnd),
     'backward',
     'lineboundary',
   )
@@ -480,7 +495,7 @@ const aimAt = (
 
 const at = (line: HTMLElement, column: number, atRowEnd: boolean): Answer => ({
   landing: { _tag: 'At', line: indexOf(line), column, atRowEnd },
-  aim: 0,
+  aimFromTextLeft: 0,
 })
 
 const rowEdgeAnswer = (
@@ -507,11 +522,14 @@ const rowEdgeAnswer = (
 const lineAt = (
   sheet: Sheet,
   y: number,
-): Readonly<{ line: number; y: number }> => {
+): Readonly<{ line: number; yInLine: number }> => {
   const lines = Array.fromIterable(
     sheet.surface.querySelectorAll<HTMLElement>('.line'),
   )
-  const inUndrawnRow = (line: number) => ({ line, y: sheet.rowHeight / 2 })
+  const inUndrawnRow = (line: number) => ({
+    line,
+    yInLine: sheet.rowHeight / 2,
+  })
   const hit = Array.findFirst(lines, line => {
     const box = line.getBoundingClientRect()
     return y >= box.top && y < box.bottom
@@ -519,7 +537,7 @@ const lineAt = (
   if (Option.isSome(hit)) {
     return {
       line: indexOf(hit.value),
-      y: y - hit.value.getBoundingClientRect().top,
+      yInLine: y - hit.value.getBoundingClientRect().top,
     }
   }
   const first = lines[0]
@@ -542,15 +560,15 @@ const pointAnswer = (
   sheet: Sheet,
   line: HTMLElement,
   x: number,
-  y: number,
+  yInLine: number,
 ): Answer => {
   const box = line.getBoundingClientRect()
-  const row = bringOnScreen(sheet, box.top + Math.min(y, box.height - 1))
+  const row = bringOnScreen(sheet, box.top + Math.min(yInLine, box.height - 1))
   const edges = textEdges(line)
   const clampedX = Math.min(edges.right - 0.5, Math.max(edges.left, x))
   return Option.match(pointAt(clampedX, row), {
     onNone: () => stay(0),
-    onSome: found => ({ landing: landAt(found, row), aim: 0 }),
+    onSome: found => ({ landing: landAt(found, row), aimFromTextLeft: 0 }),
   })
 }
 
@@ -565,10 +583,10 @@ const pageDistance = (sheet: Sheet): number =>
 
 const answer = (sheet: Sheet, query: Query): Answer =>
   Query.match(query, {
-    Point: ({ x, line, y }) =>
+    Point: ({ x, line, yInLine }) =>
       Option.match(lineElement(sheet.surface, line), {
         onNone: () => stay(0),
-        onSome: element => pointAnswer(sheet, element, x, y),
+        onSome: element => pointAnswer(sheet, element, x, yInLine),
       }),
     Step: ({ at: from, direction }) =>
       Option.match(lineElement(sheet.surface, from.line), {
@@ -592,16 +610,16 @@ const answer = (sheet: Sheet, query: Query): Answer =>
         onNone: () => stay(0),
         onSome: line => rowEdgeAnswer(line, from.column, atRowEnd, edge),
       }),
-    Vertical: ({ at: from, atRowEnd, rows, goal }) =>
+    Vertical: ({ at: from, atRowEnd, rows, goalX }) =>
       Option.match(lineElement(sheet.surface, from.line), {
-        onNone: () => stay(Option.getOrElse(goal, () => 0)),
+        onNone: () => stay(Option.getOrElse(goalX, () => 0)),
         onSome: line =>
           verticalAnswer(
             sheet,
             line,
             { column: from.column, atRowEnd },
             rows * sheet.rowHeight,
-            goal,
+            goalX,
             'Row',
           ),
       }),
@@ -946,7 +964,7 @@ export const surface = (
       h.OnMount(SurfacePort()),
     ],
     [
-      spacer(frame.above, h),
+      spacer(frame.undrawnAbove, h),
       ...Array.map(frame.lines, line =>
         lazyLine(line.id, lineView, [
           line.id,
@@ -957,7 +975,7 @@ export const surface = (
           h,
         ]),
       ),
-      spacer(frame.below, h),
+      spacer(frame.undrawnBelow, h),
       h.div([h.Id('caret'), h.Class('cur'), h.AriaHidden(true)]),
     ],
   )

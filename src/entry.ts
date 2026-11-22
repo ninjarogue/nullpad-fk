@@ -1,9 +1,11 @@
+import { Effect } from 'effect'
 import { Runtime } from 'foldkit'
 
-import { Message, Model, init, update, view } from './main'
+import { Flags, Message, Model, flagsOf, init, update, view } from './main'
 
 const application = Runtime.makeApplication({
   Model,
+  Flags,
   init,
   update,
   view,
@@ -13,4 +15,6 @@ const application = Runtime.makeApplication({
   },
 })
 
-Runtime.run(application)
+Runtime.run(application, {
+  flags: Effect.sync(() => flagsOf(window.location.search)),
+})

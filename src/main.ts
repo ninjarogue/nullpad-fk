@@ -65,6 +65,7 @@ const OpenNote = Schema.Struct({
   id: Notes.NoteId,
   folder: Schema.String,
   revision: Schema.Int,
+  savedText: Schema.String,
   savedEdits: Schema.Int,
   save: SaveState,
 })
@@ -103,6 +104,7 @@ const show = (
       id: note.id,
       folder: note.folder,
       revision: note.revision,
+      savedText: text,
       savedEdits: model.edits,
       save: SaveState.cases.Idle.make({}),
     }),
@@ -176,6 +178,21 @@ const RemoveNote = Command.define('RemoveNote', {
       ),
       Effect.orElseSucceed(() =>
         Message.CompletedRemoveNote({ isStoreAvailable: false }),
+      ),
+    ),
+})
+
+const ReadStoredNote = Command.define('ReadStoredNote', {
+  args: { id: Notes.NoteId },
+  messages: [Message.CompletedReadStoredNote],
+  execute: ({ id }) =>
+    Effect.gen(function* () {
+      const store = yield* Storage.NoteStore
+      const maybeNote = yield* store.read(id)
+      return Message.CompletedReadStoredNote({ id, maybeNote })
+    }).pipe(
+      Effect.orElseSucceed(() =>
+        Message.CompletedReadStoredNote({ id, maybeNote: Option.none() }),
       ),
     ),
 })
@@ -436,11 +453,24 @@ const changedId = (change: Storage.NoteChange): Notes.NoteId =>
     Removed: ({ id }) => id,
   })
 
+const adoptStored = (model: Model, note: Notes.Note): Model =>
+  modifyFields(model, {
+    note: open =>
+      modifyFields(open, {
+        folder: () => note.folder,
+        revision: () => note.revision,
+        save: () => SaveState.cases.Idle.make({}),
+      }),
+  })
+
 const applyChange = (model: Model, change: Storage.NoteChange): UpdateReturn =>
   Storage.NoteChange.match(change, {
     Saved: ({ note }) => {
       if (note.id !== model.note.id || note.revision <= model.note.revision) {
         return { model }
+      }
+      if (note.text === model.note.savedText) {
+        return saveIfDirty(adoptStored(model, note))
       }
       return isDirty(model)
         ? conflictCopy(model)
@@ -504,6 +534,7 @@ const confirmSave = (model: Model, note: Notes.Note): UpdateReturn => {
     note: open =>
       modifyFields(open, {
         revision: () => note.revision,
+        savedText: () => note.text,
         save: () => SaveState.cases.Idle.make({}),
       }),
     store: () => 'Saving',
@@ -659,6 +690,7 @@ export const init: Runtime.ApplicationInit<
       id: Notes.NoteId.make(`${seed}-0`),
       folder: '',
       revision: 0,
+      savedText: '',
       savedEdits: 0,
       save: SaveState.cases.Idle.make({}),
     },
@@ -737,7 +769,7 @@ export const update = (model: Model, message: Message) =>
         return isEdit ? copyLeftNote(noted, draft) : { model: noted }
       }
       return reason === 'Conflict'
-        ? conflictCopy(noted)
+        ? { model: noted, commands: [ReadStoredNote({ id: draft.id })] }
         : {
             model: modifyFields(noted, {
               note: open =>
@@ -747,6 +779,25 @@ export const update = (model: Model, message: Message) =>
                 }),
             }),
           }
+    },
+    CompletedReadStoredNote: ({ id, maybeNote }) => {
+      if (id !== model.note.id) {
+        return { model }
+      }
+      const failed = modifyFields(model, {
+        note: open =>
+          modifyFields(open, {
+            savedEdits: () => -1,
+            save: () => SaveState.cases.Idle.make({}),
+          }),
+      })
+      return Option.match(
+        Option.filter(maybeNote, ({ text }) => text === model.note.savedText),
+        {
+          onNone: () => conflictCopy(failed),
+          onSome: note => saveNow(adoptStored(failed, note)),
+        },
+      )
     },
     CompletedRemoveNote: ({ isStoreAvailable }) => ({
       model: isStoreAvailable

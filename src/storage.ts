@@ -225,19 +225,39 @@ const makeNoteStore = Effect.gen(function* () {
     yield* broadcast(NoteChange.cases.Removed.make({ id }))
   })
 
+  const read = (
+    id: NoteId,
+  ): Effect.Effect<Option.Option<Note>, StorageUnavailable> =>
+    Effect.flatMap(begin('readonly'), transaction =>
+      Effect.callback<Option.Option<Note>, StorageUnavailable>(resume => {
+        const outcome = { isSettled: false }
+        const request = transaction.objectStore(storeName).get(id)
+        request.addEventListener('success', () =>
+          settle(outcome, resume, Effect.succeed(decodeNote(request.result))),
+        )
+        request.addEventListener('error', () =>
+          settle(outcome, resume, Effect.fail(unavailable(request.error))),
+        )
+        return abortUnlessSettled(transaction, outcome)
+      }),
+    )
+
   const changes: Stream.Stream<NoteChange> = Dom.streamFromEventFilterMap({
     target: channel,
     type: 'message',
     filterMapEvent: event => decodeChange(event.data),
   })
 
-  return NoteStore.of({ list, write, remove, changes })
+  return NoteStore.of({ list, read, write, remove, changes })
 })
 
 export class NoteStore extends Context.Service<
   NoteStore,
   {
     readonly list: Effect.Effect<ReadonlyArray<Note>, StorageUnavailable>
+    readonly read: (
+      id: NoteId,
+    ) => Effect.Effect<Option.Option<Note>, StorageUnavailable>
     readonly write: (
       draft: Draft,
       expectedRevision: number,

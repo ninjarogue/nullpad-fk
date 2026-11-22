@@ -3,7 +3,7 @@ import { defineMessageUnion } from 'foldkit/message'
 
 import { Answer } from './core/editor'
 import { Input } from './core/input'
-import { Note } from './core/notes'
+import { Note, NoteId } from './core/notes'
 import { Draft, NoteChange } from './storage'
 
 export const Message = defineMessageUnion({
@@ -25,6 +25,7 @@ export const Message = defineMessageUnion({
     reason: Schema.Literals(['Conflict', 'Unavailable']),
   },
   CompletedRemoveNote: { isStoreAvailable: Schema.Boolean },
+  CompletedReadStoredNote: { id: NoteId, maybeNote: Schema.Option(Note) },
   CompletedRequestPersistence: {},
   CompletedReadClock: { now: Schema.Finite },
   CompletedRevealFinderRow: {},

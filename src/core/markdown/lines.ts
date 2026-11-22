@@ -27,8 +27,7 @@ export const matchAt = (
 export const endAt = (pattern: RegExp, text: string, offset: number): number =>
   offset + (matchAt(pattern, text, offset)?.[0].length ?? 0)
 
-/** The spec replaces U+0000 with U+FFFD (section 2.3). Both are one UTF-16 unit, so columns stay. */
-export const textOf = (line: SourceLine): string =>
+export const withNulReplaced = (line: SourceLine): string =>
   line.text.includes('\u0000')
     ? line.text.replaceAll('\u0000', '\uFFFD')
     : line.text

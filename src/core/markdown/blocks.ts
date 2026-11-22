@@ -12,8 +12,8 @@ import {
   pastMarker,
   skipColumns,
   start,
-  textOf,
   toNonspace,
+  withNulReplaced,
 } from './lines'
 import * as Stack from './stack'
 import * as Starts from './starts'
@@ -616,7 +616,7 @@ const readLine = (state: BlockState, text: string): Split => {
 }
 
 export const step = (state: BlockState, line: SourceLine): BlockState => {
-  const text = textOf(line)
+  const text = withNulReplaced(line)
   const { closed, open } = readLine(state, text)
   return {
     closed,

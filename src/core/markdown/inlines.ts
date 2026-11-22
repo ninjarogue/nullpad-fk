@@ -199,7 +199,6 @@ const ampersand: Place = (reading, state, { at }) => {
   })
 }
 
-/** Spec section 6.1: line endings in a code span become spaces, then one space comes off each end when both ends have one and the content is not all spaces. */
 const codeOf = (source: string): string => {
   const spaced = source.replaceAll('\n', ' ')
   return spaced.startsWith(' ') && spaced.endsWith(' ') && /[^ ]/.test(spaced)

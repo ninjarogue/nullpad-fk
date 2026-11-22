@@ -2,7 +2,7 @@ import { Array, Option } from 'effect'
 
 import * as Blocks from './markdown/blocks'
 import * as Inlines from './markdown/inlines'
-import { textOf } from './markdown/lines'
+import { withNulReplaced } from './markdown/lines'
 import type {
   Definition,
   Document,
@@ -61,7 +61,7 @@ export const parse = (lines: ReadonlyArray<SourceLine>): Document => {
           lineInSection =>
             Option.match(Array.get(lines, firstLine + lineInSection), {
               onNone: () => '',
-              onSome: textOf,
+              onSome: withNulReplaced,
             }),
           key => Option.fromUndefinedOr(definitions.get(key)),
         ),

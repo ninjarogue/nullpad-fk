@@ -11,7 +11,7 @@ import type {
   SourceLine,
 } from './markdown/tree'
 
-export { toHtml } from './markdown/html'
+export { outline, toHtml } from './markdown/html'
 export { deepestNesting, positionOf } from './markdown/tree'
 export type {
   Block,
@@ -70,13 +70,3 @@ export const parse = (lines: ReadonlyArray<SourceLine>): Document => {
   )
   return { lines, sections, definitions }
 }
-
-export const outline = (document: Document): string =>
-  Array.join(
-    Array.map(
-      document.lines,
-      (line, index) =>
-        `Paragraph ${index + 1}:0-${index + 1}:${line.text.length}`,
-    ),
-    '\n',
-  )

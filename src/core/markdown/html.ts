@@ -1,7 +1,17 @@
 import { Array, Option } from 'effect'
 
 import * as Stack from './stack'
-import type { Block, Document, Inline, Item, List, Phrasing } from './tree'
+import {
+  type Block,
+  type Document,
+  type Inline,
+  type Item,
+  type List,
+  type Phrasing,
+  type Placed,
+  type Point,
+  positionOf,
+} from './tree'
 
 type Written = Stack.Stack<string>
 
@@ -224,4 +234,60 @@ export const toHtml = (document: Document): string =>
       ),
     ),
     '',
+  )
+
+type Node = Block | Item<Phrasing> | Inline
+
+const shownOf = (node: Node): Option.Option<string> => {
+  if (
+    node._tag === 'Link' ||
+    node._tag === 'Image' ||
+    node._tag === 'Definition'
+  ) {
+    return Option.some(node.destination)
+  }
+  return 'text' in node ? Option.some(node.text) : Option.none()
+}
+
+const childrenOf = (node: Node): ReadonlyArray<Node> => {
+  if (node._tag === 'Paragraph' || node._tag === 'Heading') {
+    return node.content.inlines
+  }
+  if (node._tag === 'List') {
+    return node.items
+  }
+  return 'children' in node ? node.children : []
+}
+
+const placeOf = (placed: Placed, point: Point): string => {
+  const { line, column } = positionOf(placed, point)
+  return `${line + 1}:${column}`
+}
+
+const rowOf = (placed: Placed, depth: number, node: Node): string =>
+  `${'  '.repeat(depth)}${node._tag} ${placeOf(placed, node.span.from)}-${placeOf(placed, node.span.to)}${Option.match(
+    shownOf(node),
+    { onNone: () => '', onSome: shown => ` ${JSON.stringify(shown)}` },
+  )}`
+
+const rowsOf =
+  (placed: Placed, depth: number) =>
+  (rows: Stack.Stack<string>, node: Node): Stack.Stack<string> =>
+    Array.reduce(
+      childrenOf(node),
+      Stack.push(rows, rowOf(placed, depth, node)),
+      rowsOf(placed, depth + 1),
+    )
+
+export const outline = (document: Document): string =>
+  Array.join(
+    Stack.toArray(
+      Array.reduce(
+        document.sections,
+        Stack.empty,
+        (rows: Stack.Stack<string>, placed) =>
+          Array.reduce(placed.section.blocks, rows, rowsOf(placed, 0)),
+      ),
+    ),
+    '\n',
   )

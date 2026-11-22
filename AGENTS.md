@@ -23,6 +23,42 @@ The editor types like a browser text box because the browser makes the decisions
 - A new key binding goes in `plainKeys` in `src/core/editor.ts`.
 - `script()` in `src/core/input.ts` and `Editor.dump` run the editor without a browser for keys that need no layout, and print the drawn lines as text. Bundle a file that calls them with `pnpm dlx rolldown@1.2.19 <file>.ts --platform node -o <file>.mjs`, then run it with `node`.
 
+## Markdown
+
+The parser is written for nullpad, uses no library and follows CommonMark 0.31.2. It reads a note's lines and returns a tree in which every node knows its place in the note. Nothing draws the tree yet, so the default screen is the editor alone.
+
+- `src/core/markdown.ts` is the whole public surface: `parse(lines)`, `toHtml(document)`, `outline(document)`, `positionOf(placed, point)` and the tree's types. The parts live under `src/core/markdown/`.
+- A `Document` holds `lines`, `sections` and `definitions`. A section is one top-level block and the blank lines after it, so it holds whole lines. A place in a section is a `Point`: `lineInSection` and a UTF-16 `column`. `positionOf` is the one function that adds the section's first line. Every node has a half-open `span`. A paragraph or a heading keeps one slice per line.
+- `parse` makes two passes. The block pass in `blocks.ts` folds over the lines with an immutable state and returns the sections. The inline pass in `inlines.ts` then reads each paragraph and heading: tokens, a delimiter stack for emphasis in `emphasis.ts`, and a bracket stack for links. A link reference definition is a block in the tree, and `toHtml` leaves it out.
+- The parser has no `for`, no `while` and no `let`. A walk whose length follows the note is a fold or a regex, and no regex nests one quantifier in another. Recursion stops at `deepestNesting`, so parsing time grows in line with the note.
+- `deepestNesting` is 100. It counts the levels of the tree: a block quote, a list and a list item are one level each, and so are emphasis, strong emphasis, a link and an image. A marker that would open level 101 stays text.
+- `toHtml` writes the HTML of the spec's examples, character for character. nullpad draws that string as text and never puts it in the page as markup.
+- `/?pane=html` and `/?pane=outline` draw `Editor.html` or `Editor.outline` as text in a `<pre class="pane">` under the editor. `src/entry.ts` reads the flag once at boot into the Model. The pane is there for tests. Without the flag the page has no pane and the parser does not run.
+
+### Outline
+
+`outline` prints one row per node, in the order of the note. A line feed ends every row but the last.
+
+```
+<two spaces per level><tag> <line>:<column>-<line>:<column>[ <JSON string>]
+```
+
+```
+Paragraph 3:0-4:12
+  Text 3:0-3:4 "see "
+  Emphasis 3:4-3:10
+    Text 3:5-3:9 "this"
+  SoftBreak 3:10-3:10
+  Link 4:0-4:12 "/url"
+    Text 4:1-4:5 "here"
+```
+
+- A top-level block has no indent. A child is one level under its parent.
+- The tag is the node's `_tag`. A block is a `Paragraph`, `Heading`, `ThematicBreak`, `CodeBlock`, `HtmlBlock`, `Definition`, `Quote`, `List` or `Item`. An inline is a `Text`, `Escape`, `Entity`, `SoftBreak`, `HardBreak`, `Code`, `Emphasis`, `Strong`, `Link`, `Image`, `Autolink` or `Html`.
+- The two places are the node's `span`, and the end is half open. The line is the note's line number as the gutter shows it, counted from 1. The column is a UTF-16 offset into that line, counted from 0.
+- A `Text`, `Escape`, `Entity`, `Code`, `Html`, `Autolink`, `CodeBlock` or `HtmlBlock` shows its text as a JSON string. A `Link`, `Image` or `Definition` shows its destination. No other node shows a string.
+- A JSON string holds no raw line feed, and the tag and the places hold no space. So the pane splits into rows at line feeds, and a row without its indent splits into tag, places and string at its first two spaces.
+
 ## Architecture rules
 
 | Rule                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | Checked by                                                                                                 |

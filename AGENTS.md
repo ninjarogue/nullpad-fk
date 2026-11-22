@@ -208,7 +208,7 @@ Each sweep shard and each scout shard reports how many mismatches each accepted 
 
 The planted-bug robot measures the tests. It puts one bug at a time into a copy of the source, builds the copy, and runs the tests on that build. A bug that makes a test fail is caught. A bug that every test passes on is missed. Judge a change to the tests, or to how they run, by this table: the change must not catch fewer bugs.
 
-A bug is one row of a set. `e2e/plant/bugs.json` is the `blind` set, which a separate agent wrote. `e2e/plant/reverts.json` is the `reverts` set, which undoes past fixes.
+A bug is one row of a set. `e2e/plant/bugs.json` is the `blind` set, which a separate agent wrote. `e2e/plant/reverts.json` is the `reverts` set, which undoes past fixes. The `held-out` set lives outside the repo, in `/mnt/project-files/nullpad-plant/held-out.json`, so that whoever writes or trims tests cannot aim them at it.
 
 ```json
 {
@@ -217,15 +217,13 @@ A bug is one row of a set. `e2e/plant/bugs.json` is the `blind` set, which a sep
   "file": "src/core/editor.ts",
   "find": "Tab: editor => now(typeText('  ')(editor)),",
   "replace": "Tab: editor => now(typeText('   ')(editor)),",
-  "see": "Tab types three spaces, not two.",
-  "heldOut": false
+  "see": "Tab types three spaces, not two."
 }
 ```
 
 - `kind` is `timing`, `measure`, `input`, `paint` or `core`.
 - `find` occurs exactly once in `file`, and the robot puts `replace` in its place.
 - `see` says what a person would notice.
-- `heldOut` marks a bug that whoever writes or trims tests does not look at. The totals count held-out bugs apart.
 
 A set that breaks one of these rules stops the run before anything builds, with one line for each fault.
 
@@ -240,6 +238,7 @@ pnpm plant --quick --ready             # with the sweeps that run before a merge
 pnpm plant --quick -- typing -g Tab    # everything after -- goes to playwright test
 pnpm plant --quick --jobs 2            # two builds at once, where the default is one for each core
 pnpm plant --quick --out /tmp/plant-a  # another folder than plant-out/, so that two runs can go at once
+pnpm plant --quick --held-out /mnt/project-files/nullpad-plant/held-out.json  # adds the held-out set, shown as counts
 ```
 
 A run has three steps.
@@ -248,7 +247,19 @@ A run has three steps.
 2. It runs the tests on the build without a bug. If one fails, the run stops there, because a table from tests that fail on their own means nothing.
 3. It runs the tests on one build at a time, each on a free port (`NULLPAD_PORT`), so that no run slows another into a failure.
 
+A run takes `run.lock` in its `--out` folder and refuses to start, with exit 2, while another live run holds it. A lock whose run has died does not block. Every process the run starts carries `NULLPAD_PLANT_RUN` in its environment, and however the run ends (done, failed, an error, Ctrl-C or SIGTERM) it kills every process that carries its mark and every child of one, such as `vite preview` and Chrome. It finds them in `/proc`, so this sweep works on Linux only.
+
+Playwright's `--retries` after `--` stops the run with exit 2. A retry turns a flaky failure into a pass, so a catch could hide and a flake could count as one.
+
 A quick run passes `--max-failures=1` to Playwright, so it says whether a bug is caught and how soon. Only a matrix run says which tests catch a bug.
+
+#### Held-out bugs
+
+The robot runs the held-out set only when `--held-out <file>` names it. It then prints and writes to `catch.json` only how many held-out bugs got each verdict, by kind. It never shows their ids, their `see`, their errors or the units that caught them, and it keeps their builds and reports in its scratch folder, which it deletes. The units' counts in a matrix run leave held-out bugs out. A fault in the held-out file stops the run with the number of faults and no more.
+
+`--reveal` shows held-out bugs like any other. Whoever writes or trims tests, or judges a change to them, never passes `--reveal` and never opens the held-out file. Only whoever keeps that file does, to fix a row or add one.
+
+The held-out rows were in this repo until commit `4c20d83`, so git history still holds them. A held-out set that no one who reads history has seen needs new rows.
 
 #### Verdicts
 
@@ -262,7 +273,7 @@ A quick run passes `--max-failures=1` to Playwright, so it says whether a bug is
 | `build-failed` | `vite build` failed on the copy.                                                                                                                                                       |
 | `run-failed`   | Playwright failed without a failing test, such as when no test matched.                                                                                                                |
 
-The run exits with 0 when every bug is `caught`, `missed` or `boots-dead`, with 1 when the tests fail without a bug or a bug has another verdict, and with 2 on a wrong argument.
+The run exits with 0 when every bug is `caught`, `missed` or `boots-dead`, with 1 when the tests fail without a bug or a bug has another verdict, and with 2 on a wrong argument or an `--out` folder in use.
 
 #### Units
 
@@ -274,11 +285,11 @@ A run prints one line for each bug as it finishes, then three tables.
 
 - Each bug with its verdict, its build time, its run time and the first unit that caught it.
 - In a matrix run, each unit with the number of bugs it catches and the number of bugs that only it catches. Keep a test only if it catches a planted bug that no other test catches.
-- For each set, the bugs caught out of the bugs caught and missed, by kind and by `heldOut`.
+- For each set, and for every set together, the bugs caught out of the bugs caught and missed, by kind, with the `boots-dead` bugs left out of that number beside it.
 
 `plant-out/` holds what the run saw. Git ignores it.
 
-- `catch.json` has the units of the run without a bug with their times, and each bug's verdict, times and failing units.
+- `catch.json` has the units of the run without a bug with their times, each bug's verdict, times and failing units, and under `heldOut` the held-out bugs of each kind and verdict, counted.
 - `baseline/` and `bugs/<id>/` each hold the build in `dist/` and Playwright's `report.json`. To see a bug as a person would, run `node e2e/drive.ts steps.json --dist plant-out/bugs/<id>/dist`.
 
 ## Process

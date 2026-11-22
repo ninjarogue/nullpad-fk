@@ -12,7 +12,7 @@ export type Verdict =
   | Readonly<{ status: 'caught'; ms: number; failed: ReadonlyArray<Ran> }>
   | Readonly<{ status: 'missed'; ms: number }>
 
-export type Planted = Pick<Bug, 'set' | 'id' | 'kind' | 'heldOut'> &
+export type Planted = Pick<Bug, 'set' | 'id' | 'kind'> &
   Readonly<{ buildMs: number | null }> &
   Verdict
 
@@ -22,6 +22,13 @@ export type Catch = Readonly<{
   playwright: ReadonlyArray<string>
   baseline: Readonly<{ ms: number; units: ReadonlyArray<Ran> }>
   bugs: ReadonlyArray<Planted>
+  heldOut: ReadonlyArray<Count>
+}>
+
+export type Count = Readonly<{
+  kind: Bug['kind']
+  status: Planted['status']
+  bugs: number
 }>
 
 export const leavesAHole = (bug: Planted): boolean =>
@@ -88,22 +95,12 @@ const detail = (bug: Planted): string => {
 
 const bugRows = (bugs: ReadonlyArray<Planted>): string =>
   columns([
-    [
-      'verdict',
-      'bug',
-      'set',
-      'kind',
-      'held out',
-      'build s',
-      'run s',
-      'caught by',
-    ],
+    ['verdict', 'bug', 'set', 'kind', 'build s', 'run s', 'caught by'],
     ...bugs.map(bug => [
       bug.status,
       bug.id,
       bug.set,
       bug.kind,
-      bug.heldOut ? 'yes' : 'no',
       seconds(bug.buildMs),
       'ms' in bug ? seconds(bug.ms) : '',
       detail(bug),
@@ -120,51 +117,74 @@ const statuses = [
   'run-failed',
 ] as const satisfies ReadonlyArray<Planted['status']>
 
-const caughtOfJudged = (bugs: ReadonlyArray<Planted>): string => {
-  const caught = bugs.filter(bug => bug.status === 'caught').length
-  const judged = caught + bugs.filter(bug => bug.status === 'missed').length
-  return judged === 0
-    ? '-'
-    : `${caught}/${judged} ${Math.round((100 * caught) / judged)}%`
-}
+export const countsOf = (bugs: ReadonlyArray<Planted>): ReadonlyArray<Count> =>
+  kinds.flatMap(kind =>
+    statuses.flatMap(status => {
+      const of = bugs.filter(
+        bug => bug.kind === kind && bug.status === status,
+      ).length
+      return of === 0 ? [] : [{ kind, status, bugs: of }]
+    }),
+  )
 
-const totalRows = (name: string, bugs: ReadonlyArray<Planted>): string =>
+const sum = (
+  counts: ReadonlyArray<Count>,
+  keep: (count: Count) => boolean,
+): number => counts.filter(keep).reduce((total, count) => total + count.bugs, 0)
+
+type Section = Readonly<{ name: string; counts: ReadonlyArray<Count> }>
+
+const totalRows = ({ name, counts }: Section): string =>
   [
     `${name}: ${statuses
       .map(
-        status =>
-          `${bugs.filter(bug => bug.status === status).length} ${status}`,
+        status => `${sum(counts, count => count.status === status)} ${status}`,
       )
       .join(', ')}`,
     columns([
-      ['caught of caught and missed', 'held out', 'not held out', 'all'],
+      ['', 'caught of caught and missed', 'boots-dead, not in it'],
       ...[
         ...kinds.map(kind => ({
           group: kind,
-          of: bugs.filter(bug => bug.kind === kind),
+          of: counts.filter(count => count.kind === kind),
         })),
-        { group: 'every kind', of: bugs },
+        { group: 'every kind', of: counts },
       ]
         .filter(({ of }) => of.length > 0)
-        .map(({ group, of }) => [
-          group,
-          caughtOfJudged(of.filter(bug => bug.heldOut)),
-          caughtOfJudged(of.filter(bug => !bug.heldOut)),
-          caughtOfJudged(of),
-        ]),
+        .map(({ group, of }) => {
+          const caught = sum(of, count => count.status === 'caught')
+          const judged = caught + sum(of, count => count.status === 'missed')
+          return [
+            group,
+            judged === 0
+              ? '-'
+              : `${caught}/${judged} ${Math.round((100 * caught) / judged)}%`,
+            sum(of, count => count.status === 'boots-dead'),
+          ]
+        }),
     ]),
   ].join('\n')
 
-const totals = (bugs: ReadonlyArray<Planted>): string => {
-  const sets = [...new Set(bugs.map(bug => bug.set))]
+const totals = (caught: Catch): string => {
+  const sections: ReadonlyArray<Section> = [
+    ...[...new Set(caught.bugs.map(bug => bug.set))].map(set => ({
+      name: set,
+      counts: countsOf(caught.bugs.filter(bug => bug.set === set)),
+    })),
+    ...(caught.heldOut.length > 0
+      ? [{ name: 'held-out, counts only', counts: caught.heldOut }]
+      : []),
+  ]
   return [
-    ...sets.map(set =>
-      totalRows(
-        set,
-        bugs.filter(bug => bug.set === set),
-      ),
-    ),
-    ...(sets.length > 1 ? [totalRows('every set', bugs)] : []),
+    ...sections.map(totalRows),
+    ...(sections.length > 1
+      ? [
+          totalRows({
+            name: 'every set',
+            counts: sections.flatMap(({ counts }) => counts),
+          }),
+        ]
+      : []),
   ].join('\n\n')
 }
 
@@ -251,10 +271,16 @@ export const table = (caught: Catch): string =>
     bugRows(caught.bugs),
     '',
     ...(caught.mode === 'matrix'
-      ? [unitRows(caught), '']
+      ? [
+          unitRows(caught),
+          ...(caught.heldOut.length > 0
+            ? ['The units count no held-out bug.']
+            : []),
+          '',
+        ]
       : [
           'A quick run stops a bug at its first failing test, so it does not say which units catch a bug alone. Run --matrix for that.',
           '',
         ]),
-    totals(caught.bugs),
+    totals(caught),
   ].join('\n')

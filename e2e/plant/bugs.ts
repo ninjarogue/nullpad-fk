@@ -20,7 +20,6 @@ const fields: ReadonlyArray<string> = [
   'find',
   'replace',
   'see',
-  'heldOut',
 ]
 
 const staysInside = (file: string): boolean => {
@@ -30,6 +29,7 @@ const staysInside = (file: string): boolean => {
 
 const parseBug = (
   set: string,
+  heldOut: boolean,
   value: unknown,
 ): Readonly<{ bug: Bug; faults: ReadonlyArray<string> }> => {
   const faults: Array<string> = []
@@ -55,7 +55,7 @@ const parseBug = (
     find: text('find'),
     replace: text('replace', true),
     see: text('see'),
-    heldOut: row['heldOut'] === true,
+    heldOut,
   }
   return {
     bug,
@@ -74,19 +74,20 @@ const parseBug = (
       ...(bug.find !== '' && bug.find === bug.replace
         ? ['replace is the same as find']
         : []),
-      ...(typeof row['heldOut'] === 'boolean'
-        ? []
-        : ['heldOut takes true or false']),
     ],
   }
 }
 
-export const parseBugs = (set: string, json: string): ReadonlyArray<Bug> => {
+export const parseBugs = (
+  set: string,
+  heldOut: boolean,
+  json: string,
+): ReadonlyArray<Bug> => {
   const parsed: unknown = JSON.parse(json)
   if (!Array.isArray(parsed) || parsed.length === 0) {
     throw new Error(`${set} is not a JSON list of at least one bug`)
   }
-  const rows = parsed.map(row => parseBug(set, row))
+  const rows = parsed.map(row => parseBug(set, heldOut, row))
   const faults = rows.flatMap(({ bug, faults }, index) =>
     [
       ...faults,

@@ -7,11 +7,12 @@ import {
   readFileSync,
   readdirSync,
   rmSync,
+  unlinkSync,
   symlinkSync,
   writeFileSync,
 } from 'node:fs'
 import { createServer } from 'node:net'
-import { availableParallelism, tmpdir } from 'node:os'
+import { availableParallelism, constants, tmpdir } from 'node:os'
 import { basename, dirname, join, relative, resolve } from 'node:path'
 import { parseArgs, stripVTControlCharacters } from 'node:util'
 
@@ -23,9 +24,11 @@ import {
   type Planted,
   type Ran,
   type Verdict,
+  countsOf,
   leavesAHole,
   table,
 } from './catch.ts'
+import { markThisRun, reapThisRun } from './reap.ts'
 import { type Unit, nameOf, unitsOf } from './unit.ts'
 
 const repo = resolve(import.meta.dirname, '../..')
@@ -38,6 +41,7 @@ type Options = Readonly<{
   ready: boolean
   playwright: ReadonlyArray<string>
   out: string
+  reveal: boolean
 }>
 
 type Suite = Readonly<{
@@ -342,19 +346,67 @@ const playwright = async (
 
 const ran = ({ kind, path, ms }: Unit): Ran => ({ kind, path, ms })
 
+const isAlive = (pid: number): boolean => {
+  try {
+    process.kill(pid, 0)
+  } catch (error) {
+    return error instanceof Error && 'code' in error && error.code === 'EPERM'
+  }
+  try {
+    return readFileSync(`/proc/${pid}/cmdline`, 'utf8').includes('plant/run.ts')
+  } catch {
+    return true
+  }
+}
+
+const lock = (out: string): (() => void) => {
+  mkdirSync(out, { recursive: true })
+  const file = join(out, 'run.lock')
+  const mine = String(process.pid)
+  for (;;) {
+    try {
+      writeFileSync(file, mine, { flag: 'wx' })
+      return () => {
+        if (existsSync(file) && readFileSync(file, 'utf8') === mine) {
+          unlinkSync(file)
+        }
+      }
+    } catch (error) {
+      if (
+        !(error instanceof Error && 'code' in error && error.code === 'EEXIST')
+      ) {
+        throw error
+      }
+    }
+    const holder = Number(readFileSync(file, 'utf8'))
+    if (Number.isInteger(holder) && holder > 0 && isAlive(holder)) {
+      throw new Error(
+        `Run ${holder} is using ${out}. Wait for it to end, or pass --out with another folder.`,
+      )
+    }
+    rmSync(file, { force: true })
+  }
+}
+
 const run = async (options: Options): Promise<number> => {
+  const unlock = lock(options.out)
   const scratch = join(
     tmpdir(),
     `nullpad-plant-${randomBytes(4).toString('hex')}`,
   )
+  markThisRun()
+  process.once('exit', () => {
+    stopChildren()
+    reapThisRun()
+    rmSync(scratch, { recursive: true, force: true })
+    unlock()
+  })
   const owned: { browser: Browser | null } = { browser: null }
   const interrupted = (signal: NodeJS.Signals) => {
-    stopChildren()
-    rmSync(scratch, { recursive: true, force: true })
     console.log(
       `${signal}: stopped, and catch.json holds the bugs judged before it`,
     )
-    process.exit(signal === 'SIGINT' ? 130 : 143)
+    process.exit(128 + constants.signals[signal])
   }
   process.once('SIGINT', interrupted)
   process.once('SIGTERM', interrupted)
@@ -363,10 +415,15 @@ const run = async (options: Options): Promise<number> => {
     for (const stale of ['baseline', 'bugs', 'catch.json']) {
       rmSync(join(options.out, stale), { recursive: true, force: true })
     }
+    const hides = (bug: Bug): boolean => bug.heldOut && !options.reveal
+    const keyOf = (bug: Bug): string =>
+      hides(bug) ? `held-out-${options.bugs.indexOf(bug)}` : bug.id
     const folderOf = (bug: Bug | null): string =>
       bug === null
         ? join(options.out, 'baseline')
-        : join(options.out, 'bugs', bug.id)
+        : hides(bug)
+          ? join(scratch, keyOf(bug))
+          : join(options.out, 'bugs', bug.id)
     const files = sourceFiles()
     const [baselineBuild, ...builds] = await pool(
       options.jobs,
@@ -375,9 +432,7 @@ const run = async (options: Options): Promise<number> => {
         mkdirSync(folderOf(bug), { recursive: true })
         return build(
           files,
-          bug === null
-            ? join(scratch, 'baseline')
-            : join(scratch, 'bugs', bug.id),
+          join(scratch, 'trees', bug === null ? 'baseline' : keyOf(bug)),
           join(folderOf(bug), 'dist'),
           bug,
         )
@@ -459,13 +514,15 @@ const run = async (options: Options): Promise<number> => {
         ? { status: 'missed', ms: result.ms }
         : { status: 'caught', ms: result.ms, failed }
     }
-    const planted: Array<Planted> = []
+    const shown: Array<Planted> = []
+    const hidden: Array<Planted> = []
     const caughtSoFar = (): Catch => ({
       mode: options.mode,
       ready: options.ready,
       playwright: options.playwright,
       baseline: { ms: baseline.ms, units: baseline.units.map(ran) },
-      bugs: planted,
+      bugs: shown,
+      heldOut: countsOf(hidden),
     })
     for (const [index, bug] of options.bugs.entries()) {
       const built = builds[index]
@@ -473,11 +530,10 @@ const run = async (options: Options): Promise<number> => {
         continue
       }
       const verdict = await judge(bug, built)
-      planted.push({
+      ;(hides(bug) ? hidden : shown).push({
         set: bug.set,
         id: bug.id,
         kind: bug.kind,
-        heldOut: bug.heldOut,
         buildMs: built.ms,
         ...verdict,
       })
@@ -486,25 +542,26 @@ const run = async (options: Options): Promise<number> => {
         `${JSON.stringify(caughtSoFar(), null, 2)}\n`,
       )
       console.log(
-        `${index + 1}/${options.bugs.length} ${verdict.status} ${bug.id}${'ms' in verdict ? ` in ${(verdict.ms / 1000).toFixed(1)} s` : ''}`,
+        `${index + 1}/${options.bugs.length} ${verdict.status} ${hides(bug) ? 'a held-out bug' : bug.id}${'ms' in verdict ? ` in ${(verdict.ms / 1000).toFixed(1)} s` : ''}`,
       )
     }
     console.log(
       `\n${table(caughtSoFar())}\n\n${join(options.out, 'catch.json')}`,
     )
-    return planted.some(leavesAHole) ? 1 : 0
+    return [...shown, ...hidden].some(leavesAHole) ? 1 : 0
   } finally {
     await owned.browser?.close()
-    stopChildren()
-    rmSync(scratch, { recursive: true, force: true })
   }
 }
 
 const sets = { blind: 'bugs.json', reverts: 'reverts.json' } as const
 
-const usage = `usage: node e2e/plant/run.ts --quick | --matrix [--set ${Object.keys(sets).join(' | ')} | all | file.json] [--only id,...] [--jobs N] [--ready] [--out dir] [-- playwright arguments]`
+const usage = `usage: node e2e/plant/run.ts --quick | --matrix [--set ${Object.keys(sets).join(' | ')} | all | file.json] [--held-out file.json [--reveal]] [--only id,...] [--jobs N] [--ready] [--out dir] [-- playwright arguments]`
 
-const bugsOf = (set: string): ReadonlyArray<Bug> => {
+const readSet = (name: string, file: string): ReadonlyArray<Bug> =>
+  parseBugs(name, false, readFileSync(file, 'utf8'))
+
+const tracked = (set: string): ReadonlyArray<Bug> => {
   const named = Object.entries(sets).filter(
     ([name]) => set === name || set === 'all',
   )
@@ -513,14 +570,12 @@ const bugsOf = (set: string): ReadonlyArray<Bug> => {
       `--set takes ${Object.keys(sets).join(', ')}, all or a .json file`,
     )
   }
-  const bugs = (
+  const bugs =
     named.length > 0
-      ? named.map(([name, file]) => ({
-          name,
-          file: join(import.meta.dirname, file),
-        }))
-      : [{ name: basename(set, '.json'), file: resolve(set) }]
-  ).flatMap(({ name, file }) => parseBugs(name, readFileSync(file, 'utf8')))
+      ? named.flatMap(([name, file]) =>
+          readSet(name, join(import.meta.dirname, file)),
+        )
+      : readSet(basename(set, '.json'), resolve(set))
   const shared = bugs.filter(
     (bug, index) => bugs.findIndex(other => other.id === bug.id) < index,
   )
@@ -530,6 +585,22 @@ const bugsOf = (set: string): ReadonlyArray<Bug> => {
     )
   }
   return bugs
+}
+
+const heldOut = (file: string, reveal: boolean): ReadonlyArray<Bug> => {
+  const conceal = (message: string): never => {
+    throw new Error(
+      reveal
+        ? message
+        : `The held-out file fails its checks in ${message.split('\n').length} places. Whoever keeps that file passes --reveal to see them.`,
+    )
+  }
+  const json = readFileSync(resolve(file), 'utf8')
+  try {
+    return parseBugs('held-out', true, json)
+  } catch (error) {
+    return conceal(error instanceof Error ? error.message : String(error))
+  }
 }
 
 const main = async (): Promise<number> => {
@@ -543,17 +614,42 @@ const main = async (): Promise<number> => {
       jobs: { type: 'string', default: String(availableParallelism()) },
       ready: { type: 'boolean', default: false },
       out: { type: 'string', default: join(repo, 'plant-out') },
+      'held-out': { type: 'string' },
+      reveal: { type: 'boolean', default: false },
     },
   })
   if (values.quick === values.matrix) {
     console.error(usage)
     return 2
   }
+  if (values.reveal && values['held-out'] === undefined) {
+    throw new Error('--reveal shows held-out bugs, so it needs --held-out')
+  }
+  if (positionals.some(arg => /^--retries(=|$)/u.test(arg))) {
+    throw new Error(
+      'Playwright retries are off in a planted-bug run: a retry turns a flaky failure into a pass, so a catch could hide and a flake could count as one.',
+    )
+  }
   const jobs = Number(values.jobs)
   if (!Number.isInteger(jobs) || jobs < 1) {
     throw new Error('--jobs takes a whole number above 0')
   }
-  const every = bugsOf(values.set)
+  const kept = tracked(values.set)
+  const hidden =
+    values['held-out'] === undefined
+      ? []
+      : heldOut(values['held-out'], values.reveal)
+  if (hidden.some(bug => kept.some(other => other.id === bug.id))) {
+    throw new Error(
+      values.reveal
+        ? `a held-out bug shares its id with a tracked bug: ${hidden
+            .filter(bug => kept.some(other => other.id === bug.id))
+            .map(bug => bug.id)
+            .join(', ')}`
+        : 'a held-out bug shares its id with a tracked bug. Whoever keeps the held-out file passes --reveal to see which.',
+    )
+  }
+  const every = [...kept, ...hidden]
   const only = values.only?.split(',') ?? every.map(bug => bug.id)
   const unknown = only.filter(id => !every.some(bug => bug.id === id))
   if (unknown.length > 0) {
@@ -566,6 +662,7 @@ const main = async (): Promise<number> => {
     ready: values.ready,
     playwright: positionals,
     out: resolve(values.out),
+    reveal: values.reveal,
   })
 }
 

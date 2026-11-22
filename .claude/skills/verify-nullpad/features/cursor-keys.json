@@ -1,0 +1,200 @@
+[
+  {
+    "paste": "foo bar baz\nab\nlonger line"
+  },
+  {
+    "expect": {
+      "status": "3:12 3L"
+    }
+  },
+  {
+    "press": "ArrowUp"
+  },
+  {
+    "expect": {
+      "status": "2:3 3L"
+    }
+  },
+  {
+    "press": "ArrowUp"
+  },
+  {
+    "expect": {
+      "status": "1:12 3L"
+    }
+  },
+  {
+    "press": "Home"
+  },
+  {
+    "expect": {
+      "status": "1:1 3L",
+      "under": "f"
+    }
+  },
+  {
+    "press": "End"
+  },
+  {
+    "expect": {
+      "status": "1:12 3L",
+      "under": " "
+    }
+  },
+  {
+    "press": "Home"
+  },
+  {
+    "press": "Control+ArrowRight"
+  },
+  {
+    "expect": {
+      "status": "1:4 3L"
+    }
+  },
+  {
+    "press": "Control+ArrowRight"
+  },
+  {
+    "expect": {
+      "status": "1:8 3L"
+    }
+  },
+  {
+    "press": "Control+ArrowLeft"
+  },
+  {
+    "expect": {
+      "status": "1:5 3L",
+      "under": "b"
+    }
+  },
+  {
+    "press": "Control+End"
+  },
+  {
+    "expect": {
+      "status": "3:12 3L"
+    }
+  },
+  {
+    "press": "Home"
+  },
+  {
+    "press": "ArrowDown"
+  },
+  {
+    "expect": {
+      "status": "3:12 3L"
+    }
+  },
+  {
+    "press": "Control+Home"
+  },
+  {
+    "press": "ArrowUp"
+  },
+  {
+    "expect": {
+      "status": "1:1 3L"
+    }
+  },
+  {
+    "press": "Control+a"
+  },
+  {
+    "expect": {
+      "status": "1:1 3L"
+    }
+  },
+  {
+    "resize": {
+      "width": 400,
+      "height": 600
+    }
+  },
+  {
+    "press": "Control+a"
+  },
+  {
+    "press": "Control+End"
+  },
+  {
+    "paste": "\nlorem ipsum dolor sit amet consectetur lorem ipsum dolor sit amet consectetur lorem ipsum dolor sit amet consectetur lorem ipsum dolor sit amet consectetur"
+  },
+  {
+    "expect": {
+      "status": "4:156 4L"
+    }
+  },
+  {
+    "press": "Home"
+  },
+  {
+    "expect": {
+      "status": "4:130 4L",
+      "under": "d"
+    }
+  },
+  {
+    "press": "ArrowUp"
+  },
+  {
+    "expect": {
+      "status": "4:97 4L",
+      "under": "s"
+    }
+  },
+  {
+    "press": "End"
+  },
+  {
+    "expect": {
+      "status": "4:130 4L",
+      "under": " "
+    }
+  },
+  {
+    "resize": {
+      "width": 1000,
+      "height": 600
+    }
+  },
+  {
+    "press": "Control+End"
+  },
+  {
+    "paste": "\nn5\nn6\nn7\nn8\nn9\nn10\nn11\nn12\nn13\nn14\nn15\nn16\nn17\nn18\nn19\nn20\nn21\nn22\nn23\nn24\nn25\nn26\nn27\nn28\nn29\nn30\nn31\nn32\nn33\nn34\nn35\nn36\nn37\nn38\nn39\nn40\nn41\nn42\nn43\nn44\nn45\nn46\nn47\nn48\nn49\nn50\nn51\nn52\nn53\nn54\nn55\nn56\nn57\nn58\nn59\nn60"
+  },
+  {
+    "press": "Control+Home"
+  },
+  {
+    "press": "PageDown"
+  },
+  {
+    "expect": {
+      "status": "21:1 60L",
+      "under": "n",
+      "top": "21"
+    }
+  },
+  {
+    "press": "PageDown"
+  },
+  {
+    "expect": {
+      "status": "43:1 60L",
+      "top": "36"
+    }
+  },
+  {
+    "press": "PageUp"
+  },
+  {
+    "expect": {
+      "status": "21:1 60L",
+      "top": "21"
+    }
+  }
+]

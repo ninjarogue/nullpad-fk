@@ -1,0 +1,78 @@
+[
+  {
+    "paste": "hello world\nsecond"
+  },
+  {
+    "click": {
+      "row": 0,
+      "cell": 6
+    }
+  },
+  {
+    "expect": {
+      "status": "1:7 2L",
+      "under": "w"
+    }
+  },
+  {
+    "click": {
+      "row": 1,
+      "cell": 40
+    }
+  },
+  {
+    "expect": {
+      "status": "2:7 2L"
+    }
+  },
+  {
+    "press": "Control+Home"
+  },
+  {
+    "click": {
+      "x": 500,
+      "y": 500
+    }
+  },
+  {
+    "expect": {
+      "status": "2:7 2L"
+    }
+  },
+  {
+    "resize": {
+      "width": 400,
+      "height": 600
+    }
+  },
+  {
+    "press": "Control+End"
+  },
+  {
+    "paste": "\nlorem ipsum dolor sit amet consectetur lorem ipsum dolor sit amet consectetur lorem ipsum dolor sit amet consectetur lorem ipsum dolor sit amet consectetur"
+  },
+  {
+    "click": {
+      "row": 3,
+      "cell": 2
+    }
+  },
+  {
+    "expect": {
+      "status": "3:30 3L",
+      "under": "n"
+    }
+  },
+  {
+    "click": {
+      "row": 4,
+      "cell": 0
+    }
+  },
+  {
+    "expect": {
+      "status": "3:62 3L",
+      "under": "a"
+    }
+  }
+]

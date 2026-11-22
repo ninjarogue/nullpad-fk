@@ -15,7 +15,7 @@ export type Sweep = Readonly<{
   runs: 'every push' | 'before a merge'
   documents: ReadonlyArray<Readonly<{ name: string; setup: Script }>>
   placements: ReadonlyArray<
-    Readonly<{ name: string; keys: Script; moves: ReadonlyArray<Script> }>
+    Readonly<{ name: string; steps: Script; moves: ReadonlyArray<Script> }>
   >
 }>
 
@@ -24,7 +24,7 @@ export type Row = Readonly<{
   placement: string
   move: Script
   script: Script
-  from: number
+  compareFrom: number
 }>
 
 export const rowsOf = (sweep: Sweep): ReadonlyArray<Row> =>
@@ -34,8 +34,8 @@ export const rowsOf = (sweep: Sweep): ReadonlyArray<Row> =>
         document: document.name,
         placement: placement.name,
         move,
-        script: [...document.setup, ...placement.keys, ...move],
-        from: document.setup.length + placement.keys.length - 1,
+        script: [...document.setup, ...placement.steps, ...move],
+        compareFrom: document.setup.length + placement.steps.length - 1,
       })),
     ),
   )
@@ -110,19 +110,19 @@ const verticalMoves: ReadonlyArray<Script> = upOrDown.flatMap(first =>
 )
 
 const verticalPlacements: Sweep['placements'] = [
-  { name: 'at the end', keys: [] },
-  { name: 'at the start', keys: [key('Control+Home')] },
-  { name: 'at the start of the last row', keys: [key('Home')] },
+  { name: 'at the end', steps: [] },
+  { name: 'at the start', steps: [key('Control+Home')] },
+  { name: 'at the start of the last row', steps: [key('Home')] },
   {
     name: 'at the end of the first row',
-    keys: [key('Control+Home'), key('End')],
+    steps: [key('Control+Home'), key('End')],
   },
   {
     name: 'five letters in',
-    keys: [key('Control+Home'), ...times(5, key('ArrowRight'))],
+    steps: [key('Control+Home'), ...times(5, key('ArrowRight'))],
   },
-  { name: 'three letters before the end', keys: times(3, key('ArrowLeft')) },
-  { name: 'one row up from the end', keys: [key('ArrowUp')] },
+  { name: 'three letters before the end', steps: times(3, key('ArrowLeft')) },
+  { name: 'one row up from the end', steps: [key('ArrowUp')] },
 ].map(placement => ({ ...placement, moves: verticalMoves }))
 
 const letters: ReadonlyArray<Readonly<{ name: string; text: string }>> = [
@@ -216,17 +216,17 @@ const thenY = (...names: ReadonlyArray<TypistKey>): ReadonlyArray<Script> =>
 const letterPlacements: Sweep['placements'] = [
   {
     name: 'at the end',
-    keys: [key('End')],
+    steps: [key('End')],
     moves: thenY('Backspace', 'ArrowLeft'),
   },
   {
     name: 'at the start',
-    keys: [key('Home')],
+    steps: [key('Home')],
     moves: thenY('Delete', 'ArrowRight'),
   },
   {
     name: 'one Right from the start',
-    keys: [key('Home'), key('ArrowRight')],
+    steps: [key('Home'), key('ArrowRight')],
     moves: thenY('Backspace', 'Delete'),
   },
 ]
@@ -258,7 +258,7 @@ export const sweeps: ReadonlyArray<Sweep> = [
       ...letterPlacements,
       {
         name: 'where the build left the cursor',
-        keys: [],
+        steps: [],
         moves: thenY('Backspace', 'Delete', 'ArrowLeft', 'ArrowRight'),
       },
     ],

@@ -86,8 +86,8 @@ export const update = (model: Model, message: Message) =>
   Message.match<Update.Return<Model, Message>>(message, {
     ReceivedInput: ({ input }) =>
       respond(model, Editor.feed(model.editor, input)),
-    ClickedText: ({ x, line, y }) =>
-      respond(model, Editor.click(model.editor, x, line, y)),
+    ClickedText: ({ x, line, yInLine }) =>
+      respond(model, Editor.click(model.editor, x, line, yInLine)),
     CompletedLocate: ({ answer }) =>
       respond(model, Editor.located(model.editor, answer)),
     ScrolledSurface: ({ top }) => ({

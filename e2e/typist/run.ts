@@ -251,12 +251,14 @@ const editContextBackspace = async (
  * The textarea keeps its own Backspace where the two agree, so its column for Up and Down survives; where the
  * EditContext takes more, the rest goes as a selection.
  */
+type JudgedPiece = string
+
 const backspaceAsEditContext = async (
   pair: Pair,
-): Promise<string | undefined> => {
+): Promise<JudgedPiece | undefined> => {
   const { value, caret } = await textareaCaret(pair.textarea)
   const piece = await pieceBefore(pair.textareaDom, value, caret)
-  const judged = value.slice(piece.start, piece.end)
+  const judgedPiece = value.slice(piece.start, piece.end)
   const [letter] = await Promise.all([
     piece.start === caret
       ? Promise.resolve(undefined)
@@ -278,7 +280,7 @@ const backspaceAsEditContext = async (
   const leftInLetter = taken.length - head.length - tail.length
   if (!taken.startsWith(head) || !taken.endsWith(tail) || leftInLetter < 0) {
     if (acceptedDifference([value]) !== undefined) {
-      return judged
+      return judgedPiece
     }
     throw new Error(
       `Backspace turned ${JSON.stringify(value)} into ${JSON.stringify(taken)} in the textarea, outside the letter the EditContext took from ${from} to ${to}`,
@@ -292,7 +294,7 @@ const backspaceAsEditContext = async (
     )
     await pair.textarea.keyboard.press('Backspace')
   }
-  return judged
+  return judgedPiece
 }
 
 const nullpadSnapshot = async (page: Page): Promise<Snapshot> => {
@@ -335,11 +337,16 @@ const textareaSnapshot = async (
   const lines = caret.text.split('\n')
   return {
     ...caret,
-    rows: lines.some(line => line.length * 3 > columns)
+    rows: lines.some(line => mayWrap(line, columns))
       ? await textareaRowStarts(page, lines, columns, cell)
       : lines.map(() => [0]),
   }
 }
+
+const maxCellsPerUnit = 3
+
+const mayWrap = (line: string, columns: number): boolean =>
+  line.length * maxCellsPerUnit > columns
 
 const same = (a: Snapshot, b: Snapshot) =>
   a.text === b.text &&
@@ -349,7 +356,10 @@ const same = (a: Snapshot, b: Snapshot) =>
     b.rows === undefined ||
     JSON.stringify(a.rows) === JSON.stringify(b.rows))
 
-const applyToTextarea = (pair: Pair, step: Step): Promise<string | undefined> =>
+const applyToTextarea = (
+  pair: Pair,
+  step: Step,
+): Promise<JudgedPiece | undefined> =>
   step.kind === 'key' && step.key === 'Backspace'
     ? backspaceAsEditContext(pair)
     : apply(pair.textarea, step).then(() => undefined)
@@ -357,7 +367,7 @@ const applyToTextarea = (pair: Pair, step: Step): Promise<string | undefined> =>
 export const compare = async (
   pair: Pair,
   script: Script,
-  from = 0,
+  compareFrom = 0,
 ): Promise<Divergence | null> => {
   await Promise.all([
     pair.nullpad.goto('/').then(() => pair.nullpad.locator('#caret').waitFor()),
@@ -369,7 +379,7 @@ export const compare = async (
       }
     }),
   ])
-  const skipped = script.slice(0, from)
+  const skipped = script.slice(0, compareFrom)
   await Promise.all([
     (async () => {
       for (const step of skipped) {
@@ -384,17 +394,17 @@ export const compare = async (
     })(),
   ])
   let before =
-    from === 0
+    compareFrom === 0
       ? ''
       : await pair.textarea.evaluate(
           () => document.querySelector('textarea')?.value ?? '',
         )
-  for (const [offset, step] of script.slice(from).entries()) {
-    const at = from + offset
-    const [nullpad, { judged, textarea }] = await Promise.all([
+  for (const [offset, step] of script.slice(compareFrom).entries()) {
+    const at = compareFrom + offset
+    const [nullpad, { judgedPiece, textarea }] = await Promise.all([
       apply(pair.nullpad, step).then(() => nullpadSnapshot(pair.nullpad)),
-      applyToTextarea(pair, step).then(async judged => ({
-        judged,
+      applyToTextarea(pair, step).then(async judgedPiece => ({
+        judgedPiece,
         textarea: await textareaSnapshot(pair.textarea, pair.measure),
       })),
     ])
@@ -408,7 +418,7 @@ export const compare = async (
         accepted: acceptedDifference([
           before,
           textarea.text,
-          ...(judged === undefined ? [] : [judged]),
+          ...(judgedPiece === undefined ? [] : [judgedPiece]),
         ]),
       }
     }

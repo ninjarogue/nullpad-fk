@@ -6,7 +6,7 @@ import * as Notes from './notes'
 
 export const Mode = Schema.TaggedUnion({
   Find: {},
-  Move: { id: Notes.NoteId },
+  Move: { id: Notes.NoteId, findPrompt: Schema.String },
 })
 export type Mode = typeof Mode.Type
 
@@ -203,6 +203,32 @@ export const enterScope = (finder: Finder, scope: string): Finder =>
 
 const backToFind = (finder: Finder): Finder => enterScope(finder, finder.scope)
 
+const cancelMove = (
+  finder: Finder,
+  notes: ReadonlyArray<Notes.Note>,
+  id: Notes.NoteId,
+  findPrompt: string,
+): Finder => {
+  const restored: Finder = {
+    ...finder,
+    mode: Mode.cases.Find.make({}),
+    prompt: findPrompt,
+    caret: findPrompt.length,
+    preedit: '',
+    selected: 0,
+  }
+  return {
+    ...restored,
+    selected: Option.getOrElse(
+      Array.findFirstIndex(
+        rows(restored, notes),
+        row => row._tag === 'Note' && row.note.id === id,
+      ),
+      () => 0,
+    ),
+  }
+}
+
 const segmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' })
 
 const boundaries = (text: string): ReadonlyArray<number> => [
@@ -371,7 +397,10 @@ const enterMove = (
       onSome: ({ note }) =>
         stay({
           ...finder,
-          mode: Mode.cases.Move.make({ id: note.id }),
+          mode: Mode.cases.Move.make({
+            id: note.id,
+            findPrompt: finder.prompt,
+          }),
           prompt: note.folder,
           caret: note.folder.length,
           preedit: '',
@@ -391,10 +420,11 @@ const keys: Readonly<
     ) => Outcome
   >
 > = {
-  Escape: finder =>
+  Escape: (finder, notes) =>
     Mode.match(finder.mode, {
       Find: () => ({ finder, action: Action.cases.Close.make({}) }),
-      Move: () => stay(backToFind(finder)),
+      Move: ({ id, findPrompt }) =>
+        stay(cancelMove(finder, notes, id, findPrompt)),
     }),
   Enter: (finder, notes) =>
     pick(finder, notes, highlighted(finder, rows(finder, notes).length)),

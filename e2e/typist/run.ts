@@ -1,6 +1,7 @@
 import type { Browser, CDPSession, Page } from '@playwright/test'
 
 import {
+  openFresh,
   rowStartsOf,
   screenOf,
   settle,
@@ -370,7 +371,7 @@ export const compare = async (
   compareFrom = 0,
 ): Promise<Divergence | null> => {
   await Promise.all([
-    pair.nullpad.goto('/').then(() => pair.nullpad.locator('#caret').waitFor()),
+    openFresh(pair.nullpad),
     pair.textarea.evaluate(() => {
       const area = document.querySelector('textarea')
       if (area !== null) {

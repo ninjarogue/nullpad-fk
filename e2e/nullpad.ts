@@ -258,6 +258,23 @@ export const screenOf = async (page: Page): Promise<Screen> => {
   return readScreen(page)
 }
 
+export const openFresh = async (page: Page): Promise<void> => {
+  await page.evaluate(
+    () =>
+      new Promise<void>(done => {
+        try {
+          const request = indexedDB.deleteDatabase('nullpad')
+          request.addEventListener('success', () => done())
+          request.addEventListener('error', () => done())
+        } catch {
+          done()
+        }
+      }),
+  )
+  await page.goto('/')
+  await page.locator('#caret').waitFor()
+}
+
 export const driver = (page: Page, cdp: CDPSession) => {
   const screen = () => screenOf(page)
   return {

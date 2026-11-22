@@ -2,6 +2,7 @@ import {
   type Nullpad,
   expect,
   numberedLines,
+  openFresh,
   screenOf,
   test,
   textOf,
@@ -890,8 +891,7 @@ test('a burst of arrows, Home, End, Delete, Backspace and typing sent while the 
       }),
     )
   }
-  await pair.nullpad.goto('/')
-  await pair.nullpad.locator('#caret').waitFor()
+  await openFresh(pair.nullpad)
   await pair.textarea.evaluate(() =>
     document.querySelector('textarea')?.focus(),
   )
@@ -1055,8 +1055,7 @@ test('a Delete a moment after a big paste and Ctrl+Home lands at the top and lea
   const rounds = 10
   const seen = []
   for (let round = 0; round < rounds; round++) {
-    await nullpad.page.goto('/')
-    await nullpad.page.locator('#caret').waitFor()
+    await openFresh(nullpad.page)
     await nullpad.page.evaluate(
       value => navigator.clipboard.writeText(value),
       lines.join('\n'),

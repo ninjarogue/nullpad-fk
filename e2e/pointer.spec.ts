@@ -5,6 +5,7 @@ import {
   expectNumberedLinesIntact,
   linesOf,
   numberedLines,
+  openFresh,
   test,
 } from './nullpad'
 
@@ -304,8 +305,7 @@ test('a click sent right after typing lands by the text as typed, not by the fra
   nullpad,
 }) => {
   for (let trial = 1; trial <= 5; trial++) {
-    await nullpad.page.reload()
-    await nullpad.page.locator('#caret').waitFor()
+    await openFresh(nullpad.page)
     const screen = await nullpad.screen()
     const left = screen.rows[0]?.left ?? 0
     await nullpad.page.keyboard.type('line one\nline two\n# Heading')

@@ -113,23 +113,25 @@ const atxHeading: BlockStart = reader => {
   })
 }
 
-const openingFence = /`{3,}(?!.*`)|~{3,}/y
+const fenceRun = /`{3,}|~{3,}/y
 
 const fencedCode: BlockStart = reader => {
   const fence = isIndentedCode(reader)
     ? null
-    : matchAt(openingFence, reader.text, reader.nonspace)
-  return fence === null
+    : matchAt(fenceRun, reader.text, reader.nonspace)
+  if (fence === null) {
+    return Option.none()
+  }
+  const { length } = fence[0]
+  const character = fence[0].charAt(0)
+  return character === '`' &&
+    reader.text.includes('`', reader.nonspace + length)
     ? Option.none()
     : Option.some({
         _tag: 'Fence',
         at: reader.nonspace,
-        fence: {
-          character: fence[0].charAt(0),
-          length: fence[0].length,
-          indent: indentOf(reader),
-        },
-        rest: pastMarker(reader, fence[0].length),
+        fence: { character, length, indent: indentOf(reader) },
+        rest: pastMarker(reader, length),
       })
 }
 
@@ -207,7 +209,7 @@ const orderedAt = (reader: Reader, tip: Tip): Option.Option<Marker> => {
     : Option.none()
 }
 
-export const sameList = (a: ListKind, b: ListKind): boolean =>
+const sameList = (a: ListKind, b: ListKind): boolean =>
   a._tag === 'Bullet'
     ? b._tag === 'Bullet' && a.character === b.character
     : b._tag === 'Ordered' && a.delimiter === b.delimiter

@@ -30,12 +30,12 @@ const pastMatch = (
     found => at + found[0].length,
   )
 
-export const openTagEnd = (text: string, at: number): Option.Option<number> =>
+const openTagEnd = (text: string, at: number): Option.Option<number> =>
   Option.flatMap(pastMatch(openTagName, text, at), afterName =>
     pastMatch(openTagClose, text, pastAttributes(text, afterName)),
   )
 
-export const closeTagEnd = (text: string, at: number): Option.Option<number> =>
+const closeTagEnd = (text: string, at: number): Option.Option<number> =>
   pastMatch(closeTag, text, at)
 
 export const tagEnd = (text: string, at: number): Option.Option<number> =>

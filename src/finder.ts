@@ -5,6 +5,11 @@ import * as Finder from './core/finder'
 import * as Notes from './core/notes'
 import { Message } from './message'
 
+export const finderBounds = {
+  control: '.finder .prompt',
+  selection: '.finder .fcur',
+}
+
 const previewLines = 40
 
 const segmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' })
@@ -69,7 +74,12 @@ const promptLine = (finder: Finder.Finder, h: HtmlBuilder<Message>): Html => {
       before,
       ...(finder.preedit === ''
         ? []
-        : [h.span([h.Class('pre')], [finder.preedit])]),
+        : [
+            h.span(
+              [h.Class('pre'), h.DataAttribute('ghost', '')],
+              [finder.preedit],
+            ),
+          ]),
       h.span([h.Class('fcur')], [after[0] ?? ' ']),
       Array.join(after.slice(1), ''),
       ...placeholder,

@@ -10,8 +10,13 @@ import * as Editor from './core/editor'
 import * as Finder from './core/finder'
 import type { Input } from './core/input'
 import * as Notes from './core/notes'
-import { finder } from './finder'
-import { Keyboard, browserUnsupportedNotice, keyboardPort } from './keyboard'
+import { finder, finderBounds } from './finder'
+import {
+  type Bounds,
+  Keyboard,
+  browserUnsupportedNotice,
+  keyboardPort,
+} from './keyboard'
 import { Message } from './message'
 import * as Storage from './storage'
 import { locate, revealCaret, statusLine, surface } from './surface'
@@ -643,6 +648,8 @@ export const subscriptions = Subscription.make<Model, Message>()(() => ({
   ),
 }))
 
+const editorBounds: Bounds = { control: '.surface', selection: '#caret' }
+
 export const view = (model: Model, h: HtmlBuilder<Message>): Document => {
   const frame = Editor.paint(model.editor)
   const title = Editor.title(model.editor)
@@ -674,6 +681,7 @@ export const view = (model: Model, h: HtmlBuilder<Message>): Document => {
             onNone: () => frame.surrounding,
             onSome: Finder.surrounding,
           }),
+          Option.isSome(model.finder) ? finderBounds : editorBounds,
           model.keyboard,
           h,
         ),

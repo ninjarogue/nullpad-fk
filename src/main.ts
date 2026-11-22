@@ -59,7 +59,8 @@ export const update = (model: Model, message: Message) =>
   Message.match<Update.Return<Model, Message>>(message, {
     ReceivedInput: ({ input }) =>
       respond(model, Editor.feed(model.editor, input)),
-    ClickedText: ({ x, y }) => respond(model, Editor.click(model.editor, x, y)),
+    ClickedText: ({ x, line, y }) =>
+      respond(model, Editor.click(model.editor, x, line, y)),
     CompletedLocate: ({ answer }) =>
       respond(model, Editor.located(model.editor, answer)),
     ScrolledSurface: ({ top }) => ({
@@ -67,13 +68,11 @@ export const update = (model: Model, message: Message) =>
         editor: editor => Editor.scrolled(editor, top),
       }),
     }),
-    ResizedScreen: ({ rows }) => ({
-      model: modifyFields(model, {
-        editor: editor => Editor.resized(editor, rows),
-      }),
-      commands: [RevealCaret({ align: 'Nearest' })],
+    ResizedScreen: ({ rows }) =>
+      respond(model, Editor.resized(model.editor, rows)),
+    CompletedRevealCaret: () => ({
+      model: modifyFields(model, { editor: Editor.revealed }),
     }),
-    CompletedRevealCaret: () => ({ model }),
     FocusedKeyboard: () => ({
       model: modifyFields(model, { keyboard: () => 'Focused' }),
     }),

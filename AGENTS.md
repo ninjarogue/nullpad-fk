@@ -4,7 +4,17 @@ A markdown note editor that feels like a terminal, built with Foldkit. Read [`FO
 
 `FOLDKIT.md` reads the line below to decide whether to offer to vendor the Foldkit source. Leave it in place.
 
-subtree_prompted: false
+subtree_prompted: true
+
+## Foldkit and Effect docs
+
+Read these before writing Foldkit or Effect code. They match the installed versions, where memory mostly knows Effect 3 and older Foldkit.
+
+- `repos/foldkit/` is Foldkit at the installed release, vendored as a git subtree. Start at `repos/foldkit/examples/` and the `foldkit` skill (`.claude/skills/foldkit`, a link into the subtree).
+- `repos/foldkit/repos/effect/` is the Effect source that Foldkit vendors, at 4.1.0 where we install 4.1.5. Start at its `LLMS.md` and `ai-docs/`. Read an exact signature from the types in `node_modules/effect`.
+- Search skips `repos/` (`.ignore`) unless you pass the path, as in `rg Schema.Struct repos/foldkit/examples`.
+- Nothing imports from `repos/`. Format, lint and the comment budget skip it too. After a Foldkit upgrade, re-pin the subtree with the `git subtree pull` command in `FOLDKIT.md`.
+- The Foldkit docs recommend story and scene tests. nullpad does not use them. See Testing.
 
 ## Layout
 

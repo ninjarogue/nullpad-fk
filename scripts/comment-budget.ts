@@ -14,6 +14,7 @@ const files = execFileSync(
     '*.ts',
     '*.mts',
     '*.cts',
+    ':!repos',
   ],
   { encoding: 'utf8' },
 )

@@ -54,10 +54,11 @@ pnpm lint        # oxlint with the Foldkit and Effect presets and type-aware Typ
 pnpm typecheck   # the shell (tsconfig.json), the core (src/core/tsconfig.json) and the tests (e2e/tsconfig.json)
 pnpm arch        # import rules and the one-keyboard check
 pnpm build
-pnpm test:e2e    # every end-to-end test in headless Chromium
+pnpm test:e2e    # the end-to-end tests of the push gate, in headless Chromium
+pnpm test:ready  # before a merge: the push gate, every sweep and the scout
 ```
 
-`.githooks/pre-push` runs them in that order and gives the tests the build it just made. `pnpm install` turns the hook on (`prepare` sets `core.hooksPath`) and applies the Effect lint patch to `node_modules` (`postinstall`). `lint` itself changes nothing.
+`.githooks/pre-push` runs all but `test:ready` in that order and gives the tests the build it just made. `pnpm install` turns the hook on (`prepare` sets `core.hooksPath`) and applies the Effect lint patch to `node_modules` (`postinstall`). `lint` itself changes nothing.
 
 Use pnpm, never npm or npx. `package.json` pins its version for corepack. pnpm fails the install when a dependency has a build script it was not told to run, so a dependency that needs one goes under `allowBuilds` in `pnpm-workspace.yaml`.
 
@@ -72,7 +73,8 @@ A bug fix starts with a scenario that fails on the bug. Run it on the broken bui
 ### Run
 
 ```sh
-pnpm test:e2e                       # builds, then runs everything: scenarios, sweeps and the short typist
+pnpm test:e2e                       # builds, then runs the push gate: scenarios, named scripts and the every-push sweeps
+pnpm test:ready                     # builds, then runs the push gate, every sweep and the scout, before a merge
 pnpm test:e2e -g "huge wheel"       # tests whose name matches
 pnpm test:e2e --trace on            # keeps a trace of each test; open one with pnpm exec playwright show-trace
 NULLPAD_DIST=/path/to/dist pnpm test:e2e   # tests a build made elsewhere, such as an old commit, without building
@@ -84,15 +86,16 @@ On a machine without Playwright's Chromium, install it once with `pnpm exec play
 
 ### Layout
 
-| File                                                             | What it covers                                                                                                                                                     |
-| ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `e2e/nullpad.ts`                                                 | The `nullpad` fixture: opens the app and reads the screen (`screen()`, `text()`, `status()`, `cursor()`, `inkIn()`), and sends input.                              |
-| `typing`, `ime`, `paste`, `pointer`, `layout`, `wrap` `.spec.ts` | Scenarios, one feature each. Every bug found so far has one here. `wrap` also checks where lines break against a textarea of the same width (`textareaRowStarts`). |
-| `browser-support.spec.ts`                                        | A browser without EditContext shows that nullpad needs Chrome or Edge instead of an editor that takes no typing.                                                   |
-| `click-sweep.spec.ts`                                            | Clicks a grid across the whole window and checks that the cursor lands on the nearest drawn character boundary each time.                                          |
-| `extremes.spec.ts`                                               | Giant and tiny wheel turns, 120,000-line pastes, line counts crossing 9,999 and 99,999, very long lines, AltGr keys, IME compositions.                             |
-| `typist.spec.ts`, `e2e/typist/`                                  | The robot typist and its named scripts.                                                                                                                            |
-| `e2e/reporters/require-tests.ts`                                 | Fails a run in which no test ran, so a filter or a skip cannot turn the gate green.                                                                                |
+| File                                                             | What it covers                                                                                                                                                                                                                                    |
+| ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `e2e/nullpad.ts`                                                 | The `nullpad` fixture: opens the app and reads the screen (`screen()`, `text()`, `status()`, `cursor()`, `inkIn()`), and sends input.                                                                                                             |
+| `typing`, `ime`, `paste`, `pointer`, `layout`, `wrap` `.spec.ts` | Scenarios, one feature each. Every bug found so far has one here. `wrap` also checks where lines break against a textarea of the same width (`textareaRowStarts`).                                                                                |
+| `browser-support.spec.ts`                                        | A browser without EditContext shows that nullpad needs Chrome or Edge instead of an editor that takes no typing.                                                                                                                                  |
+| `click-sweep.spec.ts`                                            | Clicks a grid across the whole window and checks that the cursor lands on the nearest drawn character boundary each time.                                                                                                                         |
+| `extremes.spec.ts`                                               | Giant and tiny wheel turns, 120,000-line pastes, line counts crossing 9,999 and 99,999, very long lines, AltGr keys, IME compositions.                                                                                                            |
+| `sweep.spec.ts`, `e2e/typist/sweeps.ts`                          | The sweeps: grids of scripts, each compared with a textarea. Some play on every push, the rest before a merge.                                                                                                                                    |
+| `typist.spec.ts`, `typist-flicker.spec.ts`, `e2e/typist/`        | The named scripts, which run on every push. The scout and the typist flicker checks, which run only with `TYPIST_SCOUT_MINUTES`. `run.ts` holds the comparison, `script.ts` the named scripts and accepted differences, and `scout.ts` the scout. |
+| `e2e/reporters/require-tests.ts`                                 | Fails a run in which no test ran, so a filter or a skip cannot turn the gate green.                                                                                                                                                               |
 
 ### Add a scenario
 
@@ -114,36 +117,92 @@ The fixture fails any test whose page logs an error or throws. A known bug that 
 
 ### Robot typist
 
-The typist types random scripts into nullpad and into a `<textarea>`, each in its own browser context, and compares the text, the caret (line and grapheme column) and where each line breaks into rows after every step. The textarea is in nullpad's font and exactly as wide as nullpad's text column, so it wraps at the same edge. Rows are compared while nullpad's screen shows the whole text.
+The typist types a script into nullpad and into a `<textarea>`, each in its own browser context, and compares the text, the cursor (line and grapheme column) and where each line breaks into rows after every step. The textarea is in nullpad's font and exactly as wide as nullpad's text column, so it wraps at the same edge. Rows are compared while nullpad's screen shows the whole text.
 
-Backspace is judged against a bare EditContext element in a third browser context, not against the textarea. Before each Backspace the typist reads the textarea's own text nodes over the DevTools protocol, because Chrome keeps the halves of a joined line in separate nodes as nullpad keeps a join. The text node before the caret goes into the EditContext, with the caret moved to the next grapheme boundary, and the EditContext takes a real Backspace. The textarea takes its own Backspace too. Where the EditContext took more, the rest of that letter is deleted from the textarea as a selection, so the textarea holds the EditContext's result for the comparison and the steps after it. At a line start the textarea joins the lines itself.
+A script is a list of steps. A `text` step types one code point, or an ASCII run key by key. An `insert` step puts a whole string in at once, as an IME does. A `key` step presses Left, Right, Up, Down, Home, End, Ctrl+Home, Ctrl+End, Backspace, Delete or Enter. Page Up, Page Down and Tab are left out.
 
-Half the scripts are cluster scripts. They mix whole emoji, flag and accented clusters typed one code point at a time, lone code points, and the keys Left, Right, Home, End, Ctrl+Home, Ctrl+End, Backspace, Delete and Enter. Up and Down are left out there, because on emoji rows a textarea aims by pixels and nullpad by cells. The other half are prose scripts. They insert a line of 50 to 90 characters at once, as an IME does, so the wrap edge is near, then type one or two words at a time with hyphens, dashes, URLs, markdown, brackets, quotes and punctuation key by key, with gaps of one to three spaces and runs of spaces, and press the same keys plus Up and Down. Every character in them is one cell wide. Page Up, Page Down and Tab are left out of both.
+Backspace is judged against a bare EditContext element in a third browser context, not against the textarea. Before each Backspace the typist reads the textarea's own text nodes over the DevTools protocol, because Chrome keeps the halves of a joined line in separate nodes as nullpad keeps a join. The text node before the cursor goes into the EditContext, with the cursor moved to the next grapheme boundary, and the EditContext takes a real Backspace. The textarea takes its own Backspace too. Where the EditContext took more, the rest of that letter is deleted from the textarea as a selection, so the textarea holds the EditContext's result for the comparison and the steps after it. At a line start the textarea joins the lines itself.
 
-On a mismatch it replays the script from empty, shrinks it to the shortest script that still fails, and prints the sequence seed, the shortest script, and the shortest script as JSON for `namedScripts` in `e2e/typist/script.ts`.
+Three kinds of script run. Named scripts and the sweeps marked `every push` run on every push. The other sweeps and the scout run before a merge, with `pnpm test:ready`.
+
+#### Named scripts
+
+`namedScripts` in `e2e/typist/script.ts` holds every script that once broke, each as its shortest form. `pnpm test:typist` plays them.
+
+#### Sweeps
+
+A sweep covers one class of bugs with a grid of scripts. It plays the same scripts on every run, so a failing row fails again until the bug is fixed. `e2e/typist/sweeps.ts` holds the table and `e2e/sweep.spec.ts` plays it.
+
+A sweep has a `name` that states its rule in plain words, `runs` that says whether it plays on every push or before a merge, and these lists.
+
+- `documents`. Each has a name and the steps that build it.
+- `placements`. Each has a name, the steps that put the cursor in a document, and its `moves`. A move is a short script, such as one key and then `y`, so the text shows where the cursor stood.
+
+A row is one document, one placement and one move. Its script is the document's steps, the placement's steps and the move, in that order. `scripts` holds the number of rows as a literal. A test fails when the grid has another size, so a grid that shrinks shows as a changed number in the diff.
+
+A row types every step before its last placement step back to back, without comparing. It then compares after that step, where the placement left the cursor, and after each step of the move. A row passes when nullpad and the textarea agree each time, or when an accepted difference covers the text. A failing row prints as `document | placement | move | differs after step N of M | nullpad L:C textarea L:C | text same: true`. A row that throws prints `threw:` and the error in place of the step. The rows go round-robin to `TYPIST_SHARDS` shards (8 by default), and each shard prints how many rows it checked, how many differ, and how many differences each accepted difference covered.
+
+The sweeps today:
+
+- Up or Down, any key, Up or Down lands where a textarea lands. Runs on every push. 6 documents (three short lines, a wrapped line of words, a long word that moved to the next row, one word longer than a row, a full row that ends in spaces, and rows of emoji and accents), 7 placements, and 52 moves in each: Up or Down, then any of 13 keys, then Up or Down. 2,184 rows, about 3 minutes on 4 cores.
+- One Backspace, Delete, Left or Right takes what a textarea takes around emoji, flags and accents. Runs before a merge, as two sweeps. The documents are twelve pieces (a letter, an accent, two flag letters, a thumbs up, a skin tone, a man, a ZWJ, a heart, a variation selector, a Devanagari letter and a virama) in every ordered pair, and seven fixed documents (two of Hangul, a keycap, a family of three, a family of four and a kiss with skin tones, which are letters of 11 and 15 UTF-16 units, and a flag split by an x). Each move is one key and then `y`.
+  - Typed in order: 151 documents, 3 placements (at the end, at the start, one Right from the start). 906 rows.
+  - Met at a line join, or typed one in front of the other: 302 documents, the same 3 placements and where the build left the cursor. 3,020 rows.
+
+The second rule has 54 named scripts on every push, and its sweeps would add about 5 minutes to each push on 4 cores, so they run before a merge. Add a row only for a shape the grid does not reach. When a bug turns up, run the sweep on the broken build first and see the new row fail.
+
+1. If the bug fits a sweep's rule, add the document that shows it. If the bug needs a cursor spot or a key the grid lacks, add a placement or a move too. Set `scripts` to the new count.
+2. If the bug breaks another rule, add a sweep to `sweeps` with its own name, documents, placements, `scripts` and `runs`.
+3. Add the shortest failing script to `namedScripts`. The sweep finds the neighbors of the bug, and the named script keeps the bug itself.
+
+`pnpm test:sweep` plays every sweep alone, the ones that run before a merge too.
+
+#### The scout
+
+The scout plays random scripts, aimed at the texts the sweeps use. It looks for bugs the grids miss. It does not run on a push. `pnpm test:ready` runs it before a merge, and `pnpm test:scout` runs it alone.
+
+`scoutScript(seed)` in `e2e/typist/scout.ts` makes these draws in order:
+
+1. A sweep.
+2. One of that sweep's documents, or one time in four a line of 50 to 90 characters built from a list of words with hyphens, dashes, URLs, markdown, brackets, quotes and runs of spaces.
+3. One of that sweep's placements.
+4. Four to ten more steps. Most are steps from that sweep's moves. The rest are any key, a word, a whole emoji, flag or accent cluster typed one code point at a time, or a lone code point.
+
+Each shard plays scripts until `TYPIST_SCOUT_MINUTES` minutes pass, and prints how many it played. A script that fails is played again from empty and shrunk to the shortest script that still fails. The report prints the sequence seed, the shortest script, and that script as JSON for `namedScripts`. A sequence seed names the same script only while `sweeps.ts` and `scout.ts` stay the same, so keep the printed script.
+
+Every scout find becomes a sweep row, or a new sweep, and a named script. If a month of scout runs finds nothing new, drop the scout.
+
+#### Commands
 
 ```sh
-pnpm test:typist                         # named scripts and 240 random scripts from a random run seed
-TYPIST_SEED=123 pnpm test:typist         # the same 240 scripts as run seed 123
-TYPIST_REPLAY=456 pnpm test:typist       # the one script of sequence seed 456, from a failure report
-pnpm test:typist:long                    # 3,000 random scripts
-TYPIST_SEQUENCES=500 pnpm test:typist    # any number
+pnpm test:e2e                                           # the push gate: scenarios, named scripts and the every-push sweeps, with no random scripts
+pnpm test:ready                                         # before a merge: the push gate, every sweep, the scout for 5 minutes and the typist flicker checks
+pnpm test:sweep                                         # every sweep alone
+pnpm test:typist                                        # the named scripts alone
+pnpm test:scout                                         # the scout for 5 minutes, and the typist flicker checks
+TYPIST_SCOUT_MINUTES=1 pnpm test:typist                 # the scout for any number of minutes
+TYPIST_SEED=123 TYPIST_SCOUT_MINUTES=1 pnpm test:typist # the scout's scripts of run seed 123, in the same order
+TYPIST_REPLAY=456 pnpm test:typist                      # the one scout script of sequence seed 456, from a failure report
 ```
 
-Every run prints its run seed. A script that once broke goes into `namedScripts` so it runs on every push.
+A scout run prints its run seed.
 
-Accepted differences. Where a malformed sequence makes Chrome's textarea or EditContext disagree with `Intl.Segmenter`, nullpad follows `Intl.Segmenter`. A mismatch counts as accepted, not failed, only when the text around it holds one of these, listed in `acceptedDifferences` in `e2e/typist/script.ts`:
+#### Accepted differences
+
+Where a malformed sequence makes Chrome's textarea or EditContext disagree with `Intl.Segmenter`, nullpad follows `Intl.Segmenter`. A mismatch counts as accepted, not failed, only when the text before the step, the textarea's text after it, or the piece a Backspace was judged on holds one of these. A piece that starts at a line join can be malformed where the whole line is not, such as a ZWJ that starts one. nullpad's own text after the step does not count, so a bug that leaves a broken letter behind is not excused. They are listed in `acceptedDifferences` in `e2e/typist/script.ts`:
 
 - ZWJ next to a non-pictograph.
 - A mark, ZWJ or skin tone on a flag letter.
 - A skin tone after a character that takes none.
 - A virama with no letter before it.
 - A variation selector not after a pictograph.
+- A mark on a space.
 
-Each run reports how many mismatches each accepted difference covered.
+Each sweep shard and each scout shard reports how many mismatches each accepted difference covered.
 
 ## Process
 
 - Tests are end-to-end only. See Testing.
+- Before a PR is ready, `pnpm test:ready` passes on its tip, and the PR body says so.
 - Before a PR is ready, an agent that did not write the change breaks it. It plants bugs, drives the app, and reports what got through.
 - Few comments. Name things better instead. Skip the `// MODEL` section headers that `FOLDKIT.md` suggests.

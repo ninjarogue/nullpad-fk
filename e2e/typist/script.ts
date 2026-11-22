@@ -22,10 +22,10 @@ export type Step =
 
 export type Script = ReadonlyArray<Step>
 
-const text = (value: string): Step => ({ kind: 'text', text: value })
-const insert = (value: string): Step => ({ kind: 'insert', text: value })
-const key = (name: TypistKey): Step => ({ kind: 'key', key: name })
-const codePoints = (value: string): Script => [...value].map(text)
+export const text = (value: string): Step => ({ kind: 'text', text: value })
+export const insert = (value: string): Step => ({ kind: 'insert', text: value })
+export const key = (name: TypistKey): Step => ({ kind: 'key', key: name })
+export const codePoints = (value: string): Script => [...value].map(text)
 
 export const label = (step: Step): string =>
   step.kind === 'key'
@@ -39,7 +39,7 @@ export const show = (script: Script): string => script.map(label).join(' ')
 export const hex = (value: string): string =>
   [...value].map(char => char.codePointAt(0)?.toString(16)).join(' ')
 
-const mulberry32 = (seed: number) => {
+export const mulberry32 = (seed: number) => {
   let state = seed | 0
   return () => {
     state = (state + 0x6d2b79f5) | 0
@@ -53,165 +53,7 @@ const mulberry32 = (seed: number) => {
 export const sequenceSeed = (runSeed: number, index: number): number =>
   Math.floor(mulberry32(runSeed ^ Math.imul(index + 1, 0x9e3779b1))() * 2 ** 31)
 
-const ZWJ = '‍'
-const loneCodePoints = [
-  '🇯',
-  '🇵',
-  '🇺',
-  '🇸',
-  '👨',
-  ZWJ,
-  '👩',
-  '👧',
-  '👍',
-  '🏽',
-  '́',
-  '̈',
-  '️',
-  '❤',
-  '漢',
-  'a',
-  'e',
-  ' ',
-]
-const clusters = [
-  '🇯🇵',
-  '🇺🇸',
-  '👨‍👩‍👧',
-  '👨‍👩‍👧‍👦',
-  '👍🏽',
-  'é',
-  'ë',
-  '❤️',
-  '漢字',
-  'ab',
-  'x',
-  'q w',
-]
-const keys: ReadonlyArray<TypistKey> = [
-  'ArrowLeft',
-  'ArrowRight',
-  'ArrowUp',
-  'ArrowDown',
-  'Home',
-  'End',
-  'Control+Home',
-  'Control+End',
-  'Backspace',
-  'Delete',
-  'Enter',
-]
-
-const pick = <A>(random: () => number, items: ReadonlyArray<A>): A => {
-  const item = items[Math.floor(random() * items.length)]
-  if (item === undefined) {
-    throw new Error('pick from an empty list')
-  }
-  return item
-}
-
-/** 4 to 17 steps: whole clusters typed one code point at a time, lone code points, and editing keys. */
-const clusterScript = (random: () => number): Script => {
-  const steps: Array<Step> = []
-  const length = 4 + Math.floor(random() * 14)
-  while (steps.length < length) {
-    const roll = random()
-    if (roll < 0.35) {
-      steps.push(...codePoints(pick(random, clusters)))
-    } else if (roll < 0.55) {
-      steps.push(text(pick(random, loneCodePoints)))
-    } else {
-      steps.push(key(pick(random, keys)))
-    }
-  }
-  return steps
-}
-
-/** Words whose joints a textarea may or may not break at: hyphens, dashes, URLs, markdown, brackets, quotes and punctuation. */
-const words = [
-  'the',
-  'a',
-  'notes',
-  'editor',
-  'release',
-  'internationalization',
-  'state-of-the-art',
-  'well-known',
-  'page-12',
-  'x-1',
-  '-1',
-  'and/or',
-  'https://example.com/path/to/page?x=1&y=2',
-  '[a link](https://example.com)',
-  '**bold**',
-  '_italic_',
-  '`code`',
-  '(see',
-  'note)',
-  'word(note)',
-  'why?',
-  'wait!',
-  'ok...',
-  'end.',
-  'a,b',
-  '"quoted"',
-  "it's",
-  '$100',
-  '100%',
-  '#tag',
-  '@user',
-  'a=b+c',
-  '<tag>',
-  '{x}y',
-  '1,000.50',
-  'e.g.',
-  '- [ ]',
-  '>',
-  'long—dash',
-  'range–end',
-  'so…',
-  '“curly”',
-]
-const gaps = [' ', ' ', ' ', ' ', '  ', '   ', '']
-const proseKeys: ReadonlyArray<TypistKey> = [...keys, 'ArrowUp', 'ArrowDown']
-
-const phrase = (random: () => number, count: number): string =>
-  Array.from(
-    { length: count },
-    () => pick(random, words) + pick(random, gaps),
-  ).join('')
-
-/**
- * A line of 50 to 90 characters inserted at once, so the wrap edge is near, then 4 to 11 steps of one or two
- * words typed key by key, runs of spaces, and editing keys.
- */
-const proseScript = (random: () => number): Script => {
-  const target = 50 + Math.floor(random() * 41)
-  let line = ''
-  while (line.length < target) {
-    line += phrase(random, 1)
-  }
-  const steps: Array<Step> = [insert(line)]
-  const length = 5 + Math.floor(random() * 8)
-  while (steps.length < length) {
-    const roll = random()
-    if (roll < 0.45) {
-      steps.push(text(phrase(random, 1 + Math.floor(random() * 2))))
-    } else if (roll < 0.55) {
-      steps.push(text(' '.repeat(1 + Math.floor(random() * 6))))
-    } else {
-      steps.push(key(pick(random, proseKeys)))
-    }
-  }
-  return steps
-}
-
-/** A cluster script or a prose script, chosen by the seed. */
-export const randomScript = (seed: number): Script => {
-  const random = mulberry32(seed)
-  return random() < 0.5 ? clusterScript(random) : proseScript(random)
-}
-
+export const ZWJ = '‍'
 /** Scripts that once broke, kept as named cases. */
 export const namedScripts: ReadonlyArray<
   Readonly<{ name: string; script: Script }>
@@ -969,6 +811,34 @@ export const namedScripts: ReadonlyArray<
       key('ArrowDown'),
     ],
   },
+  {
+    name: 'End after a space typed in front of a mark that starts a line of one long word',
+    script: [
+      insert('x'.repeat(100)),
+      key('Control+Home'),
+      text('\u0308'),
+      key('Home'),
+      text(' '),
+      key('End'),
+    ],
+  },
+  {
+    name: 'Backspace after a heart typed after a ZWJ that starts a piece at a line join',
+    script: [
+      text('❤'),
+      key('Enter'),
+      text(ZWJ),
+      key('Home'),
+      key('Backspace'),
+      key('ArrowDown'),
+      text('❤'),
+      key('Backspace'),
+    ],
+  },
+  {
+    name: 'Backspace takes a whole family of four, a letter of 11 UTF-16 units',
+    script: [insert(`👩${ZWJ}👩${ZWJ}👧${ZWJ}👦`), key('Backspace')],
+  },
 ]
 
 type Difference = Readonly<{ name: string; pattern: RegExp }>
@@ -976,11 +846,12 @@ type Difference = Readonly<{ name: string; pattern: RegExp }>
 /**
  * Malformed sequences where nullpad follows Intl.Segmenter and Chrome's textarea, or its EditContext for Backspace,
  * does not: where a caret left inside a grapheme settles after inserted text, and how much Backspace takes. A mismatch
- * counts as accepted only when the text around it holds one of these, in a named script as in a random one.
+ * counts as accepted only when the text before the step, the textarea's text after it or the piece a Backspace was
+ * judged on holds one of these, never by nullpad's own text, so a bug that leaves a malformed sequence behind is not
+ * excused.
  */
 /** A flag letter followed by a mark, a ZWJ or a skin tone, which no flag has. */
-export const markOnFlagLetter =
-  /\p{Regional_Indicator}[\p{M}‍\u{1f3fb}-\u{1f3ff}]/u
+const markOnFlagLetter = /\p{Regional_Indicator}[\p{M}‍\u{1f3fb}-\u{1f3ff}]/u
 
 export const acceptedDifferences: ReadonlyArray<Difference> = [
   {
@@ -1004,6 +875,10 @@ export const acceptedDifferences: ReadonlyArray<Difference> = [
   {
     name: 'stray variation selector',
     pattern: /(?<!\p{Extended_Pictographic})️/u,
+  },
+  {
+    name: 'mark on a space',
+    pattern: / \p{M}/u,
   },
 ]
 

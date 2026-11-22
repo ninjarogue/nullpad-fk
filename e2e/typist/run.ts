@@ -1,6 +1,12 @@
 import type { Browser, CDPSession, Page } from '@playwright/test'
 
-import { rowStartsOf, screenOf, textOf, textareaRowStarts } from '../nullpad'
+import {
+  rowStartsOf,
+  screenOf,
+  settle,
+  textOf,
+  textareaRowStarts,
+} from '../nullpad'
 import { type Script, type Step, acceptedDifference } from './script'
 
 /** `rows` holds where each line starts its rows, and is left out when nullpad's screen does not show the whole text. */
@@ -259,11 +265,15 @@ const editContextBackspace = async (
  * same text. The textarea keeps its own Backspace where the two agree, so its column for Up and Down survives; where
  * the EditContext takes more, the rest goes as a selection. On an accepted malformed sequence, Chrome's textarea may delete
  * text outside the letter, such as the character after the caret, so there is nothing to finish and the pair is left
- * for `compare` to file under that accepted difference.
+ * for `compare` to file under that accepted difference. Returns the piece the EditContext judged, which `compare`
+ * reads for an accepted difference, as a piece that starts at a line join can be malformed where the whole line is not.
  */
-const backspaceAsEditContext = async (pair: Pair) => {
+const backspaceAsEditContext = async (
+  pair: Pair,
+): Promise<string | undefined> => {
   const { value, caret } = await textareaCaret(pair.textarea)
   const piece = await pieceBefore(pair.textareaDom, value, caret)
+  const judged = value.slice(piece.start, piece.end)
   const [letter] = await Promise.all([
     piece.start === caret
       ? Promise.resolve(undefined)
@@ -275,7 +285,7 @@ const backspaceAsEditContext = async (pair: Pair) => {
     pair.textarea.keyboard.press('Backspace'),
   ])
   if (letter === undefined) {
-    return
+    return undefined
   }
   const from = piece.start + letter.from
   const to = piece.start + letter.to
@@ -285,7 +295,7 @@ const backspaceAsEditContext = async (pair: Pair) => {
   const leftInLetter = taken.length - head.length - tail.length
   if (!taken.startsWith(head) || !taken.endsWith(tail) || leftInLetter < 0) {
     if (acceptedDifference([value]) !== undefined) {
-      return
+      return judged
     }
     throw new Error(
       `Backspace turned ${JSON.stringify(value)} into ${JSON.stringify(taken)} in the textarea, outside the letter the EditContext took from ${from} to ${to}`,
@@ -299,6 +309,7 @@ const backspaceAsEditContext = async (pair: Pair) => {
     )
     await pair.textarea.keyboard.press('Backspace')
   }
+  return judged
 }
 
 const nullpadSnapshot = async (page: Page): Promise<Snapshot> => {
@@ -360,14 +371,22 @@ const same = (a: Snapshot, b: Snapshot) =>
     b.rows === undefined ||
     JSON.stringify(a.rows) === JSON.stringify(b.rows))
 
+/** Applies the step and returns the piece a Backspace was judged on, if it was one. */
+const applyToTextarea = (pair: Pair, step: Step): Promise<string | undefined> =>
+  step.kind === 'key' && step.key === 'Backspace'
+    ? backspaceAsEditContext(pair)
+    : apply(pair.textarea, step).then(() => undefined)
+
 /**
  * Types `script` into both from empty and returns the first step after which text, caret or row breaks differ.
  * Backspace on the textarea takes what a bare EditContext takes. The two pages are independent, so each step goes to
- * both at once.
+ * both at once. The steps before `from` are typed back to back, with one wait for nullpad to draw them, and not
+ * compared, for a script whose first steps repeat across many runs.
  */
 export const compare = async (
   pair: Pair,
   script: Script,
+  from = 0,
 ): Promise<Divergence | null> => {
   await Promise.all([
     pair.nullpad.goto('/').then(() => pair.nullpad.locator('#caret').waitFor()),
@@ -379,14 +398,34 @@ export const compare = async (
       }
     }),
   ])
-  let before = ''
-  for (const [at, step] of script.entries()) {
-    const [nullpad, textarea] = await Promise.all([
+  const skipped = script.slice(0, from)
+  await Promise.all([
+    (async () => {
+      for (const step of skipped) {
+        await apply(pair.nullpad, step)
+      }
+      await settle(pair.nullpad)
+    })(),
+    (async () => {
+      for (const step of skipped) {
+        await applyToTextarea(pair, step)
+      }
+    })(),
+  ])
+  let before =
+    from === 0
+      ? ''
+      : await pair.textarea.evaluate(
+          () => document.querySelector('textarea')?.value ?? '',
+        )
+  for (const [offset, step] of script.slice(from).entries()) {
+    const at = from + offset
+    const [nullpad, { judged, textarea }] = await Promise.all([
       apply(pair.nullpad, step).then(() => nullpadSnapshot(pair.nullpad)),
-      (step.kind === 'key' && step.key === 'Backspace'
-        ? backspaceAsEditContext(pair)
-        : apply(pair.textarea, step)
-      ).then(() => textareaSnapshot(pair.textarea, pair.measure)),
+      applyToTextarea(pair, step).then(async judged => ({
+        judged,
+        textarea: await textareaSnapshot(pair.textarea, pair.measure),
+      })),
     ])
     if (!same(nullpad, textarea)) {
       return {
@@ -395,7 +434,11 @@ export const compare = async (
         nullpad,
         textarea,
         before,
-        accepted: acceptedDifference([before, textarea.text, nullpad.text]),
+        accepted: acceptedDifference([
+          before,
+          textarea.text,
+          ...(judged === undefined ? [] : [judged]),
+        ]),
       }
     }
     before = textarea.text

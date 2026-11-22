@@ -59,7 +59,6 @@ const allKeys: ReadonlyArray<TypistKey> = [
   'Enter',
 ]
 
-/** Words whose joints a textarea may or may not break at: hyphens, dashes, URLs, markdown, brackets, quotes and punctuation. */
 const words = [
   'the',
   'a',
@@ -120,7 +119,6 @@ const phrase = (random: () => number, count: number): string =>
     () => pick(random, words) + pick(random, gaps),
   ).join('')
 
-/** A line of 50 to 90 characters, so the wrap edge is near. */
 const proseLine = (random: () => number): string => {
   const target = 50 + Math.floor(random() * 41)
   let line = ''
@@ -130,7 +128,6 @@ const proseLine = (random: () => number): string => {
   return line
 }
 
-/** The distinct steps the moves of a sweep are made of, which are the steps that sweep found worth trying. */
 const stepsOfMoves = (sweep: Sweep): ReadonlyArray<Step> => {
   const seen = new Map<string, Step>()
   for (const placement of sweep.placements) {
@@ -141,11 +138,6 @@ const stepsOfMoves = (sweep: Sweep): ReadonlyArray<Step> => {
   return [...seen.values()]
 }
 
-/**
- * A script that starts where a sweep's rows start and wanders off its grid. The dice pick a sweep, one of its
- * documents or else a line of prose, one of its placements, then 4 to 10 more steps: mostly the steps of that
- * sweep's moves, and otherwise any key, a word, a cluster or a lone code point.
- */
 export const scoutScript = (seed: number): Script => {
   const random = mulberry32(seed)
   const sweep = pick(random, sweeps)

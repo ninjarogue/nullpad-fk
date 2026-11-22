@@ -13,7 +13,6 @@ const words = Array.from(
   (_, i) => `w${String(i).padStart(2, '0')}`,
 ).join(' ')
 
-/** A point a quarter into cell `cell` of drawn row `row`, nearest the boundary before that cell. */
 const pointIn = (screen: Screen, row: number, cell: number) => {
   const drawn = screen.rows[row]
   if (drawn === undefined) {
@@ -190,7 +189,6 @@ test('one huge wheel turn on a 20,000-line note scrolls without a crash and keep
 
 const rowKey = (row: Screen['rows'][number]) => `${row.lineId}:${row.start}`
 
-/** How far the text moved up between two screens, read from a row both show. */
 const textMoved = (before: Screen, after: Screen): number => {
   const shared = before.rows.find(row =>
     after.rows.some(other => rowKey(other) === rowKey(row)),
@@ -323,7 +321,6 @@ test('a click sent right after typing lands by the text as typed, not by the fra
   }
 })
 
-/** A long note with the cursor on line 1 and the mouse over the text, ready for a wheel turn. */
 const longNoteAtTop = async (nullpad: Nullpad) => {
   await nullpad.paste(numberedLines(400))
   await nullpad.press('Control+Home')
@@ -331,7 +328,6 @@ const longNoteAtTop = async (nullpad: Nullpad) => {
   return nullpad.screen()
 }
 
-/** A wheel turn and key presses handed to the browser back to back, with no wait between them. */
 const wheelThenKeys = (
   nullpad: Nullpad,
   deltaY: number,
@@ -408,11 +404,6 @@ test('a letter and ArrowDown sent right after a big wheel turn leave the cursor 
   }
 })
 
-/**
- * Presses `x` and then the mouse button at `point`, and says whether the button went down on the frame from before the
- * letter. It did when both left within 12 ms: the letter's frame is on screen 16 ms after the letter at the soonest. A
- * busy machine can take longer, and then nothing says which frame the click was made on.
- */
 const letterThenClick = async (
   nullpad: Nullpad,
   point: Readonly<{ x: number; y: number }>,
@@ -468,14 +459,12 @@ test('a click sent right after a letter lands on the line that was on screen whe
   expectSomeCounted(counted)
 })
 
-/** A long note with the cursor at its end and the mouse over the text. */
 const longNoteAtEnd = async (nullpad: Nullpad) => {
   await nullpad.paste(numberedLines(400))
   await nullpad.page.mouse.move(400, 300)
   return nullpad.screen()
 }
 
-/** A wheel turn handed to the browser, without the wait for its scroll that `nullpad.wheel` adds. */
 const turnWheel = (nullpad: Nullpad, deltaY: number) =>
   nullpad.cdp.send('Input.dispatchMouseEvent', {
     type: 'mouseWheel',

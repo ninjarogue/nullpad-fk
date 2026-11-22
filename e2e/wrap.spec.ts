@@ -130,11 +130,6 @@ test('an indent before a word too long for the rest of its row stays on that row
   expect(rowTexts(await nullpad.screen())).toEqual(['      ', 'x'.repeat(72)])
 })
 
-/**
- * Text that puts a pair of characters at the wrap edge, so where the line breaks shows whether a textarea
- * may break between them: hyphens and dashes, URLs, markdown links and emphasis, brackets, quotes,
- * punctuation, numbers, no-break spaces, CJK and emoji.
- */
 const joints: ReadonlyArray<readonly [string, string]> = [
   ['state-of-', 'the-art'],
   ['well-', 'known'],
@@ -186,7 +181,6 @@ const joints: ReadonlyArray<readonly [string, string]> = [
   ['カタカナ', 'ー'],
 ]
 
-/** Each joint with the wrap edge just before it, at it, and one and two cells after it. */
 const jointLines = (columns: number): ReadonlyArray<string> =>
   joints.flatMap(([left, right]) =>
     [-1, 0, 1, 2].map(

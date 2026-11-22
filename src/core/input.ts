@@ -25,17 +25,6 @@ export const Modifiers = Schema.Struct({
 })
 export type Modifiers = typeof Modifiers.Type
 
-/**
- * What the keyboard said, in the terms a terminal program receives it.
- * Text is characters, not keys: layout, shift, AltGr and dead keys are already applied. `byKey` is false for text
- * an emoji picker or the like inserts without a keypress: Chrome leaves its caret right after that text, but moves
- * it past a grapheme typed text joined with.
- * Paste is separate from Text so a mode that reads Text as commands never runs a paste.
- * Preedit is the IME's unfinished text ('' when it has none). Commit ends a composition.
- * Erase is text an IME takes back before it writes its replacement, as when it converts letters already typed: the
- * caret's line from `from` to `to`, in UTF-16 units counted from the caret, negative before it. The caret goes to
- * where the erased text began.
- */
 export const Input = Schema.TaggedUnion({
   Key: { key: NamedKey, modifiers: Modifiers },
   Chord: { char: Schema.String, modifiers: Modifiers },
@@ -89,7 +78,6 @@ const fromNotation = (name: string): Option.Option<Input> => {
   )
 }
 
-/** Vim key notation to Inputs, `script('hello<CR><C-e>')`, for driving the core without a browser. */
 export const script = (notation: string): ReadonlyArray<Input> =>
   Array.flatMap(
     Array.fromIterable(notation.matchAll(/<([A-Za-z-]+)>|[^]/gu)),

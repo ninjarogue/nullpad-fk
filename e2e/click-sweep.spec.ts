@@ -17,7 +17,6 @@ const note = [
 
 const bands = 4
 
-/** Where nullpad draws its text: the left and right edges of the text column and the top of the first row. */
 type Column = Readonly<{
   left: number
   right: number
@@ -25,10 +24,6 @@ type Column = Readonly<{
   stylesheet: string
 }>
 
-/**
- * A textarea holding `text` in nullpad's font, placed over the same pixels as nullpad's text column, so a click at
- * one point means the same thing in both pages.
- */
 const openTextarea = async (
   browser: Browser,
   baseURL: string,
@@ -61,7 +56,6 @@ const openTextarea = async (
   return { page, close: () => context.close() }
 }
 
-/** The textarea's caret after a click, as nullpad's status line shows one: line, then graphemes before it plus one. */
 const textareaCaret = (page: Page) =>
   page.evaluate(() => {
     const area = document.querySelector('textarea')

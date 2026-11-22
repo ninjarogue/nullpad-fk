@@ -1,5 +1,4 @@
 #!/bin/sh
-# Names are matched wherever they appear, so a builder not called h or a destructured handler is still seen.
 start='(^|[^A-Za-z0-9_$])'
 end='([^A-Za-z0-9_$]|$)'
 handlers="${start}(OnKey[A-Za-z]*|OnInput|OnBeforeInput[A-Za-z]*|OnPaste[A-Za-z]*|OnComposition[A-Za-z]*|Contenteditable)${end}"

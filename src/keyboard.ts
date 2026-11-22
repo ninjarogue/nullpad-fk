@@ -5,7 +5,6 @@ import type { Html, HtmlBuilder } from 'foldkit/html'
 import { Input, type Modifiers, NamedKey } from './core/input'
 import { Message } from './message'
 
-/** Whether the app's one text input has focus, which decides how the caret is drawn, or this browser cannot type into it. */
 export const Keyboard = Schema.Literals(['Focused', 'Blurred', 'Unsupported'])
 export type Keyboard = typeof Keyboard.Type
 
@@ -23,7 +22,6 @@ type EditContext = EventTarget &
     ) => void
   }>
 
-/** None where the browser has no EditContext, or has one turned off so that making it throws. */
 const makeEditContext = (): Option.Option<EditContext> => {
   const constructor: unknown = Reflect.get(globalThis, 'EditContext')
   if (typeof constructor !== 'function') {
@@ -70,12 +68,7 @@ const modifiersOf = (event: KeyboardEvent): Modifiers => ({
   shift: event.shiftKey,
 })
 
-/**
- * A keydown as an Input, or none when the key belongs to the browser or the IME, or will arrive as text from the
- * EditContext. Windows reports AltGr as Ctrl+Alt, so a character typed with both arrives as text. Backspace is taken
- * here too, so it lands in order with the keys around it, and the core deletes the whole letter before the caret, as
- * an EditContext does.
- */
+/** Windows reports AltGr as Ctrl+Alt, so a character typed with both arrives as text. */
 const fromKeyDown = (event: KeyboardEvent): Option.Option<Input> => {
   const { key } = event
   if (
@@ -114,7 +107,6 @@ const drawnRect = (selector: string): Option.Option<DOMRect> =>
     element.getBoundingClientRect(),
   )
 
-/** Each UTF-16 unit of the drawn preedit, in viewport pixels, so the IME puts its window by the composed text. */
 const preeditBounds = (from: number, to: number): ReadonlyArray<DOMRect> => {
   const node = document.querySelector('[data-ghost]')?.firstChild
   if (node === null || node === undefined) {
@@ -132,14 +124,8 @@ const preeditBounds = (from: number, to: number): ReadonlyArray<DOMRect> => {
   )
 }
 
-/** A range of the EditContext's text, in UTF-16 units. */
 type Span = Readonly<{ start: number; end: number }>
 
-/**
- * The text a textupdate replaces outside `kept`, the caret or the composition so far, as an Erase for the core. The
- * EditContext holds the caret's line, so an IME can replace text already typed, but its copy may be a frame behind the
- * core's. So the range is counted from `kept`, which stands where the core's caret does, never from the line's start.
- */
 const replacement = (kept: Span, replaced: Span): Option.Option<Input> => {
   const fromCaret = (offset: number) =>
     offset < kept.start
@@ -154,7 +140,6 @@ const replacement = (kept: Span, replaced: Span): Option.Option<Input> => {
     : Option.some(Input.cases.Erase.make({ from, to }))
 }
 
-/** Where the composition lies once a textupdate replaced `replaced` with `text`: it takes in a range it touches. */
 const composedAfter = (composed: Span, replaced: Span, text: string): Span => {
   const touches =
     replaced.start <= composed.end && replaced.end >= composed.start
@@ -209,10 +194,7 @@ const listen = (
           const offerInput = (input: Input): boolean =>
             Queue.offerUnsafe(queue, Message.ReceivedInput({ input }))
           const keepFocus = () => port.focus({ preventScroll: true })
-          /**
-           * A click commits the composition where it was composed, as in a text box, before the click lands: giving the
-           * port its EditContext again makes Chrome end the composition then and there, with a compositionend.
-           */
+          /** Giving the port its EditContext again makes Chrome end the composition then and there, with a compositionend. */
           const commitComposition = () => {
             Reflect.set(port, 'editContext', context)
           }
@@ -388,12 +370,6 @@ const listen = (
     }),
   )
 
-/**
- * The app's only keyboard listener, on the app's only text input: an element with an EditContext. The EditContext
- * holds the caret's line, or the part of it near the caret, which the port's attributes carry from the view, so an IME
- * can read it and convert letters already typed. Text it receives becomes an Input, and an IME composes in it until it
- * commits. The EditContext takes the line again after each render, except while an IME composes.
- */
 export const KeyboardPort = Mount.defineStream('KeyboardPort', {
   messages: [
     Message.ReceivedInput,
@@ -415,7 +391,6 @@ export const KeyboardPort = Mount.defineStream('KeyboardPort', {
     }),
 })
 
-/** Rendered once, at the app root, outside every branch that can switch. */
 export const keyboardPort = (
   surrounding: Readonly<{ text: string; caret: number }>,
   keyboard: Keyboard,
@@ -431,7 +406,6 @@ export const keyboardPort = (
     h.OnMount(KeyboardPort()),
   ])
 
-/** Shown in place of the editor in a browser without an EditContext, where typing would go nowhere. */
 export const browserUnsupportedNotice = (h: HtmlBuilder<Message>): Html =>
   h.div(
     [h.Class('unsupported'), h.Role('alert')],

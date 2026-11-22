@@ -13,7 +13,6 @@ export type Status = Readonly<{
   lineCount: number
 }>
 
-/** One drawn row. `text` and `inkRight` leave out the cursor past the end and the IME preedit, which are not text. */
 export type ScreenRow = Readonly<{
   lineId: string
   start: number
@@ -25,7 +24,6 @@ export type ScreenRow = Readonly<{
   inkRight: number
 }>
 
-/** The drawn block cursor, when it is on a row on screen. `cell` counts cells from its row's left edge. */
 export type Cursor = Readonly<{
   row: number
   cell: number
@@ -45,7 +43,6 @@ export type Screen = Readonly<{
   area: Readonly<{ left: number; right: number; top: number; bottom: number }>
 }>
 
-/** Waits until every input sent so far is drawn: the app updates in a task and draws in the next animation frame. */
 export const settle = (page: Page): Promise<void> =>
   page.evaluate(
     () =>
@@ -56,10 +53,6 @@ export const settle = (page: Page): Promise<void> =>
       ),
   )
 
-/**
- * The rows on screen, read from what the browser drew: each line is one element whose text the browser wraps, so a row
- * is the text whose boxes share a top. A row partly off screen is not on screen.
- */
 const readScreen = (page: Page): Promise<Screen> =>
   page.evaluate(() => {
     const surface = document.querySelector<HTMLElement>('.surface')
@@ -245,7 +238,6 @@ const readScreen = (page: Page): Promise<Screen> =>
     }
   })
 
-/** The lines on screen, rows of one line joined back together. */
 export const linesOf = (screen: Screen): ReadonlyArray<string> =>
   screen.rows.reduce<Array<string>>((lines, row, index) => {
     const previous = screen.rows[index - 1]
@@ -261,7 +253,6 @@ export const textOf = (screen: Screen): string => linesOf(screen).join('\n')
 
 export type Nullpad = ReturnType<typeof driver>
 
-/** The screen once every input sent so far is drawn. */
 export const screenOf = async (page: Page): Promise<Screen> => {
   await settle(page)
   return readScreen(page)
@@ -286,7 +277,6 @@ const driver = (page: Page, cdp: CDPSession) => {
       }
       await settle(page)
     },
-    /** One trusted Ctrl+V with the system clipboard holding `text`, as a user pastes. */
     paste: async (text: string) => {
       await page.evaluate(value => navigator.clipboard.writeText(value), text)
       const key = {
@@ -303,7 +293,6 @@ const driver = (page: Page, cdp: CDPSession) => {
       await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', ...key })
       await settle(page)
     },
-    /** An IME's preedit. `replacing` is the range of the text field's text, in UTF-16 units, the IME converts again. */
     compose: async (
       text: string,
       replacing?: Readonly<{ start: number; end: number }>,
@@ -325,13 +314,11 @@ const driver = (page: Page, cdp: CDPSession) => {
       await cdp.send('Input.insertText', { text })
       await settle(page)
     },
-    /** The window takes a new size, and the editor measures it on the next frame and redraws on the one after. */
     resize: async (width: number, height: number) => {
       await page.setViewportSize({ width, height })
       await settle(page)
       await settle(page)
     },
-    /** A wheel turn, then the browser's own scroll animation to its `scrollend`, or ten frames when nothing scrolls. */
     wheel: async (deltaY: number) => {
       const ended = page.evaluate(
         () =>
@@ -368,7 +355,6 @@ const driver = (page: Page, cdp: CDPSession) => {
       await page.mouse.click(x, y)
       await settle(page)
     },
-    /** Pixels in `clip` that differ from the page background, from a screenshot of what is drawn. */
     inkIn: async (
       clip: Readonly<{ x: number; y: number; width: number; height: number }>,
     ) => {
@@ -422,7 +408,6 @@ const driver = (page: Page, cdp: CDPSession) => {
   }
 }
 
-/** Every line on screen reads `line N` under its number N, as `numberedLines` wrote it. */
 export const expectNumberedLinesIntact = (screen: Screen, label: string) => {
   const numbered = screen.rows.filter(row => row.number !== null)
   expect(numbered.length, `${label}: line numbers on screen`).toBeGreaterThan(0)
@@ -437,7 +422,6 @@ export const expectRowsFit = (screen: Screen, label: string) =>
     `${label}: widest row against the text area's right edge`,
   ).toBeLessThanOrEqual(screen.area.right + 0.5)
 
-/** No ink in the two blank cells between the line numbers and the text, and some ink left of them. */
 export const expectNumbersClearOfText = async (
   nullpad: Nullpad,
   label: string,
@@ -468,13 +452,11 @@ export const expectNumbersClearOfText = async (
   ).toBeGreaterThan(0)
 }
 
-/** `lines` numbered lines, `line 1` to `line N`, each followed by `suffix`. */
 export const numberedLines = (lines: number, suffix = ''): string =>
   Array.from({ length: lines }, (_, i) => `line ${i + 1}${suffix}`).join('\n')
 
 /**
- * Where a textarea of the screen's wrap width breaks each line, in the editor's font. A div outside the app takes the
- * textarea's wrap rules (pre-wrap, break-word), which wraps exactly as a textarea does.
+ * A div outside the app takes the textarea's wrap rules (pre-wrap, break-word), which wraps exactly as a textarea does.
  */
 export const textareaRowStarts = (
   page: Page,
@@ -527,7 +509,6 @@ export const textareaRowStarts = (
     { lines, columns, cell },
   )
 
-/** Where each line on screen starts its rows, as columns of the line. */
 export const rowStartsOf = (
   screen: Screen,
 ): ReadonlyArray<ReadonlyArray<number>> =>

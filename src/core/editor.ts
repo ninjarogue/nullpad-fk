@@ -4,16 +4,9 @@ import * as Buffer from './buffer'
 import { Input, type Modifiers, type NamedKey } from './input'
 import * as Words from './words'
 
-/** Vim adds Normal, Insert and Visual here. Plain is the default typing mode. */
 export const Mode = Schema.Literals(['Plain'])
 export type Mode = typeof Mode.Type
 
-/**
- * What the core asks the browser, which alone knows where the text it drew wraps and where a pixel falls in it.
- * `at` is the caret the move starts from and `atRowEnd` the row it is drawn on where its line wraps.
- * Step is one grapheme along the line, as the browser moves its own caret. Point is a click on `line`: `x` in client
- * pixels and `y` in pixels below the line's top, so no scroll before the answer moves it off the line it was made on.
- */
 export const Query = Schema.TaggedUnion({
   Step: {
     at: Buffer.Position,
@@ -39,7 +32,6 @@ export const Query = Schema.TaggedUnion({
 })
 export type Query = typeof Query.Type
 
-/** Where the browser puts the caret. Stay means the target is not drawn, so the move does nothing. */
 export const Landing = Schema.TaggedUnion({
   At: { line: Schema.Int, column: Schema.Int, atRowEnd: Schema.Boolean },
   TextStart: {},
@@ -48,7 +40,6 @@ export const Landing = Schema.TaggedUnion({
 })
 export type Landing = typeof Landing.Type
 
-/** `aim` is the x, in pixels from the text's left edge, that a vertical move aimed at: the goal it keeps. */
 export const Answer = Schema.Struct({ landing: Landing, aim: Schema.Finite })
 export type Answer = typeof Answer.Type
 
@@ -58,19 +49,8 @@ const Queued = Schema.TaggedUnion({
 })
 type Queued = typeof Queued.Type
 
-/** The input that asked the browser, and every input since, held in order until the answer lands. */
 const Locating = Schema.Struct({ cause: Queued, queued: Schema.Array(Queued) })
 
-/**
- * The text, the caret and what is drawn. The core never reads layout: rows, pixels and graphemes on screen are the
- * browser's, and come back as Answers. `goal` is the x that Up and Down aim for. As in Chrome, typing, a click or a
- * move that lands elsewhere clears it; a move that stays put keeps it, and so do Backspace, Delete and Enter that leave
- * the caret in the text node it was in, on the same side of a wrap (see `eraseTo` and `breakLine`).
- * `caretAtRowEnd` draws a caret where its line wraps at the end of the upper row, as Chrome's upstream caret after
- * End, a click past a row end or a vertical move onto one. `top` is the line the shell reports at the top of the
- * screen and `rows` how many rows the screen holds. `revision` counts changes to the drawn text, so the shell answers
- * a query only from a screen that shows every input before it. `revealing` counts the reveals the shell has yet to run.
- */
 export const Editor = Schema.Struct({
   buffer: Buffer.Buffer,
   mode: Mode,
@@ -85,10 +65,8 @@ export const Editor = Schema.Struct({
 })
 export type Editor = typeof Editor.Type
 
-/** How the shell scrolls after a step: not at all, as little as puts the caret on screen, or its row to the top. */
 export type Reveal = 'None' | 'Nearest' | 'Top'
 
-/** A step's result: the editor, the query the browser must answer before it goes on, and how to scroll. */
 export type Outcome = Readonly<{
   editor: Editor
   locate: Option.Option<Readonly<{ query: Query; revision: number }>>
@@ -97,10 +75,6 @@ export type Outcome = Readonly<{
 
 export type Part = Readonly<{ text: string; isPreedit: boolean }>
 
-/**
- * A drawn line. Its parts are its pieces between joins, each a text node of its own, and the preedit at the caret.
- * `number` counts from 1.
- */
 export type PaintedLine = Readonly<{
   id: Buffer.LineId
   index: number
@@ -108,11 +82,6 @@ export type PaintedLine = Readonly<{
   parts: ReadonlyArray<Part>
 }>
 
-/**
- * Everything the view draws. `above` and `below` count the lines not drawn, each estimated at one row. `surrounding` is
- * the caret's line, or as much of it as lies near the caret, with the caret's offset in it: the text an IME reads to
- * convert letters already typed.
- */
 export type Frame = Readonly<{
   lines: ReadonlyArray<PaintedLine>
   above: number
@@ -148,10 +117,6 @@ type Drawn = Partial<
   Pick<Editor, 'buffer' | 'preedit' | 'caretAtRowEnd' | 'top' | 'rows'>
 >
 
-/**
- * The editor with what the view draws changed. The revision counts only changes to the drawn text and which lines are
- * drawn: a caret move alone leaves every answer the browser gives about the text as it was.
- */
 const redraw = (editor: Editor, drawn: Drawn): Editor => {
   const next = { ...editor, ...drawn }
   return next.buffer.lines === editor.buffer.lines &&
@@ -162,11 +127,6 @@ const redraw = (editor: Editor, drawn: Drawn): Editor => {
     : { ...next, revision: editor.revision + 1 }
 }
 
-/**
- * Lines drawn past each edge of the screen. Up, Down and paging find their target among a screen of them. A fast wheel
- * scrolls the screen before nullpad hears of it and draws, so 125 lines, about 2,750 pixels, are drawn ahead of it.
- * The shell reuses the view of every line that did not change, so typing costs what it did with one screen drawn.
- */
 const margin = (editor: Editor): number => Math.max(editor.rows, 125)
 
 const drawnLines = (
@@ -185,7 +145,6 @@ const isDrawn = (editor: Editor, line: number): boolean => {
   return line >= first && line <= last
 }
 
-/** A line outside the drawn lines brings them along, so the shell can read it and scroll it on screen. */
 const withLineDrawn = (editor: Editor, line: number): Editor =>
   isDrawn(editor, line)
     ? editor
@@ -257,8 +216,8 @@ const typeText =
   }
 
 /**
- * Enter. Chrome keeps the goal when the break falls inside a piece of the line, and clears it at the start of the
- * line, at a join, at the line end and at a caret drawn at the end of the upper row.
+ * Chrome keeps the goal when the break falls inside a piece of the line, and clears it at the start of the line, at a
+ * join, at the line end and at a caret drawn at the end of the upper row.
  */
 const breakLine = (editor: Editor): Editor => {
   const buffer = settled(editor)
@@ -269,9 +228,9 @@ const breakLine = (editor: Editor): Editor => {
 }
 
 /**
- * Backspace and Delete. Chrome keeps the goal only when its caret ends in the text node it was in, on the same side of
- * a wrap: an erase that empties the caret's piece, ends in another one or starts at a caret drawn at the end of the
- * upper row clears it, wherever the caret is drawn after.
+ * Chrome keeps the goal only when its caret ends in the text node it was in, on the same side of a wrap: an erase that
+ * empties the caret's piece, ends in another one or starts at a caret drawn at the end of the upper row clears it,
+ * wherever the caret is drawn after.
  */
 const eraseTo = (editor: Editor, target: Buffer.Position): Editor => {
   const buffer = settled(editor)
@@ -286,7 +245,6 @@ const eraseTo = (editor: Editor, target: Buffer.Position): Editor => {
       })
 }
 
-/** A move that leaves the caret where it was keeps the goal, as Chrome does; one that moves it clears it. */
 const moveTo = (
   editor: Editor,
   caret: Buffer.Position,
@@ -319,7 +277,6 @@ const landingPosition = (
     Stay: () => Option.none(),
   })
 
-/** Lands a move, or leaves the editor as it was when the browser could not place it. */
 const landMove =
   (editor: Editor, reveal: Reveal = 'Nearest') =>
   ({ landing }: Answer): Outcome =>
@@ -331,7 +288,6 @@ const landMove =
       reveal,
     )
 
-/** ArrowLeft and ArrowRight: at either end of the text they do nothing, even to a caret inside a grapheme. */
 const step =
   (direction: 'Forward' | 'Backward') =>
   (editor: Editor): Plan => {
@@ -365,10 +321,6 @@ const step =
         )
   }
 
-/**
- * Ctrl+Left and Ctrl+Right move by word as Chrome's text field does on Linux, on every system: Windows would stop at the
- * start of the next word instead. A word move that stays keeps the goal; one that moves clears it.
- */
 const wordStep =
   (direction: 'Forward' | 'Backward') =>
   (editor: Editor): Plan => {
@@ -386,7 +338,6 @@ const wordStep =
     )
   }
 
-/** Delete erases what ArrowRight would step over, so it removes the grapheme the browser draws as one. */
 const deleteForward = (editor: Editor): Plan => {
   const buffer = settled(editor)
   const { line, column } = buffer.caret
@@ -430,7 +381,6 @@ const documentEdge = (editor: Editor, edge: 'Start' | 'End'): Plan =>
     ),
   )
 
-/** Up and Down aim at the goal, or at the caret's own x, which becomes the goal even if the caret cannot move. */
 const vertical =
   (rows: -1 | 1) =>
   (editor: Editor): Plan =>
@@ -455,10 +405,6 @@ const vertical =
       },
     )
 
-/**
- * Page Up and Page Down move the caret a page at the x it is drawn at, then scroll its row to the top of the screen,
- * as far as the end of the text allows. Like any other move, they clear the goal unless they leave the caret where it was.
- */
 const page =
   (direction: -1 | 1) =>
   (editor: Editor): Plan =>
@@ -520,7 +466,6 @@ const inputPlan = (editor: Editor, input: Input): Plan =>
     Commit: ({ text }) => now(insertText(text)({ ...editor, preedit: '' })),
   })
 
-/** A click below the last line is the end of the text. */
 const clickPlan = (editor: Editor, x: number, line: number, y: number): Plan =>
   line >= editor.buffer.lines.length
     ? documentEdge(editor, 'End')
@@ -532,12 +477,6 @@ const planOf = (editor: Editor, queued: Queued): Plan =>
     Clicked: ({ x, line, y }) => clickPlan(editor, x, line, y),
   })
 
-/**
- * Runs an input, or asks the browser what it needs first, with the line the query is about drawn: the clicked line, or
- * the caret's. A key whose caret left the drawn lines scrolls the caret on screen in the frame that draws them again.
- * Waiting for the answer would leave a frame in which the browser, keeping the lines on screen still as the drawn lines
- * change, reports the old place as a scroll.
- */
 const run = (editor: Editor, queued: Queued): Outcome => {
   const plan = planOf(editor, queued)
   if (plan._tag === 'Done') {
@@ -576,7 +515,6 @@ const enqueue = (editor: Editor, queued: Queued): Outcome =>
 
 const strongest = (a: Reveal, b: Reveal): Reveal => (b === 'None' ? a : b)
 
-/** Runs held inputs in order. Once one asks the browser, the rest wait behind it again. */
 const replay = (start: Outcome, queued: ReadonlyArray<Queued>): Outcome =>
   Array.reduce(queued, start, (outcome, next) => {
     const result = enqueue(outcome.editor, next)
@@ -587,7 +525,6 @@ const replay = (start: Outcome, queued: ReadonlyArray<Queued>): Outcome =>
     }
   })
 
-/** An outcome that asks for a reveal counts it, until the shell says it ran. */
 const owed = (outcome: Outcome): Outcome =>
   outcome.reveal === 'None'
     ? outcome
@@ -599,24 +536,14 @@ const owed = (outcome: Outcome): Outcome =>
         },
       }
 
-/** The shell ran a reveal. */
 export const revealed = (editor: Editor): Editor => ({
   ...editor,
   revealing: Math.max(0, editor.revealing - 1),
 })
 
-/**
- * The one way the keyboard changes the editor. An Input the mode has no use for (Escape, a Chord) changes nothing
- * and scrolls nothing. Every other Input puts the caret on screen, even a motion that cannot move the caret.
- * An Input that arrives while the browser has a query to answer waits for the answer.
- */
 export const feed = (editor: Editor, input: Input): Outcome =>
   owed(enqueue(editor, Queued.cases.Fed.make({ input })))
 
-/**
- * The pointer pressed on `line`, at client x and `y` pixels below the line's top. It lands where it would after every
- * input fed before it.
- */
 export const click = (
   editor: Editor,
   x: number,
@@ -624,7 +551,6 @@ export const click = (
   y: number,
 ): Outcome => owed(enqueue(editor, Queued.cases.Clicked.make({ x, line, y })))
 
-/** The browser answered the query the editor is waiting on. The caret lands, then the held inputs run. */
 export const located = (editor: Editor, answer: Answer): Outcome =>
   Option.match(editor.locating, {
     onNone: () => done(editor, 'None'),
@@ -636,7 +562,6 @@ export const located = (editor: Editor, answer: Answer): Outcome =>
     },
   })
 
-/** The line the shell has yet to read or reveal: a clicked line, or the caret's for a key's query or a reveal. */
 const awaitedLine = (editor: Editor): Option.Option<number> =>
   Option.match(editor.locating, {
     onNone: () =>
@@ -652,11 +577,6 @@ const awaitedLine = (editor: Editor): Option.Option<number> =>
       ),
   })
 
-/**
- * The screen shows `top` as its first line. The caret may leave the screen until an input brings it back. A report
- * that would undraw the line the shell has yet to read or reveal is left out: it can come from a scroll made before
- * the input, and the shell reads that line from the screen.
- */
 export const scrolled = (editor: Editor, top: number): Editor => {
   if (top === editor.top) {
     return editor
@@ -670,7 +590,6 @@ export const scrolled = (editor: Editor, top: number): Editor => {
     : moved
 }
 
-/** The screen holds this many rows now, and shows the caret if its line is drawn. */
 export const resized = (editor: Editor, rows: number): Outcome => {
   const size = Math.max(1, Math.floor(rows))
   return owed({
@@ -680,7 +599,6 @@ export const resized = (editor: Editor, rows: number): Outcome => {
   })
 }
 
-/** Cells left of the text: the largest line number, at least four digits, then two blank cells. */
 const gutterWidth = (buffer: Buffer.Buffer): number =>
   Math.max(4, String(buffer.lines.length).length) + 2
 
@@ -706,10 +624,6 @@ const cutAt = (
     : [{ from: 0, text: '', isPreedit: false }]
 }
 
-/**
- * Each line's pieces, kept while the line is unchanged. An edit replaces a Line object, so a paint returns the same
- * parts array for every other line and the shell can tell at once that its view is unchanged.
- */
 const piecesOfLine = new WeakMap<Buffer.Line, ReadonlyArray<Part>>()
 
 const piecesOf = (line: Buffer.Line): ReadonlyArray<Part> => {
@@ -722,7 +636,6 @@ const piecesOf = (line: Buffer.Line): ReadonlyArray<Part> => {
   return pieces
 }
 
-/** The line split at its joins, and at the caret when a preedit is drawn there. */
 const partsOf = (
   line: Buffer.Line,
   preedit: Option.Option<Readonly<{ column: number; text: string }>>,
@@ -743,7 +656,6 @@ const partsOf = (
     },
   })
 
-/** How far, in UTF-16 units on each side of the caret, an IME may read the caret's line. */
 const surroundingReach = 1000
 
 export const paint = (editor: Editor): Frame => {
@@ -787,7 +699,6 @@ export const paint = (editor: Editor): Frame => {
   }
 }
 
-/** The drawn lines as plain text, the caret in brackets. For an agent to read a screen without a browser. */
 export const dump = (frame: Frame): string =>
   Array.join(
     Array.map(frame.lines, line => {

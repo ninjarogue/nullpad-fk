@@ -9,7 +9,6 @@ import {
 } from '../nullpad'
 import { type Script, type Step, acceptedDifference } from './script'
 
-/** `rows` holds where each line starts its rows, and is left out when nullpad's screen does not show the whole text. */
 export type Snapshot = Readonly<{
   text: string
   line: number
@@ -26,10 +25,8 @@ export type Divergence = Readonly<{
   accepted: string | undefined
 }>
 
-/** nullpad's wrap width, in cells and pixels per cell, so the oracle textarea wraps where nullpad does. */
 type Measure = Readonly<{ columns: number; cell: number; stylesheet: string }>
 
-/** A textarea in nullpad's font, as wide as nullpad's text column, so it wraps at the same edge. */
 const oracleHtml = ({ columns, cell, stylesheet }: Measure) =>
   [
     '<!doctype html><meta charset="utf-8">',
@@ -40,7 +37,6 @@ const oracleHtml = ({ columns, cell, stylesheet }: Measure) =>
 /**
  * nullpad, a textarea that wraps at nullpad's edge, and a bare EditContext element that decides what Backspace takes,
  * each in its own browser context so none runs as a throttled background tab and the textarea never loses focus.
- * `textareaDom` reads the textarea's own text nodes.
  */
 export type Pair = Readonly<{
   nullpad: Page
@@ -139,10 +135,9 @@ const findTextarea = (node: DomNode): DomNode | undefined =>
     : (node.children ?? []).map(findTextarea).find(found => found !== undefined)
 
 /**
- * The textarea's own text nodes, with a line break for each `<br>`. Chrome keeps the two halves of a line that
- * Backspace or Delete joined in separate text nodes, as nullpad keeps a join. They sit in the textarea's user-agent
- * shadow root, which only the DevTools protocol reaches, and DOM.getDocument leaves out text nodes of only spaces, so
- * they are read from the editor element itself.
+ * Chrome keeps the two halves of a line that Backspace or Delete joined in separate text nodes, as nullpad keeps a
+ * join. They sit in the textarea's user-agent shadow root, which only the DevTools protocol reaches, and
+ * DOM.getDocument leaves out text nodes of only spaces, so they are read from the editor element itself.
  */
 const textareaNodes = async (
   dom: CDPSession,
@@ -167,10 +162,6 @@ const textareaNodes = async (
   return result.value
 }
 
-/**
- * The text Backspace reads back from: the caret's line, or the textarea text node in it that ends at or holds the
- * caret. Empty at a line start.
- */
 const pieceBefore = async (
   dom: CDPSession,
   value: string,
@@ -217,10 +208,6 @@ const textareaCaret = (page: Page) =>
     return { value: area.value, caret: area.selectionStart }
   })
 
-/**
- * What a real Backspace takes from `piece` in a bare EditContext, as offsets into `piece`. The caret first moves to
- * the next grapheme boundary, as nullpad and Chrome's textarea move it before any command.
- */
 const editContextBackspace = async (
   letters: Page,
   piece: string,
@@ -261,12 +248,8 @@ const editContextBackspace = async (
 }
 
 /**
- * Backspace on the textarea, then as much more of the letter before the caret as a bare EditContext takes from the
- * same text. The textarea keeps its own Backspace where the two agree, so its column for Up and Down survives; where
- * the EditContext takes more, the rest goes as a selection. On an accepted malformed sequence, Chrome's textarea may delete
- * text outside the letter, such as the character after the caret, so there is nothing to finish and the pair is left
- * for `compare` to file under that accepted difference. Returns the piece the EditContext judged, which `compare`
- * reads for an accepted difference, as a piece that starts at a line join can be malformed where the whole line is not.
+ * The textarea keeps its own Backspace where the two agree, so its column for Up and Down survives; where the
+ * EditContext takes more, the rest goes as a selection.
  */
 const backspaceAsEditContext = async (
   pair: Pair,
@@ -331,11 +314,6 @@ const nullpadSnapshot = async (page: Page): Promise<Snapshot> => {
   }
 }
 
-/**
- * The textarea's caret as nullpad's status line shows one: line, then graphemes before it plus one, and where its
- * lines wrap. A line of at most a third as many UTF-16 units as the row has cells cannot wrap, as no grapheme in
- * the scripts is wider than three cells per unit, so text of only such lines is not measured.
- */
 const textareaSnapshot = async (
   page: Page,
   { columns, cell }: Measure,
@@ -371,18 +349,11 @@ const same = (a: Snapshot, b: Snapshot) =>
     b.rows === undefined ||
     JSON.stringify(a.rows) === JSON.stringify(b.rows))
 
-/** Applies the step and returns the piece a Backspace was judged on, if it was one. */
 const applyToTextarea = (pair: Pair, step: Step): Promise<string | undefined> =>
   step.kind === 'key' && step.key === 'Backspace'
     ? backspaceAsEditContext(pair)
     : apply(pair.textarea, step).then(() => undefined)
 
-/**
- * Types `script` into both from empty and returns the first step after which text, caret or row breaks differ.
- * Backspace on the textarea takes what a bare EditContext takes. The two pages are independent, so each step goes to
- * both at once. The steps before `from` are typed back to back, with one wait for nullpad to draw them, and not
- * compared, for a script whose first steps repeat across many runs.
- */
 export const compare = async (
   pair: Pair,
   script: Script,

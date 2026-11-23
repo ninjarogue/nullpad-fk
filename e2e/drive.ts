@@ -16,6 +16,7 @@ import { parseArgs } from 'node:util'
 
 import { type Browser, chromium } from '@playwright/test'
 
+import { newestSource } from '../scripts/build-stamp.ts'
 import {
   type Step,
   describe,
@@ -63,18 +64,6 @@ const waitForServer = async (
 
 const repo = resolve(import.meta.dirname, '..')
 
-const newestSource = (): number =>
-  execFileSync('git', ['ls-files', 'src', 'index.html', 'vite.config.ts'], {
-    cwd: repo,
-    encoding: 'utf8',
-  })
-    .split('\n')
-    .filter(path => path !== '' && existsSync(join(repo, path)))
-    .reduce(
-      (newest, path) => Math.max(newest, statSync(join(repo, path)).mtimeMs),
-      0,
-    )
-
 const doctor = async (): Promise<number> => {
   const problems: Array<string> = []
   const say = (line: string) => console.log(line)
@@ -98,7 +87,7 @@ const doctor = async (): Promise<number> => {
   }
   const dist = join(repo, 'dist', 'index.html')
   if (existsSync(dist)) {
-    const stale = statSync(dist).mtimeMs < newestSource()
+    const stale = statSync(dist).mtimeMs < newestSource(repo)
     say(
       `dist/ ${stale ? 'is older than src/; runs build fresh anyway' : 'is current'}`,
     )

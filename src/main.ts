@@ -1,6 +1,6 @@
 import { Effect, Option, Schema } from 'effect'
 import { Command, type Runtime, type Update } from 'foldkit'
-import type { Document, HtmlBuilder } from 'foldkit/html'
+import type { Document, Html, HtmlBuilder } from 'foldkit/html'
 import { modifyFields } from 'foldkit/struct'
 
 import * as Editor from './core/editor'
@@ -10,15 +10,44 @@ import { locate, revealCaret, statusLine, surface } from './surface'
 
 export { Message }
 
+export const Pane = Schema.Literals(['None', 'Html', 'Outline'])
+export type Pane = typeof Pane.Type
+
+export const Flags = Schema.Struct({ pane: Pane })
+export type Flags = typeof Flags.Type
+
+const paneNames: Readonly<Record<string, Pane>> = {
+  html: 'Html',
+  outline: 'Outline',
+}
+
+export const flagsOf = (search: string): Flags => ({
+  pane: Option.getOrElse(
+    Option.flatMap(
+      Option.fromNullishOr(new URLSearchParams(search).get('pane')),
+      name => Option.fromUndefinedOr(paneNames[name]),
+    ),
+    () => 'None',
+  ),
+})
+
 export const Model = Schema.Struct({
   editor: Editor.Editor,
   keyboard: Keyboard,
   path: Schema.String,
+  pane: Pane,
 })
 export type Model = typeof Model.Type
 
-export const init: Runtime.ApplicationInit<Model, Message> = () => ({
-  model: { editor: Editor.open(''), keyboard: 'Blurred', path: 'untitled.md' },
+export const init: Runtime.ApplicationInit<Model, Message, Flags> = ({
+  pane,
+}) => ({
+  model: {
+    editor: Editor.open(''),
+    keyboard: 'Blurred',
+    path: 'untitled.md',
+    pane,
+  },
 })
 
 const Locate = Command.define('Locate', {
@@ -82,6 +111,18 @@ export const update = (model: Model, message: Message) =>
     }),
   })
 
+const paneView = (model: Model, h: HtmlBuilder<Message>): Html =>
+  model.pane === 'None'
+    ? h.empty
+    : h.pre(
+        [h.Class('pane')],
+        [
+          model.pane === 'Html'
+            ? Editor.html(model.editor)
+            : Editor.outline(model.editor),
+        ],
+      )
+
 export const view = (model: Model, h: HtmlBuilder<Message>): Document => {
   const frame = Editor.paint(model.editor)
   return {
@@ -93,6 +134,7 @@ export const view = (model: Model, h: HtmlBuilder<Message>): Document => {
           ? [browserUnsupportedNotice(h)]
           : [
               surface(frame, model.keyboard, h),
+              paneView(model, h),
               statusLine(frame.status, model.path, h),
             ]),
         keyboardPort(frame.surrounding, model.keyboard, h),

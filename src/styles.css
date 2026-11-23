@@ -120,6 +120,18 @@ body {
   text-underline-offset: 3px;
 }
 
+.pane {
+  flex: none;
+  max-height: 40%;
+  margin: 0 0 0 2ch;
+  padding: 0 1ch;
+  overflow: auto;
+  border-top: 1px solid var(--rule);
+  color: var(--dim);
+  font: inherit;
+  white-space: pre;
+}
+
 .status {
   display: flex;
   flex: none;

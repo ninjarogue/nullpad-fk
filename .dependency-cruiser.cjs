@@ -24,7 +24,10 @@ module.exports = {
       name: 'shell-imports-core-internals',
       severity: 'error',
       from: { path: '^src/', pathNot: core },
-      to: { path: core, pathNot: '^src/core/(editor|input)[.]ts$' },
+      to: {
+        path: core,
+        pathNot: '^src/core/(editor|finder|input|notes)[.]ts$',
+      },
     },
     {
       name: 'markdown-internals-outside-markdown',

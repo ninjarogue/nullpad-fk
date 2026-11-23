@@ -1,4 +1,4 @@
-import { type Nullpad, test as base, expect } from './nullpad'
+import { type Nullpad, test as base, expect, openFresh } from './nullpad'
 
 export { expect }
 
@@ -21,8 +21,7 @@ export const test = base.extend<{ pane: Pane }>({
     await use({
       nullpad,
       paste: async (markdown, kind = 'html') => {
-        await page.goto(`/?pane=${kind}`)
-        await page.locator('#caret').waitFor()
+        await openFresh(page, `/?pane=${kind}`)
         await nullpad.paste(markdown)
         await expect(
           page.locator('.pos'),
@@ -31,8 +30,7 @@ export const test = base.extend<{ pane: Pane }>({
         return (await page.locator('.pane').textContent()) ?? ''
       },
       timedPaste: async (markdown, kind = 'html') => {
-        await page.goto(kind === 'none' ? '/' : `/?pane=${kind}`)
-        await page.locator('#caret').waitFor()
+        await openFresh(page, kind === 'none' ? '/' : `/?pane=${kind}`)
         const started = performance.now()
         await nullpad.paste(markdown)
         await page.waitForFunction(

@@ -4,7 +4,7 @@ One file per thing a person does in nullpad. Read this index, then drive the mat
 
 ## Baseline
 
-- Every run starts on an empty note: one empty line, status `1:1 1L`, cursor on row 0 cell 0.
+- Every run starts on an empty note in a fresh browser profile with no notes saved: one empty line, status `1:1 1L`, cursor on row 0 cell 0.
 - The window is 1000 by 600 unless the run passes `--width` and `--height`. At 1000 wide a row holds 76 cells.
 - `node e2e/drive.ts --doctor` ends with `ok`.
 
@@ -26,3 +26,4 @@ Each file opens with what the person sees, then four sections: `Sub-features`, `
 - [Clicking](./clicking.md) covers placing the cursor with the mouse on text, wrapped rows and below the last line.
 - [Scrolling](./scrolling.md) covers the wheel on long notes and the cursor coming back on screen when a person types.
 - [IME and paste](./ime-and-paste.md) covers composing text with an input method and pasting from the clipboard.
+- [Notes and finder](./notes-and-finder.md) covers saving notes, reloading, and the Ctrl-P finder with its folders and moves.

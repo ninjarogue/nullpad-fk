@@ -10,6 +10,10 @@
   --rule: #1d1d1c;
   --cur: #e8e3d6;
   --barfg: #8a8781;
+  --gut: #3a3936;
+  --ins: #c9b37e;
+  --sel: #33322e;
+  --accent: #e8e3d6;
   --row: 22px;
   color-scheme: dark;
 }
@@ -163,6 +167,12 @@ body {
   color: var(--dim);
 }
 
+.warn {
+  overflow: hidden;
+  color: var(--ins);
+  text-overflow: ellipsis;
+}
+
 .unsupported {
   flex: 1;
   max-width: 76ch;
@@ -190,4 +200,267 @@ body {
   outline: 0;
   opacity: 0;
   pointer-events: none;
+}
+
+.finder {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+}
+
+.finder .backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgb(8 8 9 / 0.55);
+}
+
+.finder .win {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr);
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 1.4em 1ch;
+  width: min(1100px, 88vw);
+  height: min(580px, 74vh);
+  min-height: 0;
+  background: var(--bg);
+}
+
+.finder .box {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  border: 1px solid var(--gut);
+  border-radius: 6px;
+}
+
+.finder .bt {
+  position: absolute;
+  top: -0.8em;
+  left: 1.5ch;
+  padding: 0 1ch;
+  background: var(--bg);
+  max-width: calc(100% - 3ch);
+  overflow: hidden;
+  color: var(--dim);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.finder .bt b {
+  color: var(--fg);
+  font-weight: 400;
+}
+
+.finder .prompt {
+  grid-column: 1;
+  padding: 8px 1.5ch 6px;
+}
+
+.finder .pl {
+  display: flex;
+  white-space: pre;
+}
+
+.finder .p {
+  margin-right: 1ch;
+  color: var(--ins);
+}
+
+.finder .query {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.finder .fcur {
+  anchor-name: --caret;
+  background: var(--cur);
+  color: var(--bg);
+}
+
+.finder .placeholder {
+  color: var(--gut);
+}
+
+.finder .cnt {
+  margin-left: 1ch;
+  color: var(--gut);
+}
+
+.finder .folders {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 2ch;
+  margin-top: 6px;
+  color: var(--dim);
+}
+
+.finder .folders button {
+  padding: 0;
+  color: var(--dim);
+  cursor: pointer;
+}
+
+.finder .folders .n {
+  margin-left: 0.5ch;
+  color: var(--gut);
+}
+
+.finder .folders button.on {
+  margin: 0 -1ch;
+  padding: 0 1ch;
+  background: var(--accent);
+  color: var(--bg);
+}
+
+.finder .folders button.on .n {
+  color: var(--bg);
+}
+
+.finder .sep {
+  color: var(--gut);
+}
+
+.finder .results {
+  display: flex;
+  flex-direction: column;
+  grid-column: 1;
+  grid-row: 2;
+  padding: 10px 0 6px;
+}
+
+.finder .rl {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  scrollbar-width: none;
+}
+
+.finder .row {
+  display: flex;
+  gap: 1ch;
+  padding: 0 1.5ch;
+  white-space: pre;
+  cursor: pointer;
+}
+
+.finder .row .t {
+  flex: 0 1 auto;
+  min-width: 12ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.finder .row .fd {
+  flex: 1 1 0;
+  min-width: 6ch;
+  overflow: hidden;
+  color: var(--gut);
+  text-align: right;
+  text-overflow: ellipsis;
+  direction: rtl;
+}
+
+.finder .row .a {
+  min-width: 4ch;
+  color: var(--gut);
+  text-align: right;
+}
+
+.finder .row b {
+  color: var(--ins);
+  font-weight: 800;
+}
+
+.finder .row.sel {
+  background: var(--sel);
+}
+
+.finder .row.sel .t::before {
+  content: '› ';
+  color: var(--ins);
+}
+
+.finder .row.sel .fd {
+  color: var(--dim);
+}
+
+.finder .row.sub .t {
+  color: var(--dim);
+}
+
+.finder .row.new .t {
+  color: var(--ins);
+}
+
+.finder .preview {
+  grid-column: 2;
+  grid-row: 1 / 3;
+  padding: 12px 2ch;
+}
+
+.finder .pvb {
+  height: 100%;
+  overflow: hidden;
+}
+
+.finder .path {
+  margin-bottom: 2px;
+  color: var(--dim);
+  word-break: break-all;
+}
+
+.finder .path b {
+  color: var(--fg);
+  font-weight: 400;
+}
+
+.finder .meta {
+  margin-bottom: 10px;
+  color: var(--gut);
+}
+
+.finder pre {
+  margin: 0;
+  font: inherit;
+  white-space: pre-wrap;
+}
+
+.finder .keys {
+  grid-column: 1 / -1;
+  grid-row: 3;
+  margin-top: -1em;
+  overflow: hidden;
+  color: var(--gut);
+  text-align: right;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+body:has(.finder) #caret {
+  visibility: hidden;
+}
+
+@media (max-width: 700px) {
+  .finder .win {
+    grid-template-columns: minmax(0, 1fr);
+    width: calc(100vw - 2ch);
+  }
+
+  .finder .preview {
+    display: none;
+  }
+}
+
+@media (max-height: 480px) {
+  .finder .win {
+    height: calc(100vh - 2 * var(--row));
+  }
+
+  .finder .keys {
+    display: none;
+  }
 }

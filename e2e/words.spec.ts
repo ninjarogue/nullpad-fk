@@ -1,6 +1,6 @@
 import type { Page } from '@playwright/test'
 
-import { expect, screenOf, test, textOf } from './nullpad'
+import { expect, openFresh, screenOf, test, textOf } from './nullpad'
 import { type Pair, openPair } from './typist/run'
 
 test.describe.configure({ mode: 'parallel' })
@@ -135,9 +135,7 @@ const textareaPressAsNullpad = async (page: Page, key: Key): Promise<Caret> => {
 
 const load = async (pair: Pair, text: string) => {
   await Promise.all([
-    pair.nullpad
-      .goto('/')
-      .then(() => pair.nullpad.locator('#caret').waitFor())
+    openFresh(pair.nullpad)
       .then(() => pair.nullpad.keyboard.insertText(text))
       .then(() => pair.nullpad.keyboard.press('Control+Home')),
     pair.textarea.evaluate(value => {

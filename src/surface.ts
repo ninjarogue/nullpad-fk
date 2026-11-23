@@ -985,6 +985,7 @@ const modeLabels: Readonly<Record<Mode, string>> = { Plain: 'EDIT' }
 export const statusLine = (
   status: Frame['status'],
   path: string,
+  maybeWarning: Option.Option<string>,
   h: HtmlBuilder<Message>,
 ): Html =>
   h.div(
@@ -992,6 +993,10 @@ export const statusLine = (
     [
       h.span([h.Class('mode')], [modeLabels[status.mode]]),
       h.span([h.Class('file')], [path]),
+      ...Option.match(maybeWarning, {
+        onNone: () => [],
+        onSome: warning => [h.span([h.Class('warn')], [warning])],
+      }),
       h.span(
         [h.Class('pos')],
         [`${status.line}:${status.column} ${status.lineCount}L`],

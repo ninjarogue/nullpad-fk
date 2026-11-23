@@ -171,10 +171,10 @@ const listen = (
         base,
       }: Readonly<{ from: number; to: number; base: number }>) =>
         Effect.sync(() => {
-          Option.map(drawnRect('.surface'), rect =>
+          Option.map(drawnRect(port.dataset['control'] ?? '.surface'), rect =>
             context.updateControlBounds(rect),
           )
-          Option.map(drawnRect('#caret'), rect =>
+          Option.map(drawnRect(port.dataset['selection'] ?? '#caret'), rect =>
             context.updateSelectionBounds(rect),
           )
           context.updateCharacterBounds(
@@ -395,8 +395,11 @@ export const KeyboardPort = Mount.defineStream('KeyboardPort', {
     }),
 })
 
+export type Bounds = Readonly<{ control: string; selection: string }>
+
 export const keyboardPort = (
   surrounding: Readonly<{ text: string; caret: number }>,
+  bounds: Bounds,
   keyboard: Keyboard,
   h: HtmlBuilder<Message>,
 ): Html =>
@@ -407,6 +410,8 @@ export const keyboardPort = (
       : [h.Role('textbox'), h.AriaLabel('editor'), h.Tabindex(0)]),
     h.DataAttribute('surrounding', surrounding.text),
     h.DataAttribute('caret', String(surrounding.caret)),
+    h.DataAttribute('control', bounds.control),
+    h.DataAttribute('selection', bounds.selection),
     h.OnMount(KeyboardPort()),
   ])
 

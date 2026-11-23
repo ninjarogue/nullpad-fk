@@ -143,6 +143,8 @@ NULLPAD_DIST=/path/to/dist pnpm test:e2e   # tests a build made elsewhere, such 
 
 Without `NULLPAD_DIST`, Playwright builds the working tree into `dist/` first, so a run always tests the current source. Traces are off by default. Pass `--trace retain-on-failure` to keep them for failing tests only.
 
+Playwright runs one and a half workers for each core (`workers: '150%'` in `playwright.config.ts`). A test spends much of its time waiting for frames, so one worker for each core left about a quarter of the CPU idle. With 8 workers on 4 cores the slowest scenario took 49 of its 60 seconds.
+
 On a machine without Playwright's Chromium, install it once with `pnpm exec playwright install chromium`. Cloud sessions have it at `/opt/pw-browsers` already. The `@playwright/test` version in `package.json` must match that browser's revision.
 
 ### Layout
@@ -208,7 +210,7 @@ A sweep has a `name` that states its rule in plain words, `runs` that says wheth
 
 A row is one document, one placement and one move. Its script is the document's steps, the placement's steps and the move, in that order. `scripts` holds the number of rows as a literal. A test fails when the grid has another size, so a grid that shrinks shows as a changed number in the diff.
 
-A row types every step before its last placement step back to back, without comparing. It then compares after that step, where the placement left the cursor, and after each step of the move. A row passes when nullpad and the textarea agree each time, or when an accepted difference covers the text. A failing row prints as `document | placement | move | differs after step N of M | nullpad L:C textarea L:C | text same: true`. A row that throws prints `threw:` and the error in place of the step. The rows go round-robin to `TYPIST_SHARDS` shards (8 by default), and each shard prints how many rows it checked, how many differ, and how many differences each accepted difference covered.
+A row types every step before its last placement step back to back, without comparing. It then compares after that step, where the placement left the cursor, and after each step of the move. A comparison at the end of the row alone would cost about as much: nullpad answers one layout key a frame, so the move's keys take their frames anyway, and a single wait after a burst of them reads a caret that has not landed yet. A row passes when nullpad and the textarea agree each time, or when an accepted difference covers the text. A failing row prints as `document | placement | move | differs after step N of M | nullpad L:C textarea L:C | text same: true`. A row that throws prints `threw:` and the error in place of the step. The rows go round-robin to `TYPIST_SHARDS` shards (8 by default), and each shard prints how many rows it checked, how many differ, and how many differences each accepted difference covered.
 
 The sweeps today:
 

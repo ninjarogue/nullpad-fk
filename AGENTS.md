@@ -114,10 +114,10 @@ pnpm typecheck   # the shell (tsconfig.json), the core (src/core/tsconfig.json) 
 pnpm arch        # import rules and the one-keyboard check
 pnpm build
 pnpm test:e2e    # the end-to-end tests of the push gate, in headless Chromium
-pnpm test:ready  # before a merge: the push gate, every sweep and the scout
+pnpm test:all    # on demand only: the push gate, every sweep, the markdown grids and the slow checks
 ```
 
-`.githooks/pre-push` runs all but `test:ready` in that order and gives the tests the build it just made. `pnpm install` turns the hook on (`prepare` sets `core.hooksPath`) and applies the Effect lint patch to `node_modules` (`postinstall`). `lint` itself changes nothing.
+`.githooks/pre-push` runs all but `test:all` in that order and gives the tests the build it just made. `pnpm install` turns the hook on (`prepare` sets `core.hooksPath`) and applies the Effect lint patch to `node_modules` (`postinstall`). `lint` itself changes nothing.
 
 Use pnpm, never npm or npx. `package.json` pins its version for corepack. pnpm fails the install when a dependency has a build script it was not told to run, so a dependency that needs one goes under `allowBuilds` in `pnpm-workspace.yaml`.
 
@@ -135,7 +135,7 @@ A bug fix starts with a scenario that fails on the bug. Run it on the broken bui
 
 ```sh
 pnpm test:e2e                       # builds, then runs the push gate: scenarios, named scripts and the every-push sweeps
-pnpm test:ready                     # builds, then runs the push gate, every sweep and the scout, before a merge
+pnpm test:all                       # builds, then runs everything, on demand only
 pnpm test:e2e -g "huge wheel"       # tests whose name matches
 pnpm test:e2e --trace on            # keeps a trace of each test; open one with pnpm exec playwright show-trace
 NULLPAD_DIST=/path/to/dist pnpm test:e2e   # tests a build made elsewhere, such as an old commit, without building
@@ -154,14 +154,14 @@ On a machine without Playwright's Chromium, install it once with `pnpm exec play
 | `browser-support.spec.ts`                                                           | A browser without EditContext shows that nullpad needs Chrome or Edge instead of an editor that takes no typing.                                                                                                                                                                                                        |
 | `e2e/pane.ts`, `pane.spec.ts`                                                       | The `pane` fixture: opens `/?pane=html` or `/?pane=outline`, pastes a note through the editor and returns the pane's text (`timedPaste` also times the paste, on a page with the pane or without one). The scenarios check the outline's rows, that the default screen has no pane, and that raw HTML is drawn as text. |
 | `commonmark.spec.ts`, `e2e/markdown/examples.ts`                                    | The 652 examples of CommonMark 0.31.2, read from `commonmark-spec`. Each is pasted through the editor, and the HTML pane must show the example's HTML to the character. One test per section of the spec.                                                                                                               |
-| `markdown-sweep.spec.ts`, `e2e/markdown/grids.ts`, `reference.ts`, `differences.ts` | The markdown grids: every short string over an alphabet, every stack of one to three line shapes, each compared with `commonmark@0.31.2` run in the test process. They run before a merge. See Markdown tests.                                                                                                          |
+| `markdown-sweep.spec.ts`, `e2e/markdown/grids.ts`, `reference.ts`, `differences.ts` | The markdown grids: every short string over an alphabet, every stack of one to three line shapes, each compared with `commonmark@0.31.2` run in the test process. They run on demand. See Markdown tests.                                                                                                               |
 | `markdown-places.spec.ts`, `e2e/markdown/places.ts`                                 | Reads the outline pane and checks the rules that hold for any note: children lie inside their parent, the source under a node has the shape of its tag, and no line with text lies outside the top-level blocks. The notes are the 652 spec examples.                                                                   |
 | `markdown-limits.spec.ts`                                                           | Scenarios whose expected value the spec or this file decides and a reference cannot give: where a setext heading ends, the nesting limit, the length of an autolink scheme.                                                                                                                                             |
-| `markdown-slow.spec.ts`, `e2e/markdown/slow.ts`                                     | Inputs that a careless parser reads in quadratic time. Each is pasted at n and 4n, and the time the pane adds to the paste must grow in line with the size. They run before a merge.                                                                                                                                    |
+| `markdown-slow.spec.ts`, `e2e/markdown/slow.ts`                                     | Inputs that a careless parser reads in quadratic time. Each is pasted at n and 4n, and the time the pane adds to the paste must grow in line with the size. They run on demand.                                                                                                                                         |
 | `click-sweep.spec.ts`                                                               | Clicks a grid across the whole window and checks that the cursor lands on the nearest drawn character boundary each time.                                                                                                                                                                                               |
 | `extremes.spec.ts`                                                                  | Giant and tiny wheel turns, 120,000-line pastes, line counts crossing 9,999 and 99,999, very long lines, AltGr keys, IME compositions.                                                                                                                                                                                  |
-| `sweep.spec.ts`, `e2e/typist/sweeps.ts`                                             | The sweeps: grids of scripts, each compared with a textarea. Some play on every push, the rest before a merge.                                                                                                                                                                                                          |
-| `typist.spec.ts`, `typist-flicker.spec.ts`, `e2e/typist/`                           | The named scripts, which run on every push. The scout and the typist flicker checks, which run only with `TYPIST_SCOUT_MINUTES`. `run.ts` holds the comparison, `script.ts` the named scripts and accepted differences, and `scout.ts` the scout.                                                                       |
+| `sweep.spec.ts`, `e2e/typist/sweeps.ts`                                             | The sweeps: grids of scripts, each compared with a textarea. They run on demand.                                                                                                                                                                                                                                        |
+| `typist.spec.ts`, `typist-flicker.spec.ts`, `e2e/typist/`                           | The named scripts, which run on every push, and the typist flicker checks, which run on demand. `run.ts` holds the comparison and `script.ts` the named scripts and accepted differences.                                                                                                                               |
 | `e2e/drive.ts`, `.claude/skills/verify-nullpad/`                                    | Not a test. Plays a JSON list of steps on a fresh build with the fixture's driver, prints the screen after each step and saves evidence. The `verify-nullpad` skill says how, and its `features/*.json` are runnable proofs of each feature.                                                                            |
 | `e2e/reporters/require-tests.ts`                                                    | Fails a run in which no test ran, so a filter or a skip cannot turn the gate green.                                                                                                                                                                                                                                     |
 
@@ -191,7 +191,7 @@ A script is a list of steps. A `text` step types one code point, or an ASCII run
 
 Backspace is judged against a bare EditContext element in a third browser context, not against the textarea. Before each Backspace the typist reads the textarea's own text nodes over the DevTools protocol, because Chrome keeps the halves of a joined line in separate nodes as nullpad keeps a join. The text node before the cursor goes into the EditContext, with the cursor moved to the next grapheme boundary, and the EditContext takes a real Backspace. The textarea takes its own Backspace too. Where the EditContext took more, the rest of that letter is deleted from the textarea as a selection, so the textarea holds the EditContext's result for the comparison and the steps after it. At a line start the textarea joins the lines itself.
 
-Three kinds of script run. Named scripts and the sweeps marked `every push` run on every push. The other sweeps and the scout run before a merge, with `pnpm test:ready`.
+Two kinds of script run. Named scripts run on every push. Sweeps run on demand, with `pnpm test:sweep` or `pnpm test:all`.
 
 #### Named scripts
 
@@ -201,7 +201,7 @@ Three kinds of script run. Named scripts and the sweeps marked `every push` run 
 
 A sweep covers one class of bugs with a grid of scripts. It plays the same scripts on every run, so a failing row fails again until the bug is fixed. `e2e/typist/sweeps.ts` holds the table and `e2e/sweep.spec.ts` plays it.
 
-A sweep has a `name` that states its rule in plain words, `runs` that says whether it plays on every push or before a merge, and these lists.
+A sweep has a `name` that states its rule in plain words, `runs` that says whether it plays on every push or on demand, and these lists.
 
 - `documents`. Each has a name and the steps that build it.
 - `placements`. Each has a name, the steps that put the cursor in a document, and its `moves`. A move is a short script, such as one key and then `y`, so the text shows where the cursor stood.
@@ -212,48 +212,27 @@ A row types every step before its last placement step back to back, without comp
 
 The sweeps today:
 
-- Up or Down, any key, Up or Down lands where a textarea lands. Runs on every push. 6 documents (three short lines, a wrapped line of words, a long word that moved to the next row, one word longer than a row, a full row that ends in spaces, and rows of emoji and accents), 7 placements, and 52 moves in each: Up or Down, then any of 13 keys, then Up or Down. 2,184 rows, about 3 minutes on 4 cores.
-- One Backspace, Delete, Left or Right takes what a textarea takes around emoji, flags and accents. Runs before a merge, as two sweeps. The documents are twelve pieces (a letter, an accent, two flag letters, a thumbs up, a skin tone, a man, a ZWJ, a heart, a variation selector, a Devanagari letter and a virama) in every ordered pair, and seven fixed documents (two of Hangul, a keycap, a family of three, a family of four and a kiss with skin tones, which are letters of 11 and 15 UTF-16 units, and a flag split by an x). Each move is one key and then `y`.
+- Up or Down, any key, Up or Down lands where a textarea lands. Runs on demand. 6 documents (three short lines, a wrapped line of words, a long word that moved to the next row, one word longer than a row, a full row that ends in spaces, and rows of emoji and accents), 7 placements, and 52 moves in each: Up or Down, then any of 13 keys, then Up or Down. 2,184 rows, about 3 minutes on 4 cores.
+- One Backspace, Delete, Left or Right takes what a textarea takes around emoji, flags and accents. Runs on demand, as two sweeps. The documents are twelve pieces (a letter, an accent, two flag letters, a thumbs up, a skin tone, a man, a ZWJ, a heart, a variation selector, a Devanagari letter and a virama) in every ordered pair, and seven fixed documents (two of Hangul, a keycap, a family of three, a family of four and a kiss with skin tones, which are letters of 11 and 15 UTF-16 units, and a flag split by an x). Each move is one key and then `y`.
   - Typed in order: 151 documents, 3 placements (at the end, at the start, one Right from the start). 906 rows.
   - Met at a line join, or typed one in front of the other: 302 documents, the same 3 placements and where the build left the cursor. 3,020 rows.
 
-The second rule has 54 named scripts on every push, and its sweeps would add about 5 minutes to each push on 4 cores, so they run before a merge. Add a row only for a shape the grid does not reach. When a bug turns up, run the sweep on the broken build first and see the new row fail.
+The second rule has 54 named scripts on every push. Add a row only for a shape the grid does not reach. When a bug turns up, run the sweep on the broken build first and see the new row fail.
 
 1. If the bug fits a sweep's rule, add the document that shows it. If the bug needs a cursor spot or a key the grid lacks, add a placement or a move too. Set `scripts` to the new count.
 2. If the bug breaks another rule, add a sweep to `sweeps` with its own name, documents, placements, `scripts` and `runs`.
 3. Add the shortest failing script to `namedScripts`. The sweep finds the neighbors of the bug, and the named script keeps the bug itself.
 
-`pnpm test:sweep` plays every sweep alone, the ones that run before a merge too.
-
-#### The scout
-
-The scout plays random scripts, aimed at the texts the sweeps use. It looks for bugs the grids miss. It does not run on a push. `pnpm test:ready` runs it before a merge, and `pnpm test:scout` runs it alone.
-
-`scoutScript(seed)` in `e2e/typist/scout.ts` makes these draws in order:
-
-1. A sweep.
-2. One of that sweep's documents, or one time in four a line of 50 to 90 characters built from a list of words with hyphens, dashes, URLs, markdown, brackets, quotes and runs of spaces.
-3. One of that sweep's placements.
-4. Four to ten more steps. Most are steps from that sweep's moves. The rest are any key, a word, a whole emoji, flag or accent cluster typed one code point at a time, or a lone code point.
-
-Each shard plays scripts until `TYPIST_SCOUT_MINUTES` minutes pass, and prints how many it played. A script that fails is played again from empty and shrunk to the shortest script that still fails. The report prints the sequence seed, the shortest script, and that script as JSON for `namedScripts`. A sequence seed names the same script only while `sweeps.ts` and `scout.ts` stay the same, so keep the printed script.
-
-Every scout find becomes a sweep row, or a new sweep, and a named script. If a month of scout runs finds nothing new, drop the scout.
+`pnpm test:sweep` plays every sweep alone.
 
 #### Commands
 
 ```sh
-pnpm test:e2e                                           # the push gate: scenarios, named scripts and the every-push sweeps, with no random scripts
-pnpm test:ready                                         # before a merge: the push gate, every sweep, the scout for 5 minutes and the typist flicker checks
-pnpm test:sweep                                         # every sweep alone
-pnpm test:typist                                        # the named scripts alone
-pnpm test:scout                                         # the scout for 5 minutes, and the typist flicker checks
-TYPIST_SCOUT_MINUTES=1 pnpm test:typist                 # the scout for any number of minutes
-TYPIST_SEED=123 TYPIST_SCOUT_MINUTES=1 pnpm test:typist # the scout's scripts of run seed 123, in the same order
-TYPIST_REPLAY=456 pnpm test:typist                      # the one scout script of sequence seed 456, from a failure report
+pnpm test:e2e      # the push gate: scenarios and named scripts
+pnpm test:all      # on demand: the push gate, every sweep, the markdown grids, the slow checks and the typist flicker checks
+pnpm test:sweep    # every sweep alone
+pnpm test:typist   # the named scripts alone
 ```
-
-A scout run prints its run seed.
 
 #### Accepted differences
 
@@ -266,25 +245,25 @@ Where a malformed sequence makes Chrome's textarea or EditContext disagree with 
 - A variation selector not after a pictograph.
 - A mark on a space.
 
-Each sweep shard and each scout shard reports how many mismatches each accepted difference covered.
+Each sweep shard reports how many mismatches each accepted difference covered.
 
 ### Markdown tests
 
-A test group stays only while a planted bug exists that no other group catches. A new group starts from a bug that got through every group, and a group that catches nothing alone is deleted. The push gate has a budget of 5 minutes in all, so a group that is slow and finds only what the spec examples find runs before a merge or not at all.
+Each group catches a kind of bug no other group catches; the last column says which bug it caught alone when it was built. The push gate has a budget of about 3 minutes in all, so a slow group runs on demand.
 
-| Group                     | Rule                                                                                                     | Rows                  | Runs         | Planted bug it caught alone                                                                                                        |
-| ------------------------- | -------------------------------------------------------------------------------------------------------- | --------------------- | ------------ | ---------------------------------------------------------------------------------------------------------------------------------- |
-| `commonmark.spec.ts`      | The pane shows each example's HTML                                                                       | 652                   | every push   | Emphasis ignoring the rule of three, and link labels matched without case folding (`ẞ` against `SS`).                              |
-| `markdown-places.spec.ts` | The outline keeps the place rules, over the 652 examples                                                 | 652 notes, in batches | every push   | A quote span ending a line late, a closing fence span ending a column late, an image span starting at `[` instead of `!`.          |
-| `markdown-limits.spec.ts` | Exact values: heading end, nesting limit, autolink scheme length                                         | 3 scenarios           | every push   | Written for a setext span that ends past a trailing-space underline, a limit off by one beside a quote, a scheme of 33 letters.    |
-| Grid: entities            | Every HTML5 entity name and numeric references at the edges decode as the reference does                 | 15,145                | before merge | `&#x10FFFF;` decoded wrong.                                                                                                        |
-| Grid: raw HTML parts      | Every string of up to 3 raw HTML parts after `x ` reads as the reference does                            | 3,615                 | before merge | A raw HTML attribute name that loses `-`.                                                                                          |
-| Grid: definition parts    | One to three lines of 16 definition parts and neighbours make the blocks and links the reference makes   | 4,368                 | before merge | A type-7 HTML block interrupting a lazy paragraph line.                                                                            |
-| Grid: line shapes         | One to three lines of 16 shapes, with tabs and ordered markers of any start, make the reference's blocks | 4,368                 | before merge | Written for a tab always 4 columns wide, and an ordered marker not starting at 1 interrupting a paragraph.                         |
-| Grid: link parts          | A link or an image with each destination, gap, title and end reads as the reference does                 | 3,168                 | before merge | Written for a link title with no whitespace before it.                                                                             |
-| `markdown-slow.spec.ts`   | The parser's share of the paste grows in line with n, at n and 4n                                        | 17 inputs             | before merge | Written for two quadratic cases: a closing backtick run searched again from each opener, and emphasis closers that find no opener. |
+| Group                     | Rule                                                                                                     | Rows                  | Runs       | Planted bug it caught alone                                                                                                        |
+| ------------------------- | -------------------------------------------------------------------------------------------------------- | --------------------- | ---------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `commonmark.spec.ts`      | The pane shows each example's HTML                                                                       | 652                   | every push | Emphasis ignoring the rule of three, and link labels matched without case folding (`ẞ` against `SS`).                              |
+| `markdown-places.spec.ts` | The outline keeps the place rules, over the 652 examples                                                 | 652 notes, in batches | every push | A quote span ending a line late, a closing fence span ending a column late, an image span starting at `[` instead of `!`.          |
+| `markdown-limits.spec.ts` | Exact values: heading end, nesting limit, autolink scheme length                                         | 3 scenarios           | every push | Written for a setext span that ends past a trailing-space underline, a limit off by one beside a quote, a scheme of 33 letters.    |
+| Grid: entities            | Every HTML5 entity name and numeric references at the edges decode as the reference does                 | 15,145                | on demand  | `&#x10FFFF;` decoded wrong.                                                                                                        |
+| Grid: raw HTML parts      | Every string of up to 3 raw HTML parts after `x ` reads as the reference does                            | 3,615                 | on demand  | A raw HTML attribute name that loses `-`.                                                                                          |
+| Grid: definition parts    | One to three lines of 16 definition parts and neighbours make the blocks and links the reference makes   | 4,368                 | on demand  | A type-7 HTML block interrupting a lazy paragraph line.                                                                            |
+| Grid: line shapes         | One to three lines of 16 shapes, with tabs and ordered markers of any start, make the reference's blocks | 4,368                 | on demand  | Written for a tab always 4 columns wide, and an ordered marker not starting at 1 interrupting a paragraph.                         |
+| Grid: link parts          | A link or an image with each destination, gap, title and end reads as the reference does                 | 3,168                 | on demand  | Written for a link title with no whitespace before it.                                                                             |
+| `markdown-slow.spec.ts`   | The parser's share of the paste grows in line with n, at n and 4n                                        | 17 inputs             | on demand  | Written for two quadratic cases: a closing backtick run searched again from each opener, and emphasis closers that find no opener. |
 
-`pnpm test:markdown` plays every markdown spec with the before-a-merge groups. `NULLPAD_READY=1` plays them, the rest are skipped.
+`pnpm test:markdown` plays every markdown spec with the on-demand groups. `NULLPAD_ALL=1` plays them, the rest are skipped.
 
 #### Grids against the reference
 
@@ -335,7 +314,9 @@ When a bug turns up, first ask whether a spec example, a place rule or a scenari
 
 - Tests are end-to-end only. See Testing.
 - Prove a change in the running app with the `verify-nullpad` skill (`node e2e/drive.ts`) before calling it done.
-- Before a PR is ready, `pnpm test:ready` passes on its tip, and the PR body says so.
-- Before a PR is ready, an agent that did not write the change breaks it. It plants bugs, drives the app, and reports what got through.
+- Every PR passes the pre-push hook: quick checks and the push gate, about 3 minutes. Nothing else runs as a gate. `pnpm test:all` runs on demand, such as after a change to the area a sweep covers.
+- A PR adds a test only when it fixes a real bug (one scenario that fails on the bug) or opens a kind of bug no test can catch. Most PRs add none.
+- A PR that changes app behavior gets one break-it pass: an agent that did not write the change drives the app, about 10 minutes, and reports what broke. A PR that only changes tests or tooling skips it.
+- No planted-bug runs, random scouts or nightly runs.
 - Few comments. Name things better instead. Keep a comment only for a fact we cannot change, such as a browser rule. Skip the `// MODEL` section headers that `FOLDKIT.md` suggests.
 - Before a PR is ready, a no-comments pass (`/pstack:no-comments`) runs on its diff.

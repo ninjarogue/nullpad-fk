@@ -9,8 +9,8 @@ const floorMilliseconds = 200
 
 test.describe.configure({ mode: 'parallel' })
 test.skip(
-  process.env['NULLPAD_READY'] === undefined,
-  'runs before a merge, pnpm test:ready',
+  process.env['NULLPAD_ALL'] === undefined,
+  'runs on demand, pnpm test:all',
 )
 
 for (const input of slowInputs) {

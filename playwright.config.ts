@@ -2,7 +2,6 @@ import { defineConfig, devices } from '@playwright/test'
 
 const port = 4317
 const prebuilt = process.env['NULLPAD_DIST']
-process.env['TYPIST_SEED'] ??= String(Math.floor(Math.random() * 2 ** 31))
 
 export default defineConfig({
   testDir: 'e2e',

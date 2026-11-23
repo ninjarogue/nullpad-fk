@@ -85,6 +85,39 @@ Rows and cells are what is on screen. A wrapped line takes several rows. A wide 
 
 The feature map in [features/README.md](features/README.md) holds one recipe per feature. Use the matching one, and prove every entry point it lists.
 
+## Explore with the nullpad MCP server
+
+When the session lists the `nullpad` tools (`mcp__nullpad__type` and the rest), use them to try things out. The server keeps Chromium open on the build in `dist/`, so a call answers in about 50 ms and you write no steps file first. It plays the steps above with the same driver as `e2e/drive.ts`.
+
+| Tool         | Arguments                        | Step it plays and records                                                                                                  |
+| ------------ | -------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `type`       | `text`                           | `{"type"}`                                                                                                                 |
+| `press`      | `key`, `times`                   | `{"press", "times"}`                                                                                                       |
+| `paste`      | `text`                           | `{"paste"}`                                                                                                                |
+| `compose`    | `text`, `replacing`              | `{"compose", "replacing"}`                                                                                                 |
+| `commit`     | `text`                           | `{"commit"}`                                                                                                               |
+| `click`      | `row` and `cell`, or `x` and `y` | `{"click"}`                                                                                                                |
+| `wheel`      | `pixels`                         | `{"wheel"}`                                                                                                                |
+| `resize`     | `width`, `height`                | `{"resize"}`                                                                                                               |
+| `screenshot` | `name`                           | `{"shot"}`. Prints the path of the PNG, which is beside the recording.                                                     |
+| `batch`      | `steps`                          | Each step of the list, `expect` steps too. Stops at the first failed `expect`.                                             |
+| `screen`     |                                  | None. Prints the screen as a `drive.ts` run prints it at its end, with a `composing` line for preedit.                     |
+| `checkpoint` | `fields`                         | An `expect` of the current screen: `text` and `status`, or the `fields` you name from `text`, `status`, `under` and `top`. |
+| `reset`      | `wipe`, `steps_file`             | None. Opens a fresh page with an empty editor at 1000 by 600 and starts a new recording.                                   |
+
+An input tool answers with one line, such as `2:4 2L | cursor row 1 cell 3 on "o"`. Pass `detail: true` to get the drawn rows as well. An error names the fix.
+
+1. Build with `pnpm build`. The server never builds. After a later `pnpm build`, the next call opens the new build in a fresh page and starts its result with `reloaded:`. A result that ends with `stale:` means that `src/` changed after the build.
+2. Drive the app with the tools.
+3. Call `checkpoint` where the screen shows what the change promises. Read the values it prints and judge them against that promise, because a checkpoint pins whatever the app showed, right or wrong. When you know the promised value before you look, send it as an `expect` step in a `batch`.
+4. Replay the recording: `node e2e/drive.ts <steps.json>`. The first call, `reset` and `checkpoint` print the path. `reset` with `steps_file` writes the recording where you say.
+
+The recording is a proof only once `drive.ts` replays it and prints `PASS`. The proof standards below apply to that replay. A recording starts at an empty editor, so after `reset` or a reload the earlier steps stay in their own file and the next recording starts over.
+
+`reset` keeps what the page saved in the browser, as a reload does for a person. `wipe: true` opens a fresh browser profile, which is what a `drive.ts` replay starts from.
+
+The server stops when the session closes it, and its Chromium stops with it.
+
 ## Evidence
 
 Each run writes to `verify-out/<time>/` (gitignored), or to `--out`:

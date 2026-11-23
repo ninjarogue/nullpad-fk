@@ -2,6 +2,7 @@ import { Array, Option, Order, Schema } from 'effect'
 
 import * as Buffer from './buffer'
 import { Input, type Modifiers, type NamedKey } from './input'
+import * as Markdown from './markdown'
 import * as Notes from './notes'
 import * as Words from './words'
 
@@ -787,3 +788,9 @@ export const dump = (frame: Frame): string =>
     }),
     '\n',
   )
+
+export const html = (editor: Editor): string =>
+  Markdown.toHtml(Markdown.parse(editor.buffer.lines))
+
+export const outline = (editor: Editor): string =>
+  Markdown.outline(Markdown.parse(editor.buffer.lines))

@@ -266,7 +266,7 @@ export const openTab = async (page: Page): Promise<Nullpad> => {
   return driver(tab, await page.context().newCDPSession(tab))
 }
 
-export const openFresh = async (page: Page): Promise<void> => {
+export const openFresh = async (page: Page, path = '/'): Promise<void> => {
   const { origin } = new URL(page.url())
   await page.goto('about:blank')
   if (origin !== 'null') {
@@ -277,7 +277,7 @@ export const openFresh = async (page: Page): Promise<void> => {
     })
     await cdp.detach()
   }
-  await page.goto('/')
+  await page.goto(path)
   await page.locator('#caret').waitFor()
 }
 

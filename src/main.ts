@@ -10,7 +10,7 @@ import {
 } from 'effect'
 import { SecureRandom } from 'effect/crypto'
 import { Command, Dom, type Runtime, Subscription, Update } from 'foldkit'
-import type { Document, HtmlBuilder } from 'foldkit/html'
+import type { Document, Html, HtmlBuilder } from 'foldkit/html'
 import { modifyFields } from 'foldkit/struct'
 
 import { BrowserCrypto } from '@effect/platform-browser'
@@ -32,11 +32,29 @@ import { locate, revealCaret, statusLine, surface } from './surface'
 
 export { Message }
 
+export const Pane = Schema.Literals(['None', 'Html', 'Outline'])
+export type Pane = typeof Pane.Type
+
+const paneNames: Readonly<Record<string, Pane>> = {
+  html: 'Html',
+  outline: 'Outline',
+}
+
+const paneOf = (search: string): Pane =>
+  Option.getOrElse(
+    Option.flatMap(
+      Option.fromNullishOr(new URLSearchParams(search).get('pane')),
+      name => Option.fromUndefinedOr(paneNames[name]),
+    ),
+    () => 'None',
+  )
+
 export const Flags = Schema.Struct({
   maybeNotes: Schema.Option(Schema.Array(Notes.Note)),
   stashed: Schema.Array(Storage.Stashed),
   seed: Schema.String,
   now: Schema.Finite,
+  pane: Pane,
 })
 export type Flags = typeof Flags.Type
 
@@ -48,7 +66,8 @@ export const flags: Effect.Effect<Flags, never, Storage.NoteStore> = Effect.gen(
     const maybeNotes = yield* Effect.option(store.list)
     const stashed = yield* Storage.takeStashed
     const now = yield* Clock.currentTimeMillis
-    return Flags.make({ maybeNotes, stashed, seed, now })
+    const pane = paneOf(window.location.search)
+    return Flags.make({ maybeNotes, stashed, seed, now, pane })
   },
 ).pipe(Effect.provide(BrowserCrypto.layerSecureRandom))
 
@@ -84,6 +103,7 @@ export const Model = Schema.Struct({
   created: Schema.Int,
   now: Schema.Finite,
   persistence: Schema.Literals(['Unrequested', 'Requested']),
+  pane: Pane,
 })
 export type Model = typeof Model.Type
 
@@ -680,7 +700,7 @@ export const init: Runtime.ApplicationInit<
   Message,
   Flags,
   Storage.NoteStore
-> = ({ maybeNotes, stashed, seed, now }) => {
+> = ({ maybeNotes, stashed, seed, now, pane }) => {
   const notes = Option.getOrElse(maybeNotes, () => [])
   const blank: Model = {
     editor: Editor.open(''),
@@ -702,6 +722,7 @@ export const init: Runtime.ApplicationInit<
     created: 1,
     now,
     persistence: 'Unrequested',
+    pane,
   }
   const opened = Option.match(Notes.newest(notes), {
     onNone: () => blank,
@@ -921,6 +942,18 @@ export const subscriptions = Subscription.make<
 
 const editorBounds: Bounds = { control: '.surface', selection: '#caret' }
 
+const paneView = (model: Model, h: HtmlBuilder<Message>): Html =>
+  model.pane === 'None'
+    ? h.empty
+    : h.pre(
+        [h.Class('pane')],
+        [
+          model.pane === 'Html'
+            ? Editor.html(model.editor)
+            : Editor.outline(model.editor),
+        ],
+      )
+
 export const view = (model: Model, h: HtmlBuilder<Message>): Document => {
   const frame = Editor.paint(model.editor)
   const title = Editor.title(model.editor)
@@ -937,6 +970,7 @@ export const view = (model: Model, h: HtmlBuilder<Message>): Document => {
                 Option.isSome(model.finder) ? 'Blurred' : model.keyboard,
                 h,
               ),
+              paneView(model, h),
               statusLine(
                 frame.status,
                 Notes.joinFolder(model.note.folder, Notes.fileName(title)),

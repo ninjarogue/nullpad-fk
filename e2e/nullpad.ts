@@ -53,8 +53,20 @@ export const settle = (page: Page): Promise<void> =>
       ),
   )
 
-const readScreen = (page: Page): Promise<Screen> =>
-  page.evaluate(() => {
+const statusIn = (position: string): Status => {
+  const match = /^(\d+):(\d+) (\d+)L$/.exec(position)
+  if (match === null) {
+    throw new Error(`status position reads "${position}"`)
+  }
+  return {
+    line: Number(match[1]),
+    column: Number(match[2]),
+    lineCount: Number(match[3]),
+  }
+}
+
+const readScreen = async (page: Page): Promise<Screen> => {
+  const { position, ...screen } = await page.evaluate(() => {
     const surface = document.querySelector<HTMLElement>('.surface')
     const position = document.querySelector('.pos')
     if (surface === null || position === null) {
@@ -220,23 +232,17 @@ const readScreen = (page: Page): Promise<Screen> =>
                 rect.right <= area.right + 0.5,
             }
           })()
-    const match = /^(\d+):(\d+) (\d+)L$/.exec(position.textContent ?? '')
-    if (match === null) {
-      throw new Error(`status position reads "${position.textContent}"`)
-    }
     return {
       rows: visible.map(({ drawn: _, ...row }) => row),
       cursor,
-      status: {
-        line: Number(match[1]),
-        column: Number(match[2]),
-        lineCount: Number(match[3]),
-      },
+      position: position.textContent ?? '',
       cell,
       rowHeight,
       area,
     }
   })
+  return { ...screen, status: statusIn(position) }
+}
 
 export const linesOf = (screen: Screen): ReadonlyArray<string> =>
   screen.rows.reduce<Array<string>>((lines, row, index) => {
@@ -256,6 +262,15 @@ export type Nullpad = ReturnType<typeof driver>
 export const screenOf = async (page: Page): Promise<Screen> => {
   await settle(page)
   return readScreen(page)
+}
+
+export const statusOf = async (page: Page): Promise<Status> => {
+  await settle(page)
+  return statusIn(
+    await page.evaluate(
+      () => document.querySelector('.pos')?.textContent ?? '',
+    ),
+  )
 }
 
 export const openTab = async (page: Page): Promise<Nullpad> => {
@@ -368,7 +383,7 @@ export const driver = (page: Page, cdp: CDPSession) => {
       await settle(page)
     },
     text: async () => textOf(await screen()),
-    status: async () => (await screen()).status,
+    status: () => statusOf(page),
     cursor: async () => (await screen()).cursor,
     type: async (text: string) => {
       await page.keyboard.type(text)

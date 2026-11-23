@@ -8,7 +8,12 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js'
-import { type Browser, type BrowserContext, chromium } from '@playwright/test'
+import {
+  type Browser,
+  type BrowserContext,
+  type Page,
+  chromium,
+} from '@playwright/test'
 
 import {
   modified,
@@ -115,6 +120,17 @@ const startStage = async (): Promise<Stage> => {
   }
 }
 
+const forgetNotes = async (page: Page, url: string): Promise<void> => {
+  await page.goto('about:blank')
+  const cdp = await page.context().newCDPSession(page)
+  await cdp.send('Storage.clearDataForOrigin', {
+    origin: new URL(url).origin,
+    storageTypes: 'indexeddb,local_storage',
+  })
+  await cdp.detach()
+  await page.close()
+}
+
 const load = async (
   options: Readonly<{ wipe: boolean; file?: string }>,
 ): Promise<Live> => {
@@ -126,17 +142,20 @@ const load = async (
   }
   session.stage ??= await startStage()
   const { browser, url } = session.stage
-  const sameProfile =
-    options.wipe || previous?.context.browser()?.isConnected() !== true
-      ? null
-      : previous.context
-  if (sameProfile === null) {
+  const reusable =
+    previous !== null &&
+    !options.wipe &&
+    previous.context.browser()?.isConnected() === true &&
+    !previous.nullpad.page.isClosed()
+      ? previous
+      : null
+  if (reusable === null) {
     await previous?.context.close().catch(() => undefined)
   } else {
-    await previous?.nullpad.page.close()
+    await forgetNotes(reusable.nullpad.page, url)
   }
   const context =
-    sameProfile ??
+    reusable?.context ??
     (await browser.newContext({ viewport, deviceScaleFactor: 1 }))
   const pageErrors: Array<string> = []
   const opened = await openPage(context, url, pageErrors).catch(
@@ -322,7 +341,7 @@ const reset = async (args: Args, say: Say): Promise<boolean> => {
   const wipe = args['wipe'] === true
   const live = await load({ wipe, ...(file === undefined ? {} : { file }) })
   say(
-    `reset: a fresh page of build ${live.stamp}${wipe ? ' in a fresh browser profile, so no saved notes' : ''}, recording to ${live.file}.${previous === null ? '' : kept(previous)}`,
+    `reset: a fresh page of build ${live.stamp}${wipe ? ' in a fresh browser profile' : ''}, with no saved notes, recording to ${live.file}.${previous === null ? '' : kept(previous)}`,
   )
   await show(live, args['detail'] === true, say)
   return true
@@ -543,7 +562,7 @@ const tools: ReadonlyArray<Tool> = [
       wipe: {
         type: 'boolean',
         description:
-          'true also drops what the page saved in the browser (IndexedDB, localStorage)',
+          'true also starts a fresh browser profile. Every reset clears saved notes either way.',
       },
       steps_file: {
         type: 'string',

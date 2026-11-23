@@ -114,7 +114,7 @@ An input tool answers with one line, such as `2:4 2L | cursor row 1 cell 3 on "o
 
 The recording is a proof only once `drive.ts` replays it and prints `PASS`. The proof standards below apply to that replay. A recording starts at an empty editor, so after `reset` or a reload the earlier steps stay in their own file and the next recording starts over.
 
-`reset` keeps what the page saved in the browser, as a reload does for a person. `wipe: true` opens a fresh browser profile, which is what a `drive.ts` replay starts from.
+`reset` and a reload after a build clear the notes the page saved (IndexedDB and the localStorage drafts), as a `drive.ts` replay starts with none. `wipe: true` also opens a fresh browser profile. A `reload` step keeps the notes, as a reload does for a person.
 
 The server stops when the session closes it, and its Chromium stops with it.
 

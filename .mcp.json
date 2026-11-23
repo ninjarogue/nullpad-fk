@@ -3,6 +3,10 @@
     "foldkit-devtools": {
       "command": "pnpm",
       "args": ["dlx", "@foldkit/devtools-mcp@0.26.0"]
+    },
+    "nullpad": {
+      "command": "node",
+      "args": ["e2e/mcp.ts"]
     }
   }
 }

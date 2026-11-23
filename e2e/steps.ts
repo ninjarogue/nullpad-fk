@@ -287,29 +287,29 @@ const checkPage = async (
   return misses
 }
 
+export const seen = (screen: Screen) => ({
+  text: linesOf(screen).join('\n'),
+  status: statusText(screen),
+  under: screen.cursor?.char,
+  top: screen.rows.find(row => row.number !== null)?.number,
+})
+
 const check = (screen: Screen, expectation: Expectation): Array<string> => {
   const misses: Array<string> = []
-  const text = linesOf(screen).join('\n')
+  const { text, status, under, top } = seen(screen)
   if (expectation.text !== undefined && text !== expectation.text) {
     misses.push(
       `text is ${JSON.stringify(text)}, expected ${JSON.stringify(expectation.text)}`,
     )
   }
-  if (
-    expectation.status !== undefined &&
-    statusText(screen) !== expectation.status
-  ) {
-    misses.push(
-      `status is "${statusText(screen)}", expected "${expectation.status}"`,
-    )
+  if (expectation.status !== undefined && status !== expectation.status) {
+    misses.push(`status is "${status}", expected "${expectation.status}"`)
   }
-  const under = screen.cursor?.char
   if (expectation.under !== undefined && under !== expectation.under) {
     misses.push(
       `cursor is on ${JSON.stringify(under ?? null)}, expected ${JSON.stringify(expectation.under)}`,
     )
   }
-  const top = screen.rows.find(row => row.number !== null)?.number
   if (expectation.top !== undefined && top !== expectation.top) {
     misses.push(
       `the top line on screen is ${top ?? 'none'}, expected ${expectation.top}`,
@@ -405,10 +405,13 @@ export const openPage = async (
     }
   })
   const response = await page.goto(url)
+  if (response === null) {
+    throw new Error(`${url} gave no response`)
+  }
   await page.locator('#caret').waitFor({ timeout: 10_000 })
   await page.evaluate(() => document.fonts.ready.then(() => undefined))
   return {
     nullpad: driver(page, await context.newCDPSession(page)),
-    html: (await response?.text()) ?? '',
+    indexHtml: await response.body(),
   }
 }

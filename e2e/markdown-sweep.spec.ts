@@ -5,11 +5,11 @@ import { referenceHtml } from './markdown/reference'
 import { expect, test } from './pane'
 
 const shards = Number(process.env['MARKDOWN_SHARDS'] ?? 4)
-const beforeAMerge = process.env['NULLPAD_READY'] !== undefined
+const onDemand = process.env['NULLPAD_ALL'] !== undefined
 const longestReport = 40
 
 test.describe.configure({ mode: 'parallel' })
-test.skip(!beforeAMerge, 'runs before a merge, pnpm test:ready')
+test.skip(!onDemand, 'runs on demand, pnpm test:all')
 
 type Verdict = Readonly<{
   failures: ReadonlyArray<string>

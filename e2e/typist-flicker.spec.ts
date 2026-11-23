@@ -7,7 +7,7 @@ import {
 } from './flicker'
 import { expect, test } from './nullpad'
 
-const isScoutRun = Number(process.env['TYPIST_SCOUT_MINUTES'] ?? 0) > 0
+const onDemand = process.env['NULLPAD_ALL'] !== undefined
 
 const jumps: ReadonlyArray<Step> = [
   ['wheel turns of 100 px at 60 Hz', wheelTurns(100, 30, 16)],
@@ -32,7 +32,7 @@ for (const throttle of [1, 4]) {
     browser,
     nullpad,
   }) => {
-    test.skip(!isScoutRun, 'runs in the scout run, pnpm test:scout')
+    test.skip(!onDemand, 'runs on demand, pnpm test:all')
     test.setTimeout(240_000)
     const failures = await flickerAgainstTextarea(
       browser,

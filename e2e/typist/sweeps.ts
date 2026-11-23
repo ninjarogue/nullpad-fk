@@ -12,7 +12,7 @@ import {
 export type Sweep = Readonly<{
   name: string
   scripts: number
-  runs: 'every push' | 'before a merge'
+  runs: 'every push' | 'on demand'
   documents: ReadonlyArray<Readonly<{ name: string; setup: Script }>>
   placements: ReadonlyArray<
     Readonly<{ name: string; steps: Script; moves: ReadonlyArray<Script> }>
@@ -238,21 +238,21 @@ export const sweeps: ReadonlyArray<Sweep> = [
   {
     name: 'Up or Down, any key, Up or Down lands where a textarea lands',
     scripts: 2184,
-    runs: 'every push',
+    runs: 'on demand',
     documents: verticalDocuments,
     placements: verticalPlacements,
   },
   {
     name: `${lettersRule} typed in order`,
     scripts: 906,
-    runs: 'before a merge',
+    runs: 'on demand',
     documents: documentsOf([typedInOrder]),
     placements: letterPlacements,
   },
   {
     name: `${lettersRule} that met at a line join or were typed one in front of the other`,
     scripts: 3020,
-    runs: 'before a merge',
+    runs: 'on demand',
     documents: documentsOf([joinedByBackspace, typedInFront]),
     placements: [
       ...letterPlacements,

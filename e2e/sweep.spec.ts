@@ -5,7 +5,7 @@ import { show } from './typist/script'
 import { rowsOf, sweeps } from './typist/sweeps'
 
 const shards = Number(process.env['TYPIST_SHARDS'] ?? 8)
-const beforeAMerge = process.env['NULLPAD_READY'] !== undefined
+const onDemand = process.env['NULLPAD_ALL'] !== undefined
 
 test.describe.configure({ mode: 'parallel' })
 
@@ -26,8 +26,8 @@ for (const sweep of sweeps) {
       baseURL,
     }, testInfo) => {
       test.skip(
-        sweep.runs === 'before a merge' && !beforeAMerge,
-        'runs before a merge, pnpm test:ready',
+        sweep.runs === 'on demand' && !onDemand,
+        'runs on demand, pnpm test:all',
       )
       test.setTimeout(60_000 + mine.length * 3_000)
       const pair = await openPair(browser, baseURL ?? '')

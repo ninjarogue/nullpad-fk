@@ -35,19 +35,6 @@ export const show = (script: Script): string => script.map(label).join(' ')
 export const hex = (value: string): string =>
   [...value].map(char => char.codePointAt(0)?.toString(16)).join(' ')
 
-export const mulberry32 = (seed: number) => {
-  let state = seed | 0
-  return () => {
-    state = (state + 0x6d2b79f5) | 0
-    let t = Math.imul(state ^ (state >>> 15), 1 | state)
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
-  }
-}
-
-export const sequenceSeed = (runSeed: number, index: number): number =>
-  Math.floor(mulberry32(runSeed ^ Math.imul(index + 1, 0x9e3779b1))() * 2 ** 31)
-
 export const ZWJ = '‍'
 export const namedScripts: ReadonlyArray<
   Readonly<{ name: string; script: Script }>
@@ -874,29 +861,3 @@ export const acceptedDifference = (
   acceptedDifferences.find(({ pattern }) =>
     texts.some(value => pattern.test(value)),
   )?.name
-
-export const shrink = async (
-  script: Script,
-  fails: (candidate: Script) => Promise<boolean>,
-): Promise<Script> => {
-  let current = script
-  let chunk = Math.max(1, Math.floor(current.length / 2))
-  while (chunk >= 1) {
-    let removed = false
-    for (let start = 0; start < current.length; start += chunk) {
-      const candidate = [
-        ...current.slice(0, start),
-        ...current.slice(start + chunk),
-      ]
-      if (candidate.length > 0 && (await fails(candidate))) {
-        current = candidate
-        removed = true
-        start -= chunk
-      }
-    }
-    if (!removed) {
-      chunk = Math.floor(chunk / 2)
-    }
-  }
-  return current
-}

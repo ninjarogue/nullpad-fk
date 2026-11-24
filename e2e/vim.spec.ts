@@ -1,4 +1,11 @@
-import { type Nullpad, expect, openFresh, settle, test } from './nullpad'
+import {
+  type Nullpad,
+  expect,
+  openFresh,
+  openTab,
+  settle,
+  test,
+} from './nullpad'
 
 type Row = Readonly<{
   name: string
@@ -1201,4 +1208,64 @@ test('an IME in Normal changes nothing, and a conversion in Insert after Normal 
   expect(await nullpad.text(), 'typing goes on after the conversion').toBe(
     'one 2 three four',
   )
+})
+
+const SAVED = 1100
+
+const editInOtherTab = async (nullpad: Nullpad) => {
+  const other = await openTab(nullpad.page)
+  if ((await modeOf(other)) === 'EDIT') {
+    await other.press(toggle)
+  }
+  expect(await other.text(), 'the second tab opens the same note').toBe('base')
+  await other.press('A')
+  await other.type(' B')
+  await other.page.waitForTimeout(SAVED)
+  await nullpad.page.bringToFront()
+  await expect
+    .poll(() => nullpad.text(), {
+      message: 'the other tab save reached this tab',
+    })
+    .toBe('base B')
+}
+
+test('a save from another tab leaves a tab in Insert in Insert, so the next letters are typed as text', async ({
+  nullpad,
+}) => {
+  await nullpad.press(toggle)
+  await nullpad.press('i')
+  await nullpad.type('base')
+  await nullpad.page.waitForTimeout(SAVED)
+  await editInOtherTab(nullpad)
+  expect(await modeOf(nullpad), 'still INSERT after the other tab saved').toBe(
+    'INSERT',
+  )
+  const caret = await nullpad.page.locator('#caret').boundingBox()
+  expect(caret?.width ?? 99, 'the cursor is still a bar').toBeLessThanOrEqual(4)
+  await nullpad.type('xyz')
+  expect(
+    (await nullpad.text()).replace('xyz', ''),
+    'xyz was typed and no letter was deleted',
+  ).toBe('base B')
+  expect(await modeOf(nullpad), 'still INSERT after typing').toBe('INSERT')
+})
+
+test('a save from another tab leaves a tab in Normal in Normal', async ({
+  nullpad,
+}) => {
+  await nullpad.press(toggle)
+  await nullpad.press('i')
+  await nullpad.type('base')
+  await nullpad.press('Escape')
+  await nullpad.page.waitForTimeout(SAVED)
+  await editInOtherTab(nullpad)
+  expect(await modeOf(nullpad), 'still NORMAL after the other tab saved').toBe(
+    'NORMAL',
+  )
+  await nullpad.type('xyz')
+  expect(
+    (await nullpad.text()).length,
+    'letters in Normal are commands, never typed text',
+  ).toBeLessThan('base B'.length)
+  expect(await modeOf(nullpad), 'still NORMAL after the keys').toBe('NORMAL')
 })

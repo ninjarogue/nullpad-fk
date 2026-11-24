@@ -58,6 +58,7 @@ export type Holder =
   | Readonly<{ _tag: 'Raw'; key: string }>
 
 type Unit = Readonly<{
+  fromLine: number
   sourceLine: number
   inside: ReadonlyArray<Holder>
   leaf: Leaf
@@ -286,12 +287,16 @@ const unitAt = (
   point: Markdown.Point,
   inside: Inside,
   leaf: Leaf,
-): Unit => ({
-  sourceLine: positionAt(source, point).line + 1,
-  inside,
-  leaf,
-  rows: lowestRows(leaf, inside),
-})
+): Unit => {
+  const sourceLine = positionAt(source, point).line + 1
+  return {
+    fromLine: sourceLine,
+    sourceLine,
+    inside,
+    leaf,
+    rows: lowestRows(leaf, inside),
+  }
+}
 
 const orEmpty = (
   units: ReadonlyArray<Unit>,
@@ -323,6 +328,7 @@ const lineUnits = (
   const lines = textLines(text)
   const gap = inside.length === 0 ? 1 : 0
   return Array.map(lines, (line, index) => ({
+    fromLine: first + index,
     sourceLine: first + index,
     inside: [...inside, holder],
     leaf: toLeaf(line),
@@ -367,6 +373,17 @@ const readItem = (
       ...readBlocks(rest, isTight, source, inside),
     ],
   })
+}
+
+const openedAt = (
+  source: Source,
+  point: Markdown.Point,
+  units: ReadonlyArray<Unit>,
+): ReadonlyArray<Unit> => {
+  const [first, ...rest] = units
+  return first === undefined
+    ? units
+    : [{ ...first, fromLine: positionAt(source, point).line + 1 }, ...rest]
 }
 
 const readBlock = (
@@ -440,10 +457,14 @@ const readBlock = (
           : { _tag: 'Bullets', key },
       ]
       return Array.flatMap(list.items, (item, ordinal) =>
-        readItem(item, list.tight, source, [
-          ...within,
-          { _tag: 'Item', key: keyAt(source, item.span.from), ordinal },
-        ]),
+        openedAt(
+          source,
+          item.span.from,
+          readItem(item, list.tight, source, [
+            ...within,
+            { _tag: 'Item', key: keyAt(source, item.span.from), ordinal },
+          ]),
+        ),
       )
     },
   })(block)
@@ -454,7 +475,13 @@ const readBlocks = (
   source: Source,
   inside: Inside,
 ): ReadonlyArray<Unit> =>
-  Array.flatMap(blocks, block => readBlock(block, isTight, source, inside))
+  Array.flatMap(blocks, block =>
+    openedAt(
+      source,
+      block.span.from,
+      readBlock(block, isTight, source, inside),
+    ),
+  )
 
 const pageOf = (units: ReadonlyArray<Unit>): Page => ({
   units,
@@ -508,7 +535,14 @@ const unitOfRow = (read: Page, row: number): number =>
   lastAtOrBelow(read.units.length, row, index => read.starts[index] ?? Infinity)
 
 export const unitOfLine = (read: Page, line: number): number =>
-  Math.max(0, unitOfSourceLine(read, line + 1))
+  Math.max(
+    0,
+    lastAtOrBelow(
+      read.units.length,
+      line + 1,
+      index => read.units[index]?.fromLine ?? Infinity,
+    ),
+  )
 
 export const lastUnit = (read: Page): number =>
   Math.max(0, read.units.length - 1)

@@ -36,8 +36,7 @@ const inlineView = (inline: Reading.Inline, h: HtmlBuilder<Message>): Child =>
     Text: ({ text }) => text,
     Raw: ({ text }) => h.span([h.Class('raw')], [text]),
     Code: ({ text }) => h.code([], [text]),
-    SoftBreak: () => '\n',
-    HardBreak: () => h.br([]),
+    Break: () => h.br([]),
     Emphasis: ({ children }) => h.em([], inlinesView(children, h)),
     Strong: ({ children }) => h.strong([], inlinesView(children, h)),
     Link: ({ href, title, children }) =>
@@ -390,10 +389,18 @@ export const reveal = (target: Reading.Reveal): Effect.Effect<void> =>
   scrollRead(read =>
     Reading.Reveal.match(target, {
       Start: () => scrollTo(read, 'Start'),
-      Unit: ({ unit }) =>
-        read
-          .querySelector(`[data-unit="${unit}"]`)
-          ?.scrollIntoView({ block: 'start' }),
+      Unit: ({ unit, breaksPast }) => {
+        const element = read.querySelector(`[data-unit="${unit}"]`)
+        element?.scrollIntoView({ block: 'start' })
+        Option.map(
+          Option.fromNullishOr(element?.querySelectorAll('br')[breaksPast - 1]),
+          br => {
+            const { top, height } = br.getBoundingClientRect()
+            const leading = pixels(getComputedStyle(br).lineHeight)
+            read.scrollTop += top + (leading + height) / 2 - viewTopOf(read)
+          },
+        )
+      },
       End: () => scrollTo(read, 'End'),
     }),
   )

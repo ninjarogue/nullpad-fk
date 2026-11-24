@@ -62,7 +62,6 @@ type Unit = Readonly<{
   sourceLine: number
   inside: ReadonlyArray<Holder>
   leaf: Leaf
-  rows: number
 }>
 
 export type Page = Readonly<{
@@ -167,12 +166,45 @@ const readInline: (inline: Markdown.Inline) => ReadonlyArray<Inline> =
         : [text(plainText(inline.children))],
   })
 
-export const columns = { text: 70, quote: 2, list: 3 } as const
+type HeadingSet = Readonly<{
+  size: number
+  leading: number
+  above: number
+  below: number
+  rule: number
+}>
+
+export const metrics = {
+  measure: 680,
+  size: 16.5,
+  leading: 27,
+  row: 22,
+  hairline: 1,
+  gap: 16,
+  itemGap: 4,
+  looseGap: 8,
+  quoteIndent: 20,
+  quoteGap: 20,
+  listIndent: 26,
+  codeSize: 13.5,
+  codeLeading: 22,
+  codePad: 12,
+  codeInset: 15,
+  ruleGap: 33,
+  headings: {
+    1: { size: 35, leading: 44, above: 41, below: 21, rule: 11 },
+    2: { size: 24, leading: 30, above: 41, below: 14, rule: 7 },
+    3: { size: 19, leading: 24, above: 28, below: 8, rule: 0 },
+    4: { size: 16.5, leading: 22, above: 25, below: 7, rule: 0 },
+    5: { size: 16.5, leading: 22, above: 25, below: 7, rule: 0 },
+    6: { size: 16.5, leading: 22, above: 25, below: 7, rule: 0 },
+  } satisfies Readonly<Record<1 | 2 | 3 | 4 | 5 | 6, HeadingSet>>,
+} as const
 
 const indentOf: Readonly<Record<Holder['_tag'], number>> = {
-  Quote: columns.quote,
-  Bullets: columns.list,
-  Numbers: columns.list,
+  Quote: metrics.quoteIndent,
+  Bullets: metrics.listIndent,
+  Numbers: metrics.listIndent,
   Item: 0,
   Code: 0,
   Raw: 0,
@@ -180,24 +212,52 @@ const indentOf: Readonly<Record<Holder['_tag'], number>> = {
 
 const widthInside = (inside: ReadonlyArray<Holder>): number =>
   Math.max(
-    1,
-    columns.text -
+    metrics.size,
+    metrics.measure -
       Array.reduce(inside, 0, (sum, holder) => sum + indentOf[holder._tag]),
   )
 
 const printableAscii = /^[\x20-\x7e]*$/u
 
 const eastAsianWide =
-  /^(?:\p{Emoji_Presentation}|.\uFE0F|[\u{1100}-\u{115F}\u{2E80}-\u{303E}\u{3041}-\u{33FF}\u{3400}-\u{4DBF}\u{4E00}-\u{9FFF}\u{A000}-\u{A4CF}\u{A960}-\u{A97F}\u{AC00}-\u{D7A3}\u{F900}-\u{FAFF}\u{FE10}-\u{FE19}\u{FE30}-\u{FE6F}\u{FF00}-\u{FF60}\u{FFE0}-\u{FFE6}\u{1B000}-\u{1B2FF}\u{20000}-\u{3FFFD}])/u
+  /^(?:\p{Emoji_Presentation}|.️|[\u{1100}-\u{115F}\u{2E80}-\u{303E}\u{3041}-\u{33FF}\u{3400}-\u{4DBF}\u{4E00}-\u{9FFF}\u{A000}-\u{A4CF}\u{A960}-\u{A97F}\u{AC00}-\u{D7A3}\u{F900}-\u{FAFF}\u{FE10}-\u{FE19}\u{FE30}-\u{FE6F}\u{FF00}-\u{FF60}\u{FFE0}-\u{FFE6}\u{1B000}-\u{1B2FF}\u{20000}-\u{3FFFD}])/u
 
-const columnsOf = (value: string): number =>
-  printableAscii.test(value)
-    ? value.length
-    : Array.reduce(
-        Array.fromIterable(Buffer.segmenter.segment(value)),
-        0,
-        (sum, { segment }) => sum + (eastAsianWide.test(segment) ? 2 : 1),
-      )
+const narrow = /[ !'(),.:;I[\]fijlrt|]/gu
+
+const broad = /[A-HJ-Z@%mw]/gu
+
+const ems = {
+  narrow: 0.31,
+  usual: 0.59,
+  broad: 0.72,
+  wide: 1,
+  mono: 0.6,
+  codeSpan: 0.86,
+  codeSpanPadding: 0.7,
+  strong: 1.05,
+  heading: 0.99,
+}
+
+const countOf = (value: string, pattern: RegExp): number =>
+  value.length - value.replace(pattern, '').length
+
+const emsOf = (value: string): number => {
+  if (printableAscii.test(value)) {
+    const narrows = countOf(value, narrow)
+    const broads = countOf(value, broad)
+    return (
+      narrows * ems.narrow +
+      broads * ems.broad +
+      (value.length - narrows - broads) * ems.usual
+    )
+  }
+  return Array.reduce(
+    Array.fromIterable(Buffer.segmenter.segment(value)),
+    0,
+    (sum, { segment }) =>
+      sum + (eastAsianWide.test(segment) ? ems.wide : ems.usual),
+  )
+}
 
 const lengthOf = (inlines: ReadonlyArray<Inline>, width: number): number =>
   Array.reduce(
@@ -206,41 +266,144 @@ const lengthOf = (inlines: ReadonlyArray<Inline>, width: number): number =>
     (sum, inline) =>
       sum +
       Match.typeTags<Inline, number>()({
-        Text: ({ text }) => columnsOf(text),
-        Raw: ({ text }) => columnsOf(text),
-        Code: ({ text }) => columnsOf(text),
-        SoftBreak: () => 1,
+        Text: ({ text }) => emsOf(text),
+        Raw: ({ text }) => emsOf(text),
+        Code: ({ text }) =>
+          text.length * ems.mono * ems.codeSpan + ems.codeSpanPadding,
+        SoftBreak: () => ems.narrow,
         HardBreak: () => 0,
         Emphasis: ({ children }) => lengthOf(children, width),
-        Strong: ({ children }) => lengthOf(children, width),
+        Strong: ({ children }) => lengthOf(children, width) * ems.strong,
         Link: ({ children }) => lengthOf(children, width),
         Image: () => width,
       })(inline),
   )
 
-const taskBoxLength = 4
+const linesOf = (length: number, width: number): number =>
+  Math.max(1, Math.ceil(length / width))
 
-const estimatedRows = (leaf: Leaf, inside: ReadonlyArray<Holder>): number => {
-  const width = widthInside(inside)
-  const wrapped = (length: number) => Math.max(1, Math.ceil(length / width))
-  const gap = inside.length === 0 ? 1 : 0
-  return Match.typeTags<Leaf, number>()({
-    Paragraph: ({ box, inlines }) =>
-      wrapped(
-        lengthOf(inlines, width) + (Option.isSome(box) ? taskBoxLength : 0),
-      ) + gap,
-    Plain: ({ box, inlines }) =>
-      wrapped(
-        lengthOf(inlines, width) + (Option.isSome(box) ? taskBoxLength : 0),
-      ),
-    Heading: ({ level, inlines }) =>
-      wrapped(lengthOf(inlines, width) + level + 1) + gap,
-    Rule: () => gap,
-    CodeLine: () => 1,
-    RawLine: () => 1,
-    Empty: () => 1,
-  })(leaf)
+const textHeight = (
+  inlines: ReadonlyArray<Inline>,
+  inside: ReadonlyArray<Holder>,
+  size: number,
+  leading: number,
+  scale: number,
+): number => {
+  const width = widthInside(inside) / size
+  return linesOf(lengthOf(inlines, width) * scale, width) * leading
 }
+
+const drawnHeight = ({ leaf, inside }: Unit): number =>
+  Match.typeTags<Leaf, number>()({
+    Paragraph: ({ inlines }) =>
+      textHeight(inlines, inside, metrics.size, metrics.leading, 1),
+    Plain: ({ inlines }) =>
+      textHeight(inlines, inside, metrics.size, metrics.leading, 1),
+    Heading: ({ level, inlines }) => {
+      const { size, leading, rule } = metrics.headings[level]
+      return textHeight(inlines, inside, size, leading, ems.heading) + rule
+    },
+    Rule: () => metrics.hairline,
+    CodeLine: () => metrics.codeLeading,
+    RawLine: ({ text }) =>
+      linesOf(
+        (text.length * ems.mono * metrics.codeSize) / metrics.size,
+        widthInside(inside) / metrics.size,
+      ) * metrics.codeLeading,
+    Empty: () => metrics.row,
+  })(leaf)
+
+type Margins = Readonly<{ top: number; bottom: number }>
+
+const margins = (top: number, bottom: number): Margins => ({ top, bottom })
+
+const topLevelMargins = (leaf: Leaf): Margins =>
+  leaf._tag === 'Heading'
+    ? margins(
+        metrics.headings[leaf.level].above,
+        metrics.headings[leaf.level].below,
+      )
+    : leaf._tag === 'Rule'
+      ? margins(metrics.ruleGap, metrics.ruleGap)
+      : margins(0, metrics.gap)
+
+const leafMargins = (unit: Unit, isLast: boolean): Margins => {
+  const parent = unit.inside[unit.inside.length - 1]
+  if (parent === undefined) {
+    return topLevelMargins(unit.leaf)
+  }
+  if (parent._tag === 'Code' || parent._tag === 'Raw') {
+    return margins(0, 0)
+  }
+  if (parent._tag === 'Item' && unit.leaf._tag === 'Plain') {
+    return margins(0, 0)
+  }
+  if (parent._tag === 'Item' && unit.leaf._tag === 'Paragraph' && isLast) {
+    return margins(0, metrics.looseGap)
+  }
+  return margins(0, isLast ? 0 : metrics.gap)
+}
+
+const holderMargins = (
+  inside: ReadonlyArray<Holder>,
+  depth: number,
+  isLast: boolean,
+): Margins => {
+  const holder = inside[depth]
+  if (holder?._tag === 'Item') {
+    return margins(metrics.itemGap, metrics.itemGap)
+  }
+  if (depth === 0) {
+    return holder?._tag === 'Quote'
+      ? margins(metrics.quoteGap, metrics.quoteGap)
+      : margins(0, metrics.gap)
+  }
+  return margins(0, isLast ? 0 : metrics.gap)
+}
+
+const sharedDepth = (unit: Unit, next: Unit): number => {
+  const depth = Array.findFirstIndex(
+    unit.inside,
+    (holder, index) => holder.key !== next.inside[index]?.key,
+  )
+  return Option.getOrElse(depth, () => unit.inside.length)
+}
+
+const panelEdge = metrics.codePad + metrics.hairline
+
+const isPanel = (inside: ReadonlyArray<Holder>, from: number): boolean =>
+  Array.some(inside.slice(from), holder => holder._tag === 'Code')
+
+const gapAfter = (unit: Unit, next: Unit | undefined): number => {
+  if (next === undefined) {
+    return isPanel(unit.inside, 0) ? panelEdge : 0
+  }
+  const depth = sharedDepth(unit, next)
+  const deeper = (inside: ReadonlyArray<Holder>) =>
+    Array.filter(
+      Array.map(inside, (_, at) => at),
+      at => at >= depth,
+    )
+  const closing = deeper(unit.inside)
+  const opening = deeper(next.inside)
+  const collapsed = Math.max(
+    0,
+    leafMargins(unit, depth < unit.inside.length).bottom,
+    ...Array.map(
+      closing,
+      at => holderMargins(unit.inside, at, depth < at).bottom,
+    ),
+    ...Array.map(opening, at => holderMargins(next.inside, at, false).top),
+    leafMargins(next, false).top,
+  )
+  return (
+    collapsed +
+    (isPanel(unit.inside, depth) ? panelEdge : 0) +
+    (isPanel(next.inside, depth) ? panelEdge : 0)
+  )
+}
+
+const taskBoxLength = 4
 
 const lead = (
   inlines: ReadonlyArray<Markdown.Inline>,
@@ -308,7 +471,6 @@ const unitAt = (
     sourceLine,
     inside,
     leaf,
-    rows: estimatedRows(leaf, inside),
   }
 }
 
@@ -340,13 +502,11 @@ const lineUnits = (
 ): ReadonlyArray<Unit> => {
   const first = positionAt(source, from).line + 1 + skipped
   const lines = textLines(text)
-  const gap = inside.length === 0 ? 1 : 0
   return Array.map(lines, (line, index) => ({
     fromLine: first + index,
     sourceLine: first + index,
     inside: [...inside, holder],
     leaf: toLeaf(line),
-    rows: index === lines.length - 1 ? 1 + gap : 1,
   }))
 }
 
@@ -499,7 +659,14 @@ const readBlocks = (
 
 const pageOf = (units: ReadonlyArray<Unit>): Page => ({
   units,
-  starts: Array.scan(units, 0, (sum, unit) => sum + unit.rows),
+  starts: Array.scan(
+    Array.map(
+      units,
+      (unit, index) => drawnHeight(unit) + gapAfter(unit, units[index + 1]),
+    ),
+    0,
+    (sum, height) => Math.round(sum + height),
+  ),
 })
 
 const readPage = (lines: ReadonlyArray<Markdown.SourceLine>): Page =>
@@ -545,8 +712,12 @@ const unitOfSourceLine = (read: Page, sourceLine: number): number =>
     index => read.units[index]?.sourceLine ?? Infinity,
   )
 
-const unitOfRow = (read: Page, row: number): number =>
-  lastAtOrBelow(read.units.length, row, index => read.starts[index] ?? Infinity)
+const unitAtHeight = (read: Page, height: number): number =>
+  lastAtOrBelow(
+    read.units.length,
+    height,
+    index => read.starts[index] ?? Infinity,
+  )
 
 export const unitOfLine = (read: Page, line: number): number =>
   Math.max(
@@ -563,7 +734,7 @@ export const lastUnit = (read: Page): number =>
 
 export const At = Schema.TaggedUnion({
   OnUnit: { unit: Schema.Int },
-  InSpacer: { from: Schema.Int, rowsPast: Schema.Int },
+  InSpacer: { from: Schema.Int, pixelsPast: Schema.Int },
 })
 export type At = typeof At.Type
 
@@ -572,10 +743,10 @@ export type Landing = Readonly<{ top: number; isPinned: boolean }>
 export const landing = (read: Page, at: At): Landing =>
   At.match(at, {
     OnUnit: ({ unit }) => ({ top: unit, isPinned: false }),
-    InSpacer: ({ from, rowsPast }) => ({
+    InSpacer: ({ from, pixelsPast }) => ({
       top: Math.min(
         lastUnit(read),
-        Math.max(0, unitOfRow(read, (read.starts[from] ?? 0) + rowsPast)),
+        Math.max(0, unitAtHeight(read, (read.starts[from] ?? 0) + pixelsPast)),
       ),
       isPinned: true,
     }),
@@ -590,7 +761,7 @@ export type Node =
       children: ReadonlyArray<Node>
     }>
 
-export type Spacer = Readonly<{ from: number; rows: number }>
+export type Spacer = Readonly<{ from: number; height: number }>
 
 export type Drawn = Readonly<{
   above: Spacer
@@ -673,9 +844,9 @@ export const drawn = (read: Page, top: number, screenRows: number): Drawn => {
   const at = Math.max(0, Math.min(count - 1, top))
   const from = Math.max(0, at - past)
   const to = Math.min(count, at + screenRows + past)
-  const rowAt = (index: number) => read.starts[index] ?? 0
+  const startOf = (index: number) => read.starts[index] ?? 0
   return {
-    above: { from: 0, rows: rowAt(from) },
+    above: { from: 0, height: startOf(from) },
     nodes: nest(
       read,
       from,
@@ -685,7 +856,7 @@ export const drawn = (read: Page, top: number, screenRows: number): Drawn => {
       })),
       0,
     ),
-    below: { from: to, rows: rowAt(count) - rowAt(to) },
+    below: { from: to, height: startOf(count) - startOf(to) },
   }
 }
 

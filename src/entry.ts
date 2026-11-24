@@ -16,6 +16,10 @@ import { NoteStore, clearLeavingStash, stashLeaving } from './storage'
 window.addEventListener('pagehide', stashLeaving)
 window.addEventListener('pageshow', clearLeavingStash)
 
+const readFonts = ["1em 'Inter Variable'", "italic 1em 'Inter Variable'"]
+
+readFonts.forEach(font => void document.fonts.load(font))
+
 const application = Runtime.makeApplication({
   Model,
   Flags,

@@ -1,4 +1,4 @@
-import { Array, Effect, Match, Option, Queue, Stream } from 'effect'
+import { Array, Effect, Match, Option, Queue, Schema, Stream } from 'effect'
 import { Mount, Render } from 'foldkit'
 import { type Html, type HtmlBuilder, createKeyedLazy } from 'foldkit/html'
 
@@ -252,8 +252,7 @@ const restoreTopPlace = (read: HTMLElement): void => {
   )
 }
 
-const sameAt = (a: Reading.At, b: Reading.At): boolean =>
-  JSON.stringify(a) === JSON.stringify(b)
+const sameAt = Schema.toEquivalence(Reading.At)
 
 const observe = (read: HTMLElement): Stream.Stream<ReadingMessage> =>
   Stream.callback<ReadingMessage>(queue =>

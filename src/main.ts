@@ -32,8 +32,8 @@ import { readBounds, reading, scrollReading, showSourceLine } from './reading'
 import * as Storage from './storage'
 import {
   locate,
+  restoreSurfaceScroll,
   revealCaret,
-  showLineAtTop,
   statusLine,
   surface,
 } from './surface'
@@ -114,6 +114,7 @@ export const Model = Schema.Struct({
   store: Schema.Literals(['Saving', 'Unavailable']),
   finder: Schema.Option(Finder.Finder),
   screen: Screen,
+  surfaceScrollTop: Schema.Finite,
   edits: Schema.Int,
   seed: Schema.String,
   created: Schema.Int,
@@ -136,6 +137,7 @@ const show = (
 ): Model =>
   modifyFields(model, {
     editor: editor => Editor.reopen(editor, text, caretAt),
+    surfaceScrollTop: () => 0,
     note: () => ({
       id: note.id,
       folder: note.folder,
@@ -272,11 +274,13 @@ const ScrollReading = Command.define('ScrollReading', {
     scrollReading(to).pipe(Effect.as(Message.CompletedScrollReading())),
 })
 
-const ShowLineAtTop = Command.define('ShowLineAtTop', {
-  args: { line: Schema.Int },
-  messages: [Message.CompletedShowLineAtTop],
-  execute: ({ line }) =>
-    showLineAtTop(line).pipe(Effect.as(Message.CompletedShowLineAtTop())),
+const RestoreSurfaceScroll = Command.define('RestoreSurfaceScroll', {
+  args: { scrollTop: Schema.Finite },
+  messages: [Message.CompletedRestoreSurfaceScroll],
+  execute: ({ scrollTop }) =>
+    restoreSurfaceScroll(scrollTop).pipe(
+      Effect.as(Message.CompletedRestoreSurfaceScroll()),
+    ),
 })
 
 const isDirty = (model: Model): boolean => model.edits !== model.note.savedEdits
@@ -542,7 +546,7 @@ const scrolledReading = (
 
 const closeReading = (model: Model): UpdateReturn => ({
   model: backToEditor(model),
-  commands: [ShowLineAtTop({ line: model.editor.topLine })],
+  commands: [RestoreSurfaceScroll({ scrollTop: model.surfaceScrollTop })],
 })
 
 const editInput = (model: Model, input: Input): UpdateReturn => {
@@ -861,6 +865,7 @@ export const init: Runtime.ApplicationInit<
     store: Option.isSome(maybeNotes) ? 'Saving' : 'Unavailable',
     finder: Option.none(),
     screen: Screen.cases.Edit.make({}),
+    surfaceScrollTop: 0,
     edits: 0,
     seed,
     created: 1,
@@ -889,9 +894,10 @@ export const update = (model: Model, message: Message) =>
           respond(stepModel, Editor.located(stepModel.editor, answer)),
         finishOpening,
       ]),
-    ScrolledSurface: ({ top }) => ({
+    ScrolledSurface: ({ top, scrollTop }) => ({
       model: modifyFields(model, {
         editor: editor => Editor.scrolled(editor, top),
+        surfaceScrollTop: () => scrollTop,
       }),
     }),
     ResizedScreen: ({ rows }) =>
@@ -1001,7 +1007,7 @@ export const update = (model: Model, message: Message) =>
         : { model },
     CompletedShowSourceLine: () => ({ model }),
     CompletedScrollReading: () => ({ model }),
-    CompletedShowLineAtTop: () => ({ model }),
+    CompletedRestoreSurfaceScroll: () => ({ model }),
   })
 
 const unsaved = ({

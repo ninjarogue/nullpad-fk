@@ -706,13 +706,13 @@ export const revealCaret = (align: 'Nearest' | 'Top'): Effect.Effect<void> =>
     ),
   )
 
-export const showLineAtTop = (line: number): Effect.Effect<void> =>
+export const restoreSurfaceScroll = (scrollTop: number): Effect.Effect<void> =>
   Render.afterCommit.pipe(
     Effect.map(() =>
       Option.map(findSurface(), surface =>
-        Option.map(lineElement(surface, line), element =>
-          scrollApp(surface, () => element.scrollIntoView({ block: 'start' })),
-        ),
+        scrollApp(surface, () => {
+          surface.scrollTop = scrollTop
+        }),
       ),
     ),
   )
@@ -774,6 +774,8 @@ const drawnScrollRange = (
   }
 }
 
+const measuredBox = { width: -1, height: -1 }
+
 const observe = (surface: HTMLElement): Stream.Stream<SurfaceMessage> =>
   Stream.callback<SurfaceMessage>(queue =>
     Effect.gen(function* () {
@@ -786,15 +788,26 @@ const observe = (surface: HTMLElement): Stream.Stream<SurfaceMessage> =>
           const controller = new AbortController()
           const { signal } = controller
           const measure = () => {
-            const sheet = sheetOf(surface)
-            Queue.offerUnsafe(
-              queue,
-              Message.ResizedScreen({
-                rows: Math.floor(
-                  (sheet.viewBottom - sheet.viewTop) / sheet.rowHeight + 0.01,
-                ),
-              }),
-            )
+            const box = {
+              width: surface.clientWidth,
+              height: surface.clientHeight,
+            }
+            if (
+              box.width !== measuredBox.width ||
+              box.height !== measuredBox.height
+            ) {
+              measuredBox.width = box.width
+              measuredBox.height = box.height
+              const sheet = sheetOf(surface)
+              Queue.offerUnsafe(
+                queue,
+                Message.ResizedScreen({
+                  rows: Math.floor(
+                    (sheet.viewBottom - sheet.viewTop) / sheet.rowHeight + 0.01,
+                  ),
+                }),
+              )
+            }
             drawCaret(surface)
           }
           const resizes = new ResizeObserver(measure)
@@ -806,7 +819,10 @@ const observe = (surface: HTMLElement): Stream.Stream<SurfaceMessage> =>
             }
           }
           const report = (top: number) =>
-            Queue.offerUnsafe(queue, Message.ScrolledSurface({ top }))
+            Queue.offerUnsafe(
+              queue,
+              Message.ScrolledSurface({ top, scrollTop: surface.scrollTop }),
+            )
           const reportTop = () => report(topLine(surface, sheetOf(surface)))
           /**
            * Chrome scrolls a wheel turn on its compositor, ahead of the drawn lines, and paints blank screen until they arrive;

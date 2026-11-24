@@ -9,7 +9,7 @@ import { Draft, NoteChange } from './storage'
 export const Message = defineMessageUnion({
   ReceivedInput: { input: Input },
   ClickedText: { x: Schema.Finite, line: Schema.Int, yInLine: Schema.Finite },
-  ScrolledSurface: { top: Schema.Int },
+  ScrolledSurface: { top: Schema.Int, scrollTop: Schema.Finite },
   ResizedScreen: { rows: Schema.Int },
   CompletedLocate: { answer: Answer },
   CompletedRevealCaret: {},
@@ -39,6 +39,6 @@ export const Message = defineMessageUnion({
   ScrolledReading: { top: Schema.Int },
   CompletedShowSourceLine: {},
   CompletedScrollReading: {},
-  CompletedShowLineAtTop: {},
+  CompletedRestoreSurfaceScroll: {},
 })
 export type Message = typeof Message.Type

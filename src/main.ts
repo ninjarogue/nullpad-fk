@@ -17,8 +17,9 @@ import { BrowserCrypto } from '@effect/platform-browser'
 
 import * as Editor from './core/editor'
 import * as Finder from './core/finder'
-import type { Input } from './core/input'
+import { Input } from './core/input'
 import * as Notes from './core/notes'
+import * as Reading from './core/reading'
 import { finder, finderBounds } from './finder'
 import {
   type Bounds,
@@ -27,8 +28,15 @@ import {
   keyboardPort,
 } from './keyboard'
 import { Message } from './message'
+import { readBounds, reading, scrollReading, showSourceLine } from './reading'
 import * as Storage from './storage'
-import { locate, revealCaret, statusLine, surface } from './surface'
+import {
+  locate,
+  revealCaret,
+  showLineAtTop,
+  statusLine,
+  surface,
+} from './surface'
 
 export { Message }
 
@@ -90,6 +98,13 @@ const OpenNote = Schema.Struct({
 })
 type OpenNote = typeof OpenNote.Type
 
+const Screen = Schema.TaggedUnion({
+  Edit: {},
+  Opening: { queued: Schema.Array(Input) },
+  Read: { top: Schema.Int },
+})
+type Screen = typeof Screen.Type
+
 export const Model = Schema.Struct({
   editor: Editor.Editor,
   keyboard: Keyboard,
@@ -98,6 +113,7 @@ export const Model = Schema.Struct({
   pending: Schema.Array(Storage.Draft),
   store: Schema.Literals(['Saving', 'Unavailable']),
   finder: Schema.Option(Finder.Finder),
+  screen: Screen,
   edits: Schema.Int,
   seed: Schema.String,
   created: Schema.Int,
@@ -240,6 +256,29 @@ const RevealFinderRow = Command.define('RevealFinderRow', {
   }).pipe(Effect.ignore, Effect.as(Message.CompletedRevealFinderRow())),
 })
 
+const ShowSourceLine = Command.define('ShowSourceLine', {
+  args: { sourceLine: Schema.Int },
+  messages: [Message.CompletedShowSourceLine],
+  execute: ({ sourceLine }) =>
+    showSourceLine(sourceLine).pipe(
+      Effect.as(Message.CompletedShowSourceLine()),
+    ),
+})
+
+const ScrollReading = Command.define('ScrollReading', {
+  args: { to: Reading.Scroll },
+  messages: [Message.CompletedScrollReading],
+  execute: ({ to }) =>
+    scrollReading(to).pipe(Effect.as(Message.CompletedScrollReading())),
+})
+
+const ShowLineAtTop = Command.define('ShowLineAtTop', {
+  args: { line: Schema.Int },
+  messages: [Message.CompletedShowLineAtTop],
+  execute: ({ line }) =>
+    showLineAtTop(line).pipe(Effect.as(Message.CompletedShowLineAtTop())),
+})
+
 const isDirty = (model: Model): boolean => model.edits !== model.note.savedEdits
 
 const draftOf = (model: Model): Storage.Draft => ({
@@ -325,6 +364,9 @@ const takePending = (
 const closeFinder = (model: Model): Model =>
   modifyFields(model, { finder: () => Option.none() })
 
+const backToEditor = (model: Model): Model =>
+  modifyFields(model, { screen: () => Screen.cases.Edit.make({}) })
+
 const conflictCopy = (model: Model): UpdateReturn =>
   saveNow(
     show(
@@ -346,7 +388,9 @@ const openStored = (model: Model, id: Notes.NoteId): UpdateReturn =>
             Update.combine(model, [
               leave,
               left => ({
-                model: closeFinder(show(left, note, note.text, 'Start')),
+                model: backToEditor(
+                  closeFinder(show(left, note, note.text, 'Start')),
+                ),
               }),
             ]),
         },
@@ -357,12 +401,14 @@ const createNote = (model: Model, folder: string, text: string): UpdateReturn =>
     leave,
     left =>
       saveNow(
-        closeFinder(
-          show(
-            modifyFields(left, { created: Number.increment }),
-            { id: newNoteId(left), folder, revision: 0 },
-            text,
-            'End',
+        backToEditor(
+          closeFinder(
+            show(
+              modifyFields(left, { created: Number.increment }),
+              { id: newNoteId(left), folder, revision: 0 },
+              text,
+              'End',
+            ),
           ),
         ),
       ),
@@ -439,19 +485,116 @@ const respond = (model: Model, outcome: Editor.Outcome): UpdateReturn => {
   }
 }
 
+const openFinder = (model: Model): UpdateReturn => ({
+  model: modifyFields(model, { finder: () => Option.some(Finder.open()) }),
+  commands: [ReadClock()],
+})
+
+const readAt = (model: Model, top: number): Model =>
+  modifyFields(model, { screen: () => Screen.cases.Read.make({ top }) })
+
+const openReading = (model: Model): UpdateReturn =>
+  Option.match(
+    Reading.sourceLineAt(
+      Reading.page(model.editor.buffer.lines),
+      model.editor.buffer.caret.line,
+    ),
+    {
+      onNone: () => ({ model: readAt(model, 1) }),
+      onSome: sourceLine => ({
+        model: readAt(model, sourceLine),
+        commands: [ShowSourceLine({ sourceLine })],
+      }),
+    },
+  )
+
+const scrollReadingTo = (model: Model, to: Reading.Scroll): UpdateReturn => {
+  const page = Reading.page(model.editor.buffer.lines)
+  const scrolled =
+    to === 'Start'
+      ? readAt(model, Reading.firstSourceLine(page))
+      : to === 'End'
+        ? readAt(model, Reading.lastSourceLine(page))
+        : model
+  return { model: scrolled, commands: [ScrollReading({ to })] }
+}
+
+const scrolledReading = (
+  model: Model,
+  drawnTop: number,
+  top: number,
+): UpdateReturn =>
+  Option.match(
+    Reading.pinnedAfterScroll(
+      Reading.page(model.editor.buffer.lines),
+      drawnTop,
+      top,
+      model.editor.screenRows,
+    ),
+    {
+      onNone: () => ({ model: readAt(model, top) }),
+      onSome: sourceLine => ({
+        model: readAt(model, sourceLine),
+        commands: [ShowSourceLine({ sourceLine })],
+      }),
+    },
+  )
+
+const closeReading = (model: Model): UpdateReturn => ({
+  model: backToEditor(model),
+  commands: [ShowLineAtTop({ line: model.editor.topLine })],
+})
+
+const editInput = (model: Model, input: Input): UpdateReturn => {
+  if (Finder.opensFinder(input)) {
+    return openFinder(model)
+  }
+  if (Reading.togglesReading(input)) {
+    return Option.isSome(model.editor.locating)
+      ? {
+          model: modifyFields(model, {
+            screen: () => Screen.cases.Opening.make({ queued: [] }),
+          }),
+        }
+      : openReading(model)
+  }
+  return respond(model, Editor.feed(model.editor, input))
+}
+
+const readInput = (model: Model, input: Input): UpdateReturn =>
+  Reading.Act.match(Reading.act(input), {
+    Close: () => closeReading(model),
+    OpenFinder: () => openFinder(model),
+    Scroll: ({ to }) => scrollReadingTo(model, to),
+    Ignore: () => ({ model }),
+  })
+
 const receiveInput = (model: Model, input: Input): UpdateReturn =>
   Option.match(model.finder, {
     onSome: open => applyFinder(model, Finder.feed(open, model.notes, input)),
     onNone: () =>
-      Finder.opensFinder(input)
-        ? {
-            model: modifyFields(model, {
-              finder: () => Option.some(Finder.open()),
-            }),
-            commands: [ReadClock()],
-          }
-        : respond(model, Editor.feed(model.editor, input)),
+      Screen.match(model.screen, {
+        Edit: () => editInput(model, input),
+        Opening: ({ queued }) => ({
+          model: modifyFields(model, {
+            screen: () =>
+              Screen.cases.Opening.make({ queued: [...queued, input] }),
+          }),
+        }),
+        Read: () => readInput(model, input),
+      }),
   })
+
+const finishOpening = (model: Model): UpdateReturn =>
+  model.screen._tag === 'Opening' && Option.isNone(model.editor.locating)
+    ? Update.combine(model, [
+        openReading,
+        ...Array.map(
+          model.screen.queued,
+          input => (stepModel: Model) => receiveInput(stepModel, input),
+        ),
+      ])
+    : { model }
 
 const laterChange = (
   held: Option.Option<Storage.NoteChange>,
@@ -717,6 +860,7 @@ export const init: Runtime.ApplicationInit<
     pending: [],
     store: Option.isSome(maybeNotes) ? 'Saving' : 'Unavailable',
     finder: Option.none(),
+    screen: Screen.cases.Edit.make({}),
     edits: 0,
     seed,
     created: 1,
@@ -740,7 +884,11 @@ export const update = (model: Model, message: Message) =>
     ClickedText: ({ x, line, yInLine }) =>
       respond(model, Editor.click(model.editor, x, line, yInLine)),
     CompletedLocate: ({ answer }) =>
-      respond(model, Editor.located(model.editor, answer)),
+      Update.combine(model, [
+        stepModel =>
+          respond(stepModel, Editor.located(stepModel.editor, answer)),
+        finishOpening,
+      ]),
     ScrolledSurface: ({ top }) => ({
       model: modifyFields(model, {
         editor: editor => Editor.scrolled(editor, top),
@@ -846,6 +994,14 @@ export const update = (model: Model, message: Message) =>
       }),
     }),
     ClickedFinderBackdrop: () => ({ model: closeFinder(model) }),
+    ClickedReadToggle: () => receiveInput(model, Reading.toggle),
+    ScrolledReading: ({ top }) =>
+      model.screen._tag === 'Read'
+        ? scrolledReading(model, model.screen.top, top)
+        : { model },
+    CompletedShowSourceLine: () => ({ model }),
+    CompletedScrollReading: () => ({ model }),
+    CompletedShowLineAtTop: () => ({ model }),
   })
 
 const unsaved = ({
@@ -954,9 +1110,38 @@ const paneView = (model: Model, h: HtmlBuilder<Message>): Html =>
         ],
       )
 
+const isReading = (model: Model): boolean => model.screen._tag === 'Read'
+
+const screenView = (
+  model: Model,
+  frame: Editor.Frame,
+  h: HtmlBuilder<Message>,
+): Html => {
+  const editing = () =>
+    surface(frame, Option.isSome(model.finder) ? 'Blurred' : model.keyboard, h)
+  return Screen.match(model.screen, {
+    Edit: editing,
+    Opening: editing,
+    Read: ({ top }) =>
+      reading(
+        Reading.drawn(
+          Reading.page(model.editor.buffer.lines),
+          top,
+          model.editor.screenRows,
+        ),
+        h,
+      ),
+  })
+}
+
 export const view = (model: Model, h: HtmlBuilder<Message>): Document => {
   const frame = Editor.paint(model.editor)
   const title = Editor.title(model.editor)
+  const bounds = Option.isSome(model.finder)
+    ? finderBounds
+    : isReading(model)
+      ? readBounds
+      : editorBounds
   return {
     title,
     body: h.main(
@@ -965,14 +1150,11 @@ export const view = (model: Model, h: HtmlBuilder<Message>): Document => {
         ...(model.keyboard === 'Unsupported'
           ? [browserUnsupportedNotice(h)]
           : [
-              surface(
-                frame,
-                Option.isSome(model.finder) ? 'Blurred' : model.keyboard,
-                h,
-              ),
+              screenView(model, frame, h),
               paneView(model, h),
               statusLine(
                 frame.status,
+                isReading(model) ? 'Read' : 'Edit',
                 Notes.joinFolder(model.note.folder, Notes.fileName(title)),
                 model.store === 'Unavailable'
                   ? Option.some('notes are not being saved')
@@ -989,7 +1171,7 @@ export const view = (model: Model, h: HtmlBuilder<Message>): Document => {
             onNone: () => frame.surrounding,
             onSome: Finder.surrounding,
           }),
-          Option.isSome(model.finder) ? finderBounds : editorBounds,
+          bounds,
           model.keyboard,
           h,
         ),

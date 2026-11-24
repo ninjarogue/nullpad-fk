@@ -706,6 +706,17 @@ export const revealCaret = (align: 'Nearest' | 'Top'): Effect.Effect<void> =>
     ),
   )
 
+export const showLineAtTop = (line: number): Effect.Effect<void> =>
+  Render.afterCommit.pipe(
+    Effect.map(() =>
+      Option.map(findSurface(), surface =>
+        Option.map(lineElement(surface, line), element =>
+          scrollApp(surface, () => element.scrollIntoView({ block: 'start' })),
+        ),
+      ),
+    ),
+  )
+
 const topLine = (surface: HTMLElement, sheet: Sheet): number => {
   const lines = Array.fromIterable(
     surface.querySelectorAll<HTMLElement>('.line'),
@@ -984,6 +995,7 @@ const modeLabels: Readonly<Record<Mode, string>> = { Plain: 'EDIT' }
 
 export const statusLine = (
   status: Frame['status'],
+  screen: 'Edit' | 'Read',
   path: string,
   maybeWarning: Option.Option<string>,
   h: HtmlBuilder<Message>,
@@ -991,7 +1003,10 @@ export const statusLine = (
   h.div(
     [h.Class('status')],
     [
-      h.span([h.Class('mode')], [modeLabels[status.mode]]),
+      h.span(
+        [h.Class('mode')],
+        [screen === 'Read' ? 'READ' : modeLabels[status.mode]],
+      ),
       h.span([h.Class('file')], [path]),
       ...Option.match(maybeWarning, {
         onNone: () => [],
@@ -1000,6 +1015,15 @@ export const statusLine = (
       h.span(
         [h.Class('pos')],
         [`${status.line}:${status.column} ${status.lineCount}L`],
+      ),
+      h.button(
+        [
+          h.Class('toggle-read'),
+          h.Type('button'),
+          h.Tabindex(-1),
+          h.OnClick(Message.ClickedReadToggle()),
+        ],
+        [screen === 'Read' ? 'edit ^E' : 'read ^E'],
       ),
     ],
   )

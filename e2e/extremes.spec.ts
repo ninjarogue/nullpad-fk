@@ -188,7 +188,7 @@ test('no printable Ctrl+Alt keydown is cancelled, and every Ctrl-only letter cho
     [],
   )
   const keptWithCtrl: Array<string> = []
-  for (const key of 'abcdefghijkmopsuxyz') {
+  for (const key of 'abcdfghijkmopsuxyz') {
     if (!(await cancelledOf(key, 2))) {
       keptWithCtrl.push(key)
     }

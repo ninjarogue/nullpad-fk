@@ -35,5 +35,10 @@ export const Message = defineMessageUnion({
   ClickedFinderRow: { index: Schema.Int },
   ClickedFinderScope: { scope: Schema.String },
   ClickedFinderBackdrop: {},
+  ClickedReadToggle: {},
+  ScrolledReading: { top: Schema.Int },
+  CompletedShowSourceLine: {},
+  CompletedScrollReading: {},
+  CompletedShowLineAtTop: {},
 })
 export type Message = typeof Message.Type

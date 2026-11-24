@@ -101,7 +101,7 @@ test('Tab inserts two spaces and the editor keeps the keyboard', async ({
 
 test('Ctrl with a letter types nothing', async ({ nullpad }) => {
   await nullpad.type('ab')
-  await nullpad.press('Control+e')
+  await nullpad.press('Control+d')
   await nullpad.press('Control+k')
   expect(await nullpad.text()).toBe('ab')
   expect(await nullpad.status()).toEqual({ line: 1, column: 3, lineCount: 1 })
@@ -147,8 +147,8 @@ test('a character typed with Ctrl+Alt, as Windows sends AltGr, is left to the br
   nullpad,
 }) => {
   expect(
-    await keydownCancelled(nullpad, 'e', ctrl),
-    'a Ctrl+E keydown is taken by the editor',
+    await keydownCancelled(nullpad, 'k', ctrl),
+    'a Ctrl+K keydown is taken by the editor',
   ).toBe(true)
   for (const char of ['@', '€', '{', '\\', '|', '~', 'ł']) {
     expect(

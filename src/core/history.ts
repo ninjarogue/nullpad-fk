@@ -57,7 +57,7 @@ export type Stepped = Readonly<{
 
 export const maxChanges = 1000
 
-export const maxUnits = 16_000_000
+export const maxUnits = 64_000_000
 
 const unitsPerLine = 32
 

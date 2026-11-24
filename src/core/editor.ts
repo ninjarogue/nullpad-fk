@@ -283,6 +283,7 @@ type Plan =
       _tag: 'Done'
       outcome: Outcome
       began: Option.Option<Buffer.Position>
+      travelled: boolean
     }>
   | Readonly<{
       _tag: 'Ask'
@@ -298,6 +299,7 @@ const now = (
   _tag: 'Done',
   outcome: done(editor, reveal),
   began,
+  travelled: false,
 })
 
 const ask = (query: Query, land: (answer: Answer) => Outcome): Plan => ({
@@ -567,7 +569,7 @@ type CaretRule = 'Vim' | 'Plain'
 
 const landedAfter = (
   stepped: History.Stepped,
-  way: Vim.Way,
+  way: History.Way,
   rule: CaretRule,
 ): Buffer.Buffer =>
   rule === 'Vim'
@@ -583,7 +585,7 @@ const landedAfter = (
 
 const travelPlan = (
   editor: Editor,
-  way: Vim.Way,
+  way: History.Way,
   count: number,
   rule: CaretRule,
 ): Plan => {
@@ -593,8 +595,8 @@ const travelPlan = (
       : Option.none()
   return Option.match(last, {
     onNone: () => now(editor, 'None'),
-    onSome: stepped =>
-      now(
+    onSome: stepped => ({
+      ...now(
         changeDrawn(
           { ...editor, history: stepped.history, goalX: Option.none() },
           {
@@ -603,6 +605,8 @@ const travelPlan = (
           },
         ),
       ),
+      travelled: true,
+    }),
   })
 }
 
@@ -721,19 +725,33 @@ const planFor = (editor: Editor, queued: Queued): Plan =>
 const isInInsert = (editor: Editor): boolean =>
   Option.exists(editor.vim, vim => vim.mode === 'Insert')
 
-type Grouping = Pick<History.Edit, 'kind' | 'joins' | 'holds'>
+type Grouping = Pick<History.Edit, 'kind' | 'joinsOnto' | 'staysOpen'>
 
-const alone: Grouping = { kind: 'Command', joins: false, holds: false }
+const alone: Grouping = { kind: 'Command', joinsOnto: [], staysOpen: false }
 
-const typing: Grouping = { kind: 'Typing', joins: true, holds: true }
+const typing: Grouping = {
+  kind: 'Typing',
+  joinsOnto: ['Typing', 'Replace'],
+  staysOpen: true,
+}
 
-const composing: Grouping = { kind: 'Compose', joins: true, holds: true }
+const replacing: Grouping = {
+  kind: 'Replace',
+  joinsOnto: ['Compose'],
+  staysOpen: true,
+}
+
+const composing: Grouping = {
+  kind: 'Compose',
+  joinsOnto: ['Compose', 'Replace'],
+  staysOpen: true,
+}
 
 const plainKeyGroupings: Partial<Record<NamedKey, Grouping>> = {
-  Enter: { ...typing, joins: false },
+  Enter: { ...typing, joinsOnto: [] },
   Tab: typing,
-  Backspace: { kind: 'Backward', joins: true, holds: true },
-  Delete: { kind: 'Forward', joins: true, holds: true },
+  Backspace: { kind: 'Backward', joinsOnto: ['Backward'], staysOpen: true },
+  Delete: { kind: 'Forward', joinsOnto: ['Forward'], staysOpen: true },
 }
 
 const plainGrouping = (input: Input): Grouping =>
@@ -741,15 +759,19 @@ const plainGrouping = (input: Input): Grouping =>
     Key: ({ key }) => plainKeyGroupings[key] ?? alone,
     Chord: () => alone,
     Text: () => typing,
-    Erase: () => composing,
+    Erase: () => replacing,
     Preedit: () => composing,
-    Commit: () => ({ ...composing, holds: false }),
+    Commit: () => ({ ...composing, staysOpen: false }),
     Paste: () => alone,
   })
 
 const groupingOf = (before: Editor, after: Editor, queued: Queued): Grouping =>
   isInInsert(before) || isInInsert(after)
-    ? { kind: 'Stay', joins: isInInsert(before), holds: isInInsert(after) }
+    ? {
+        kind: 'InsertStay',
+        joinsOnto: isInInsert(before) ? ['InsertStay'] : [],
+        staysOpen: isInInsert(after),
+      }
     : queued._tag === 'Fed' &&
         Option.isNone(before.vim) &&
         Option.isNone(after.vim)
@@ -762,9 +784,6 @@ const recorded = (
   edit: History.Edit,
 ): Outcome => {
   const after = outcome.editor
-  if (after.history !== before.history) {
-    return outcome
-  }
   const history = History.record(
     before.history,
     before.buffer,
@@ -789,13 +808,15 @@ const tracked = (
 
 const planOf = (editor: Editor, queued: Queued): Plan => {
   const plan = planFor(editor, queued)
-  return plan._tag === 'Done'
-    ? { ...plan, outcome: tracked(editor, queued, plan.outcome, plan.began) }
-    : {
-        ...plan,
-        land: answer =>
-          tracked(editor, queued, plan.land(answer), Option.none()),
-      }
+  if (plan._tag === 'Ask') {
+    return {
+      ...plan,
+      land: answer => tracked(editor, queued, plan.land(answer), Option.none()),
+    }
+  }
+  return plan.travelled
+    ? plan
+    : { ...plan, outcome: tracked(editor, queued, plan.outcome, plan.began) }
 }
 
 const withQueriedLineDrawn = (editor: Editor, query: Query): Editor =>

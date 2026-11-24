@@ -1,6 +1,7 @@
 import { Option, Schema } from 'effect'
 
 import * as Buffer from './buffer'
+import * as History from './history'
 import { Input, type NamedKey } from './input'
 import { cellAt, cellCount, cellStart } from './vim/cells'
 import * as Keymap from './vim/keymap'
@@ -39,13 +40,10 @@ export const start: Vim = {
   want: 'Unset',
 }
 
-export const Way = Keymap.Way
-export type Way = Keymap.Way
-
 export const Fate = Schema.TaggedUnion({
   Done: {},
   Plain: {},
-  Travel: { way: Keymap.Way, count: Schema.Int },
+  Travel: { way: History.Way, count: Schema.Int },
 })
 export type Fate = typeof Fate.Type
 
@@ -141,9 +139,6 @@ const placeInsert = (
   return places[at]()
 }
 
-const isEarlier = (a: Buffer.Position, b: Buffer.Position): boolean =>
-  a.line < b.line || (a.line === b.line && a.column < b.column)
-
 const firstNonBlankOf = (
   buffer: Buffer.Buffer,
   line: number,
@@ -162,7 +157,7 @@ const changeBegan = (
   }
   if (target === 'Lines' && range.from.line === range.to.line) {
     const lineStart = firstNonBlankOf(buffer, range.from.line)
-    return isEarlier(buffer.caret, lineStart) ? buffer.caret : lineStart
+    return Buffer.isBefore(buffer.caret, lineStart) ? buffer.caret : lineStart
   }
   return operator === 'Change' && range.to.line > range.from.line
     ? { line: from.line + 1, column: from.column }

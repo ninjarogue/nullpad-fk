@@ -1,5 +1,6 @@
 import { Array, Option, Schema } from 'effect'
 
+import * as History from '../history'
 import { MotionName } from './motions'
 import { OperatorName, Side } from './operators'
 import { TargetName } from './targets'
@@ -16,16 +17,13 @@ export const InsertAt = Schema.Literals([
 ])
 export type InsertAt = typeof InsertAt.Type
 
-export const Way = Schema.Literals(['Undo', 'Redo'])
-export type Way = typeof Way.Type
-
 export const Command = Schema.TaggedUnion({
   Move: { motion: MotionName },
   Operate: { operator: OperatorName, target: TargetName },
   Put: { side: Side },
   Insert: { at: InsertAt },
   Cancel: {},
-  Travel: { way: Way },
+  Travel: { way: History.Way },
 })
 export type Command = typeof Command.Type
 

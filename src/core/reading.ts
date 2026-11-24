@@ -220,7 +220,7 @@ const lengthOf = (inlines: ReadonlyArray<Inline>, width: number): number =>
 
 const taskBoxLength = 4
 
-const lowestRows = (leaf: Leaf, inside: ReadonlyArray<Holder>): number => {
+const estimatedRows = (leaf: Leaf, inside: ReadonlyArray<Holder>): number => {
   const width = widthInside(inside)
   const wrapped = (length: number) => Math.max(1, Math.ceil(length / width))
   const gap = inside.length === 0 ? 1 : 0
@@ -308,7 +308,7 @@ const unitAt = (
     sourceLine,
     inside,
     leaf,
-    rows: lowestRows(leaf, inside),
+    rows: estimatedRows(leaf, inside),
   }
 }
 

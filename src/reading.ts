@@ -299,10 +299,16 @@ export const ReadingPort = Mount.defineStream('ReadingPort', {
       : Stream.never,
 })
 
+const docColumns = {
+  '--text-columns': String(Reading.columns.text),
+  '--quote-indent': String(Reading.columns.quote),
+  '--list-indent': String(Reading.columns.list),
+}
+
 export const reading = (drawn: Reading.Drawn, h: HtmlBuilder<Message>): Html =>
   h.div(
     [h.Class('read'), h.OnMount(ReadingPort())],
-    [h.div([h.Class('doc')], drawnView(drawn, h))],
+    [h.div([h.Class('doc'), h.Style(docColumns)], drawnView(drawn, h))],
   )
 
 export const readBounds = { control: '.read', selection: '.read' }

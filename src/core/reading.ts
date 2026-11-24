@@ -167,12 +167,12 @@ const readInline: (inline: Markdown.Inline) => ReadonlyArray<Inline> =
         : [text(plainText(inline.children))],
   })
 
-const textColumns = 70
+export const columns = { text: 70, quote: 2, list: 3 } as const
 
 const indentOf: Readonly<Record<Holder['_tag'], number>> = {
-  Quote: 2,
-  Bullets: 3,
-  Numbers: 3,
+  Quote: columns.quote,
+  Bullets: columns.list,
+  Numbers: columns.list,
   Item: 0,
   Code: 0,
   Raw: 0,
@@ -181,7 +181,7 @@ const indentOf: Readonly<Record<Holder['_tag'], number>> = {
 const widthInside = (inside: ReadonlyArray<Holder>): number =>
   Math.max(
     1,
-    textColumns -
+    columns.text -
       Array.reduce(inside, 0, (sum, holder) => sum + indentOf[holder._tag]),
   )
 

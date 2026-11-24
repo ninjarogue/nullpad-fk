@@ -492,3 +492,76 @@ test('a 5,000-item list opens at the cursor’s item and draws under 2,000 eleme
     'elements drawn in the read view',
   ).toBeLessThan(2000)
 })
+
+const opensAtBlockStartingOnNextLine = async (
+  nullpad: Nullpad,
+  target: ReadonlyArray<string>,
+  upFromEnd: number,
+  shown: string | null,
+) => {
+  const paragraph = Array.from({ length: 400 }, (_, i) => `word ${i + 1}`)
+  await nullpad.paste([...paragraph, '', ...target].join('\n'))
+  await nullpad.press('Control+End')
+  await nullpad.press('ArrowUp', upFromEnd)
+  const { line } = await nullpad.status()
+  expect(line, 'cursor on the first line of the target block').toBe(402)
+  await openRead(nullpad)
+  const tops = await nullpad.page.evaluate(line => {
+    const read = document.querySelector('.read')
+    const block = document.querySelector(`.read [data-source-line="${line}"]`)
+    return {
+      read: read?.getBoundingClientRect().top ?? null,
+      block: block?.getBoundingClientRect().top ?? null,
+    }
+  }, line)
+  expect(tops.block, 'the target block is drawn').not.toBeNull()
+  expect(
+    Math.abs((tops.block ?? 0) - (tops.read ?? 0)),
+    'the target block sits at the top of the read view',
+  ).toBeLessThan(80)
+  if (shown !== null) {
+    await expect(
+      nullpad.page.locator('.read').getByText(shown),
+      'the target block’s text is on screen',
+    ).toBeInViewport()
+  }
+}
+
+test('opening the read view on an opening code fence puts the code block at the top', async ({
+  nullpad,
+}) => {
+  await opensAtBlockStartingOnNextLine(
+    nullpad,
+    ['```', 'fenced body', '```'],
+    2,
+    'fenced body',
+  )
+})
+
+test('opening the read view on a bare > line puts the quote at the top', async ({
+  nullpad,
+}) => {
+  await opensAtBlockStartingOnNextLine(
+    nullpad,
+    ['>', '> quoted words'],
+    1,
+    'quoted words',
+  )
+})
+
+test('opening the read view on a bare - marker puts the list at the top', async ({
+  nullpad,
+}) => {
+  await opensAtBlockStartingOnNextLine(
+    nullpad,
+    ['-', '  item words'],
+    1,
+    'item words',
+  )
+})
+
+test('opening the read view on the fence of an empty code block puts it at the top', async ({
+  nullpad,
+}) => {
+  await opensAtBlockStartingOnNextLine(nullpad, ['```', '```'], 1, null)
+})

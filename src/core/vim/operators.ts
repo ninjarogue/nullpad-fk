@@ -107,6 +107,9 @@ const remove = (buffer: Buffer.Buffer, range: Range): Buffer.Buffer => {
 
 const emptyLine = (buffer: Buffer.Buffer, range: Range): Buffer.Buffer => {
   const { line } = range.from
+  if (range.to.line === line && lineText(buffer, line) === '') {
+    return Buffer.moveTo(buffer, { line, column: 0 })
+  }
   const kept = Buffer.removeLines(buffer, line + 1, range.to.line)
   return Buffer.erase(
     kept,

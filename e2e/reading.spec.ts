@@ -293,3 +293,149 @@ test('a flipped task box survives a reload and the cursor stays where it was', a
   await nullpad.reload()
   expect(await nullpad.text(), 'text after a reload').toBe(expected)
 })
+
+type Seen = Readonly<{ text: string; top: number; bottom: number }>
+
+const onScreen = (nullpad: Nullpad) =>
+  nullpad.page.evaluate(() => {
+    const read = document.querySelector('.read')
+    if (read === null) {
+      throw new Error('no .read on screen')
+    }
+    const box = read.getBoundingClientRect()
+    const range = document.createRange()
+    const walker = document.createTreeWalker(read, NodeFilter.SHOW_TEXT)
+    const seen: Array<{ text: string; top: number; bottom: number }> = []
+    for (
+      let node = walker.nextNode();
+      node !== null;
+      node = walker.nextNode()
+    ) {
+      if ((node.textContent ?? '').trim() === '') {
+        continue
+      }
+      range.selectNodeContents(node)
+      const rect = range.getBoundingClientRect()
+      if (rect.height > 0 && rect.bottom > box.top && rect.top < box.bottom) {
+        seen.push({
+          text: (node.textContent ?? '').trim(),
+          top: rect.top,
+          bottom: rect.bottom,
+        })
+      }
+    }
+    return { box: { top: box.top, bottom: box.bottom }, seen }
+  })
+
+const find = (seen: ReadonlyArray<Seen>, text: string) =>
+  seen.find(item => item.text === text)
+
+const blanks = (count: number) => '\n'.repeat(count)
+
+const expectOutroOnFirstScreen = async (nullpad: Nullpad) => {
+  await nullpad.press('Control+Home')
+  await openRead(nullpad)
+  const { box, seen } = await onScreen(nullpad)
+  const outro = find(seen, 'Outro')
+  expect(
+    outro,
+    'Outro is drawn on the first screen of the read view',
+  ).toBeDefined()
+  expect(outro?.top ?? Infinity, 'Outro is inside the read view').toBeLessThan(
+    box.bottom,
+  )
+}
+
+test('Outro is on the first screen after 300 blank lines', async ({
+  nullpad,
+}) => {
+  await nullpad.paste(`Intro${blanks(301)}Outro`)
+  await expectOutroOnFirstScreen(nullpad)
+})
+
+test('Outro is on the first screen after 400 link definitions', async ({
+  nullpad,
+}) => {
+  const definitions = Array.from(
+    { length: 400 },
+    (_, i) => `[r${i}]: /u${i}`,
+  ).join('\n')
+  await nullpad.paste(`Intro\n\n${definitions}\n\nOutro`)
+  await expectOutroOnFirstScreen(nullpad)
+})
+
+test('paragraphs after a 600-item list fill the screen when the list ends mid-screen', async ({
+  nullpad,
+}) => {
+  const items = Array.from({ length: 600 }, (_, i) => `- item ${i + 1}`)
+  const paragraphs = Array.from({ length: 200 }, (_, i) => `para ${i + 1}`)
+  await nullpad.paste([...items, '', paragraphs.join('\n\n')].join('\n'))
+  await nullpad.press('Control+Home')
+  await openRead(nullpad)
+  await nullpad.page.locator('.read').hover()
+  let now = await onScreen(nullpad)
+  for (let i = 0; i < 80; i++) {
+    const end = find(now.seen, 'item 600')
+    if (end !== undefined && end.top < (now.box.top + now.box.bottom) / 2) {
+      break
+    }
+    await nullpad.page.mouse.wheel(0, 1000)
+    await settle(nullpad.page)
+    now = await onScreen(nullpad)
+  }
+  const end = find(now.seen, 'item 600')
+  expect(end, 'the end of the list is on screen').toBeDefined()
+  expect(
+    end?.top ?? Infinity,
+    'the list ends above the middle of the screen',
+  ).toBeLessThan((now.box.top + now.box.bottom) / 2)
+  expect(
+    now.seen.filter(item => /^para \d+$/.test(item.text)).length,
+    'paragraphs after the list are on screen',
+  ).toBeGreaterThan(0)
+  expect(
+    Math.max(...now.seen.map(item => item.bottom)),
+    'text reaches the bottom of the screen, no blank area',
+  ).toBeGreaterThan(now.box.bottom - 80)
+})
+
+test('the first screen is filled with text when each paragraph is followed by 30 blank lines', async ({
+  nullpad,
+}) => {
+  const note = Array.from({ length: 100 }, (_, i) => `para ${i + 1}`).join(
+    blanks(31),
+  )
+  await nullpad.paste(note)
+  await nullpad.press('Control+Home')
+  await openRead(nullpad)
+  const { box, seen } = await onScreen(nullpad)
+  expect(
+    seen.length,
+    'more than one paragraph fits on the first screen',
+  ).toBeGreaterThan(1)
+  expect(
+    Math.max(...seen.map(item => item.bottom)),
+    'text reaches the bottom of the first screen',
+  ).toBeGreaterThan(box.bottom - 120)
+})
+
+test('a 5,000-item list opens at the cursor’s item and draws under 2,000 elements', async ({
+  nullpad,
+}) => {
+  const items = (from: number, to: number) =>
+    Array.from({ length: to - from + 1 }, (_, i) => `- item ${from + i}`)
+  await nullpad.paste(items(1365, 5000).join('\n'))
+  await nullpad.press('Control+Home')
+  await nullpad.paste(`${items(1, 1364).join('\n')}\n`)
+  expect((await nullpad.status()).line, 'cursor on item 1365').toBe(1365)
+  await openRead(nullpad)
+  const { box, seen } = await onScreen(nullpad)
+  const first = seen.find(item => item.top >= box.top - 1)
+  expect(first?.text, 'the first item on screen is the cursor’s item').toBe(
+    'item 1365',
+  )
+  expect(
+    await nullpad.page.locator('.read *').count(),
+    'elements drawn in the read view',
+  ).toBeLessThan(2000)
+})

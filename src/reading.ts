@@ -172,7 +172,7 @@ type ReadingMessage = typeof Message.ScrolledReading.Type
 
 type Place = Readonly<{ unit: number; offset: number }>
 
-const kept: { place: Option.Option<Place> } = { place: Option.none() }
+const topPlace: { place: Option.Option<Place> } = { place: Option.none() }
 
 const viewTopOf = (read: HTMLElement): number =>
   read.getBoundingClientRect().top + pixels(getComputedStyle(read).paddingTop)
@@ -225,16 +225,18 @@ const placeOf = (read: HTMLElement, viewTop: number): Option.Option<Place> => {
 const atOf = (read: HTMLElement): Option.Option<Reading.At> => {
   const viewTop = viewTopOf(read)
   const inSpacer = spacerAt(read, viewTop)
-  kept.place = Option.isSome(inSpacer) ? Option.none() : placeOf(read, viewTop)
+  topPlace.place = Option.isSome(inSpacer)
+    ? Option.none()
+    : placeOf(read, viewTop)
   return Option.orElse(inSpacer, () =>
-    Option.map(kept.place, ({ unit }) =>
+    Option.map(topPlace.place, ({ unit }) =>
       Reading.At.cases.OnUnit.make({ unit }),
     ),
   )
 }
 
-const keepPlace = (read: HTMLElement): void => {
-  Option.map(kept.place, ({ unit, offset }) =>
+const restoreTopPlace = (read: HTMLElement): void => {
+  Option.map(topPlace.place, ({ unit, offset }) =>
     Option.map(
       Option.fromNullishOr(
         read.querySelector<HTMLElement>(`[data-unit="${unit}"]`),
@@ -261,8 +263,8 @@ const observe = (read: HTMLElement): Stream.Stream<ReadingMessage> =>
         const reported: { at: Option.Option<Reading.At> } = {
           at: Option.none(),
         }
-        kept.place = Option.none()
-        const patches = new MutationObserver(() => keepPlace(read))
+        topPlace.place = Option.none()
+        const patches = new MutationObserver(() => restoreTopPlace(read))
         patches.observe(read, { childList: true, subtree: true })
         read.addEventListener(
           'scroll',
@@ -312,7 +314,7 @@ const scrollRead = (scroll: (read: HTMLElement) => void): Effect.Effect<void> =>
         Option.fromNullishOr(document.querySelector<HTMLElement>('.read')),
         read => {
           scroll(read)
-          kept.place = placeOf(read, viewTopOf(read))
+          topPlace.place = placeOf(read, viewTopOf(read))
         },
       ),
     ),

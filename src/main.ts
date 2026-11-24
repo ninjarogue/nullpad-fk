@@ -1087,7 +1087,7 @@ const screenView = (
   frame: Editor.Frame,
   h: HtmlBuilder<Message>,
 ): Html => {
-  const editing = surface(
+  const editorSurface = surface(
     frame,
     Option.isSome(model.finder) ? 'Blurred' : model.keyboard,
     h,
@@ -1095,7 +1095,7 @@ const screenView = (
   return h.div(
     [h.Class(model.screen._tag === 'Read' ? 'stage reading' : 'stage')],
     [
-      editing,
+      editorSurface,
       ...(model.screen._tag === 'Read'
         ? [
             reading(

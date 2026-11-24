@@ -1,0 +1,247 @@
+[
+  {
+    "paste": "hello world\n\nfoo bar\n  indented"
+  },
+  {
+    "expect": {
+      "mode": "EDIT",
+      "status": "4:11 4L"
+    }
+  },
+  {
+    "type": "x"
+  },
+  {
+    "expect": {
+      "text": "hello world\n\nfoo bar\n  indentedx"
+    }
+  },
+  {
+    "press": "Backspace"
+  },
+  {
+    "press": "Control+Comma"
+  },
+  {
+    "expect": {
+      "mode": "NORMAL",
+      "status": "4:10 4L",
+      "under": "d"
+    }
+  },
+  {
+    "type": "gg"
+  },
+  {
+    "expect": {
+      "status": "1:1 4L",
+      "under": "h"
+    }
+  },
+  {
+    "type": "w"
+  },
+  {
+    "expect": {
+      "status": "1:7 4L",
+      "under": "w"
+    }
+  },
+  {
+    "type": "$"
+  },
+  {
+    "expect": {
+      "status": "1:11 4L",
+      "under": "d"
+    }
+  },
+  {
+    "type": "jj"
+  },
+  {
+    "expect": {
+      "status": "3:7 4L",
+      "under": "r"
+    }
+  },
+  {
+    "type": "2"
+  },
+  {
+    "expect": {
+      "pending": "2"
+    }
+  },
+  {
+    "type": "g"
+  },
+  {
+    "expect": {
+      "pending": "2g"
+    }
+  },
+  {
+    "press": "Escape"
+  },
+  {
+    "expect": {
+      "pending": "",
+      "status": "3:7 4L"
+    }
+  },
+  {
+    "type": "0x"
+  },
+  {
+    "expect": {
+      "text": "hello world\n\noo bar\n  indented",
+      "status": "3:1 4L"
+    }
+  },
+  {
+    "type": "q"
+  },
+  {
+    "expect": {
+      "text": "hello world\n\noo bar\n  indented"
+    }
+  },
+  {
+    "type": "G"
+  },
+  {
+    "expect": {
+      "status": "4:3 4L",
+      "under": "i"
+    }
+  },
+  {
+    "type": "Az"
+  },
+  {
+    "expect": {
+      "mode": "INSERT",
+      "text": "hello world\n\noo bar\n  indentedz"
+    }
+  },
+  {
+    "press": "Escape"
+  },
+  {
+    "expect": {
+      "mode": "NORMAL",
+      "status": "4:11 4L",
+      "under": "z"
+    }
+  },
+  {
+    "type": "kOnew"
+  },
+  {
+    "press": "Escape"
+  },
+  {
+    "expect": {
+      "text": "hello world\n\nnew\noo bar\n  indentedz",
+      "status": "3:3 5L"
+    }
+  },
+  {
+    "type": "g"
+  },
+  {
+    "press": "Control+p"
+  },
+  {
+    "expect": {
+      "finder": "prompt ❯ filter or new note name0/0"
+    }
+  },
+  {
+    "press": "Escape"
+  },
+  {
+    "type": "g"
+  },
+  {
+    "expect": {
+      "pending": "g",
+      "status": "3:3 5L"
+    }
+  },
+  {
+    "press": "Escape"
+  },
+  {
+    "click": {
+      "row": 0,
+      "cell": 40
+    }
+  },
+  {
+    "expect": {
+      "status": "1:11 5L",
+      "under": "d"
+    }
+  },
+  {
+    "compose": "に"
+  },
+  {
+    "commit": "日"
+  },
+  {
+    "expect": {
+      "text": "hello world\n\nnew\noo bar\n  indentedz",
+      "mode": "NORMAL"
+    }
+  },
+  {
+    "type": "llli"
+  },
+  {
+    "compose": "Q",
+    "replacing": {
+      "start": 9,
+      "end": 10
+    }
+  },
+  {
+    "commit": "Q"
+  },
+  {
+    "expect": {
+      "text": "hello worQd\n\nnew\noo bar\n  indentedz",
+      "status": "1:11 5L",
+      "mode": "INSERT"
+    }
+  },
+  {
+    "press": "Escape"
+  },
+  {
+    "reload": true
+  },
+  {
+    "expect": {
+      "mode": "NORMAL"
+    }
+  },
+  {
+    "press": "Control+Comma"
+  },
+  {
+    "expect": {
+      "mode": "EDIT"
+    }
+  },
+  {
+    "reload": true
+  },
+  {
+    "expect": {
+      "mode": "EDIT"
+    }
+  }
+]

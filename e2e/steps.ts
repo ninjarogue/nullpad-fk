@@ -14,6 +14,8 @@ type Expectation = Readonly<{
   full?: boolean
   title?: string
   finder?: string
+  mode?: string
+  pending?: string
 }>
 
 export type Step =
@@ -170,7 +172,7 @@ export const parseStep = (value: unknown, index: number): Step => {
     case 'expect': {
       if (!isRecord(body)) {
         return fail(
-          'expect takes { text?, status?, under?, top?, full?, title?, finder? }',
+          'expect takes { text?, status?, under?, top?, full?, title?, finder?, mode?, pending? }',
         )
       }
       const fields = [
@@ -180,6 +182,8 @@ export const parseStep = (value: unknown, index: number): Step => {
         'top',
         'title',
         'finder',
+        'mode',
+        'pending',
       ] as const
       const unknown = Object.keys(body).filter(
         key => ![...fields, 'full'].includes(key),
@@ -282,6 +286,21 @@ const checkPage = async (
       misses.push(
         `finder shows ${JSON.stringify(finder)}, expected ${JSON.stringify(expectation.finder)}`,
       )
+    }
+  }
+  for (const name of ['mode', 'pending'] as const) {
+    const wanted = expectation[name]
+    if (wanted !== undefined) {
+      const shown = await page
+        .locator(`.status .${name}`)
+        .evaluateAll(found =>
+          found.map(element => element.textContent).join(''),
+        )
+      if (shown !== wanted) {
+        misses.push(
+          `${name} shows ${JSON.stringify(shown)}, expected ${JSON.stringify(wanted)}`,
+        )
+      }
     }
   }
   return misses

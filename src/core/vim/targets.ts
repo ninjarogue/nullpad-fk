@@ -1,7 +1,7 @@
 import { Option, Schema } from 'effect'
 
 import type * as Buffer from '../buffer'
-import { cellText } from './cells'
+import { cellAt, cellText } from './cells'
 import {
   type Motion,
   MotionName,
@@ -10,6 +10,7 @@ import {
   cellsIn,
   classAt,
   decl,
+  endOf,
   endOfWord,
   firstFilled,
   forwardWordStoppingAtLineEnd,
@@ -18,6 +19,7 @@ import {
   lastLine,
   motionFails,
   motions,
+  positionOf,
 } from './motions'
 
 export const Kind = Schema.Literals(['Charwise', 'Linewise'])
@@ -152,13 +154,18 @@ const wordEndStay: Target = (buffer, from, count, want) =>
     ? wordForward(buffer, from, count, want)
     : toWordEnd(true)(buffer, from, count, want)
 
+const isNoteStart = (spot: Spot): boolean => spot.line === 0 && spot.cell === 0
+
 const wordBackward: Target = (buffer, from, count = 1) => {
   let spot = from
   for (let left = count; left > 0; left -= 1) {
-    if (spot.line === 0 && spot.cell === 0) {
+    if (isNoteStart(spot)) {
       return Option.none()
     }
     spot = motions.WordBackward(buffer, spot, 1, 'Unset').spot
+    if (isNoteStart(spot) && cellsIn(buffer, 0) > 0) {
+      break
+    }
   }
   return Option.some(
     rangeOf(buffer, { start: spot, end: from, reach: 'Exclusive' }),
@@ -379,39 +386,30 @@ const unmatched = (
   wanted: string,
   nested: string,
 ): Option.Option<Spot> => {
-  const last = lastLine(buffer)
-  let { line, cell } = from
+  const step = direction === 'Backward' ? -1 : 1
+  let line = from.line
+  let column =
+    direction === 'Backward'
+      ? positionOf(buffer, from).column - 1
+      : endOf(buffer, from).column
   let depth = 0
-  for (;;) {
-    if (direction === 'Backward') {
-      if (cell > 0) {
-        cell -= 1
-      } else if (line > 0) {
-        line -= 1
-        cell = cellsIn(buffer, line)
-        continue
-      } else {
-        return Option.none()
+  while (line >= 0 && line <= lastLine(buffer)) {
+    const { text } = buffer.lines[line] ?? buffer.lines[0]
+    for (; column >= 0 && column < text.length; column += step) {
+      const unit = text[column]
+      if (unit === wanted && depth === 0) {
+        return Option.some({
+          line,
+          cell: cellAt(buffer.lines[line] ?? buffer.lines[0], column),
+        })
       }
-    } else if (cell + 1 < cellsIn(buffer, line)) {
-      cell += 1
-    } else if (line < last) {
-      line += 1
-      cell = -1
-      continue
-    } else {
-      return Option.none()
+      depth += unit === wanted ? -1 : unit === nested ? 1 : 0
     }
-    const text = cellIn(buffer, { line, cell })
-    if (text === wanted) {
-      if (depth === 0) {
-        return Option.some({ line, cell })
-      }
-      depth -= 1
-    } else if (text === nested) {
-      depth += 1
-    }
+    line += step
+    column =
+      direction === 'Backward' ? (buffer.lines[line]?.text.length ?? 0) - 1 : 0
   }
+  return Option.none()
 }
 
 const repeatedSearch = (

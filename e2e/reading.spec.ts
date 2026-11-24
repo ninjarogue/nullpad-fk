@@ -500,23 +500,37 @@ const opensAtBlockStartingOnNextLine = async (
   shown: string | null,
 ) => {
   const paragraph = Array.from({ length: 400 }, (_, i) => `word ${i + 1}`)
-  await nullpad.paste([...paragraph, '', ...target].join('\n'))
+  const after = Array.from({ length: 200 }, (_, i) => `after ${i + 1}`)
+  await nullpad.paste([...paragraph, '', ...target, '', ...after].join('\n'))
   await nullpad.press('Control+End')
-  await nullpad.press('ArrowUp', upFromEnd)
+  await nullpad.press('ArrowUp', after.length + 1 + upFromEnd)
   const { line } = await nullpad.status()
   expect(line, 'cursor on the first line of the target block').toBe(402)
   await openRead(nullpad)
-  const tops = await nullpad.page.evaluate(line => {
+  const top = await nullpad.page.evaluate(() => {
     const read = document.querySelector('.read')
-    const block = document.querySelector(`.read [data-source-line="${line}"]`)
-    return {
-      read: read?.getBoundingClientRect().top ?? null,
-      block: block?.getBoundingClientRect().top ?? null,
-    }
-  }, line)
-  expect(tops.block, 'the target block is drawn').not.toBeNull()
+    const readTop = read?.getBoundingClientRect().top ?? 0
+    const first = Array.from(
+      document.querySelectorAll<HTMLElement>('.read [data-source-line]'),
+    ).find(element => element.getBoundingClientRect().bottom > readTop + 1)
+    return first === undefined
+      ? null
+      : {
+          line: Number(first.dataset['sourceLine']),
+          offset: first.getBoundingClientRect().top - readTop,
+        }
+  })
+  expect(top, 'a block is drawn at the top of the read view').not.toBeNull()
   expect(
-    Math.abs((tops.block ?? 0) - (tops.read ?? 0)),
+    top?.line,
+    'the block at the top starts in the target block, not the paragraph above',
+  ).toBeGreaterThanOrEqual(402)
+  expect(
+    top?.line,
+    'the block at the top starts in the target block, not after it',
+  ).toBeLessThanOrEqual(403)
+  expect(
+    Math.abs(top?.offset ?? 0),
     'the target block sits at the top of the read view',
   ).toBeLessThan(80)
   if (shown !== null) {

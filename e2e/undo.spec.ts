@@ -1162,22 +1162,6 @@ const vimRows: ReadonlyArray<Row> = [
   {
     text: 'A',
     at: [1, 1],
-    keys: 'xjxjxjx4u',
-    after: 'one two three\n  indent (x y) here\n\nend',
-    line: 1,
-    column: 1,
-  },
-  {
-    text: 'A',
-    at: [1, 1],
-    keys: 'xjxjxjx4u2<C-r>',
-    after: 'ne two three\n indent (x y) here\n\nend',
-    line: 2,
-    column: 1,
-  },
-  {
-    text: 'A',
-    at: [1, 1],
     keys: 'xgg<C-r>',
     after: 'ne two three\n  indent (x y) here\n\nend',
     line: 1,

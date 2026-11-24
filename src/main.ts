@@ -479,13 +479,11 @@ const readAt = (model: Model, top: number): Model =>
   modifyFields(model, { screen: () => Screen.cases.Read.make({ top }) })
 
 const openReading = (model: Model): UpdateReturn => {
-  const unit = Reading.unitOfLine(
-    Reading.page(model.editor.buffer.lines),
-    model.editor.buffer.caret.line,
-  )
+  const read = Reading.page(model.editor.buffer.lines)
+  const { line } = model.editor.buffer.caret
   return {
-    model: readAt(model, unit),
-    commands: [RevealReading({ target: Reading.revealUnit(unit) })],
+    model: readAt(model, Reading.unitOfLine(read, line)),
+    commands: [RevealReading({ target: Reading.revealLine(read, line) })],
   }
 }
 

@@ -179,7 +179,7 @@ const readInline: (inline: Markdown.Inline) => ReadonlyArray<Inline> =
               title: inline.title,
             },
           ]
-        : [text(plainText(inline.children))],
+        : readInlines(inline.children),
   })
 
 type HeadingSet = Readonly<{
@@ -836,13 +836,43 @@ export type At = typeof At.Type
 
 export const Reveal = Schema.TaggedUnion({
   Start: {},
-  Unit: { unit: Schema.Int },
+  Unit: { unit: Schema.Int, breaksPast: Schema.Int },
   End: {},
 })
 export type Reveal = typeof Reveal.Type
 
-export const revealUnit = (unit: number): Reveal =>
-  unit === 0 ? Reveal.cases.Start.make({}) : Reveal.cases.Unit.make({ unit })
+const revealUnit = (unit: number, breaksPast: number): Reveal =>
+  unit === 0 && breaksPast === 0
+    ? Reveal.cases.Start.make({})
+    : Reveal.cases.Unit.make({ unit, breaksPast })
+
+const inlinesOf = (leaf: Leaf): ReadonlyArray<Inline> =>
+  leaf._tag === 'Paragraph' || leaf._tag === 'Plain' || leaf._tag === 'Heading'
+    ? leaf.inlines
+    : []
+
+const breaksBefore = (unit: Unit, line: number): number =>
+  Math.max(
+    0,
+    Math.min(
+      Array.filter(
+        piecesOf(inlinesOf(unit.leaf), 0),
+        piece => piece === 'Break',
+      ).length,
+      line + 1 - unit.sourceLine,
+    ),
+  )
+
+export const revealLine = (read: Page, line: number): Reveal => {
+  const unit = unitOfLine(read, line)
+  return revealUnit(
+    unit,
+    Option.match(Array.get(read.units, unit), {
+      onNone: () => 0,
+      onSome: here => breaksBefore(here, line),
+    }),
+  )
+}
 
 export type Landing = Readonly<{ top: number; reveal: Option.Option<Reveal> }>
 
@@ -864,7 +894,7 @@ export const landing = (read: Page, at: At, screenRows: number): Landing =>
         lastUnit(read),
         Math.max(0, unitAtHeight(read, viewTop)),
       )
-      return { top, reveal: Option.some(revealUnit(top)) }
+      return { top, reveal: Option.some(revealUnit(top, 0)) }
     },
   })
 

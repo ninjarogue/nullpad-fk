@@ -179,6 +179,56 @@ test('closing the read view leaves the editor scrolled where it was, cursor off 
   ).toEqual(before)
 })
 
+const tap = (nullpad: Nullpad, key: Readonly<Record<string, unknown>>) =>
+  Promise.all([
+    nullpad.cdp.send('Input.dispatchKeyEvent', { type: 'rawKeyDown', ...key }),
+    nullpad.cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', ...key }),
+  ])
+
+const ctrlEnd = {
+  key: 'End',
+  code: 'End',
+  windowsVirtualKeyCode: 35,
+  modifiers: 2,
+}
+
+const ctrlE = {
+  key: 'e',
+  code: 'KeyE',
+  windowsVirtualKeyCode: 69,
+  modifiers: 2,
+}
+
+test('Ctrl+End and Ctrl+E in one frame, then Esc, shows what Ctrl+End alone shows', async ({
+  nullpad,
+}) => {
+  await nullpad.paste(
+    Array.from({ length: 400 }, (_, i) => `line ${i + 1}`).join('\n'),
+  )
+  const linesOnScreen = async () => {
+    const screen = await nullpad.screen()
+    return {
+      lines: screen.rows.map(row => row.number),
+      cursorOnScreen: screen.cursor?.inside ?? false,
+    }
+  }
+  await nullpad.press('Control+Home')
+  await tap(nullpad, ctrlEnd)
+  await settle(nullpad.page)
+  await settle(nullpad.page)
+  const alone = await linesOnScreen()
+  await nullpad.press('Control+Home')
+  await Promise.all([tap(nullpad, ctrlEnd), tap(nullpad, ctrlE)])
+  await settle(nullpad.page)
+  await expect(
+    nullpad.page.locator('.read'),
+    'Ctrl+E opens the read view',
+  ).toBeVisible()
+  await nullpad.press('Escape')
+  await nullpad.page.waitForTimeout(1000)
+  expect(await linesOnScreen(), 'one second after Esc').toEqual(alone)
+})
+
 const boxes = (nullpad: Nullpad) =>
   nullpad.page.locator('.read [role=checkbox]')
 

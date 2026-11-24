@@ -165,6 +165,7 @@ On a machine without Playwright's Chromium, install it once with `pnpm exec play
 | `sweep.spec.ts`, `e2e/typist/sweeps.ts`                                             | The sweeps: grids of scripts, each compared with a textarea. They run on demand.                                                                                                                                                                                                                                        |
 | `typist.spec.ts`, `typist-flicker.spec.ts`, `e2e/typist/`                           | The named scripts, which run on every push, and the typist flicker checks, which run on demand. `run.ts` holds the comparison and `script.ts` the named scripts and accepted differences.                                                                                                                               |
 | `e2e/drive.ts`, `.claude/skills/verify-nullpad/`                                    | Not a test. Plays a JSON list of steps on a fresh build with the fixture's driver, prints the screen after each step and saves evidence. The `verify-nullpad` skill says how, and its `features/*.json` are runnable proofs of each feature.                                                                            |
+| `e2e/mcp.ts`, `e2e/steps.ts`, `scripts/build-stamp.ts`                              | Not a test. The `nullpad` MCP server keeps headless Chromium open on the build in `dist/` and plays one step for each tool call with the player in `steps.ts` that `drive.ts` uses. `drive.ts` replays its recording. See The nullpad MCP server.                                                                       |
 | `e2e/reporters/require-tests.ts`                                                    | Fails a run in which no test ran, so a filter or a skip cannot turn the gate green.                                                                                                                                                                                                                                     |
 
 ### Add a scenario
@@ -249,6 +250,19 @@ Where a malformed sequence makes Chrome's textarea or EditContext disagree with 
 
 Each sweep shard reports how many mismatches each accepted difference covered.
 
+### The nullpad MCP server
+
+`.mcp.json` registers `nullpad`, a stdio MCP server (`node e2e/mcp.ts`). It keeps one headless Chromium open on the build in `dist/`, so a key press answers in about 50 ms, where a `drive.ts` run spends several seconds on a build, a server and a browser first. It is not a test. Use it to explore, then replay its recording with `drive.ts` as the proof.
+
+- **One driver.** The server plays each step with `play` from `e2e/steps.ts` and the fixture's driver, the code that `drive.ts` runs. `type`, `press`, `paste`, `compose`, `commit`, `click`, `wheel`, `resize` and `screenshot` each play one step, and `batch` plays a list. A new kind of step goes in `e2e/steps.ts`. It gets a row in `tools` in `e2e/mcp.ts` only if it needs a tool of its own.
+- **Recording.** The server appends each step that plays to `verify-out/mcp-<time>-<pid>/<n>/steps.json`, and `checkpoint` appends an `expect` of the current screen. `node e2e/drive.ts <that file>` replays the recording on a fresh build. A recording belongs to one page. `reset` and a reload each start the next recording in the next numbered folder, so every recording starts from an empty editor. `reset` takes `steps_file` to write the recording elsewhere. A step that throws and an `expect` that fails are not recorded.
+- **Reload.** Every `vite build` ends by writing `dist/build-stamp` (`scripts/build-stamp.ts`), the first 12 hex digits of the SHA-256 of the built `index.html`. Before each tool call the server compares that file with the stamp of the page it has open. If they differ, it opens a fresh page and starts its result with `reloaded:`. A `batch` is one call, so no reload lands inside it. While a build is being written, `dist/` has no stamp, and the server waits up to 10 seconds for one.
+- **No build.** The server never builds. While a file under `src/` is newer than the stamp, each result ends with `stale:` and the fix, `pnpm build`.
+- **Page errors.** A result that carries `PAGE ERROR` is marked as an error, because a `drive.ts` replay of that recording fails.
+- **Another build.** `NULLPAD_DIST=/path/to/dist` serves that build, which needs its own `build-stamp`.
+
+The `verify-nullpad` skill lists the tools and their arguments.
+
 ### Markdown tests
 
 Each group catches a kind of bug no other group catches; the last column says which bug it caught alone when it was built. The push gate has a budget of about 3 minutes in all, so a slow group runs on demand.
@@ -315,7 +329,7 @@ When a bug turns up, first ask whether a spec example, a place rule or a scenari
 ## Process
 
 - Tests are end-to-end only. See Testing.
-- Prove a change in the running app with the `verify-nullpad` skill (`node e2e/drive.ts`) before calling it done.
+- Prove a change in the running app with the `verify-nullpad` skill (`node e2e/drive.ts`) before calling it done. The `nullpad` MCP server is for trying things out. Its recording is a proof once `drive.ts` replays it.
 - Every PR passes the pre-push hook: quick checks and the push gate, about 3 minutes. Nothing else runs as a gate. `pnpm test:all` runs on demand, such as after a change to the area a sweep covers.
 - A PR adds a test only when it fixes a real bug (one scenario that fails on the bug) or opens a kind of bug no test can catch. Most PRs add none.
 - A PR that changes app behavior gets one break-it pass: an agent that did not write the change drives the app, about 10 minutes, and reports what broke. A PR that only changes tests or tooling skips it.

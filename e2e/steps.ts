@@ -1,0 +1,417 @@
+import { join } from 'node:path'
+
+import { type BrowserContext } from '@playwright/test'
+
+import { type Nullpad, type Screen, driver, linesOf } from './nullpad.ts'
+
+type Point = Readonly<{ x: number; y: number }>
+type Spot = Readonly<{ row: number; cell: number }>
+type Expectation = Readonly<{
+  text?: string
+  status?: string
+  under?: string
+  top?: string
+  full?: boolean
+  title?: string
+  finder?: string
+}>
+
+export type Step =
+  | Readonly<{ type: string }>
+  | Readonly<{ press: string; times?: number }>
+  | Readonly<{ paste: string }>
+  | Readonly<{
+      compose: string
+      replacing?: Readonly<{ start: number; end: number }>
+    }>
+  | Readonly<{ commit: string }>
+  | Readonly<{ click: Point | Spot }>
+  | Readonly<{ wheel: number }>
+  | Readonly<{ resize: Readonly<{ width: number; height: number }> }>
+  | Readonly<{ shot: string }>
+  | Readonly<{ reload: true }>
+  | Readonly<{ wait: number }>
+  | Readonly<{ expect: Expectation }>
+
+const stepKeys = [
+  'type',
+  'press',
+  'paste',
+  'compose',
+  'commit',
+  'click',
+  'wheel',
+  'resize',
+  'shot',
+  'reload',
+  'wait',
+  'expect',
+] as const
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value)
+
+export const parseStep = (value: unknown, index: number): Step => {
+  const fail = (why: string): never => {
+    throw new Error(`step ${index + 1} ${JSON.stringify(value)}: ${why}`)
+  }
+  if (!isRecord(value)) {
+    return fail('is not an object')
+  }
+  const kinds = stepKeys.filter(key => key in value)
+  const [kind] = kinds
+  if (kinds.length !== 1 || kind === undefined) {
+    return fail(`needs exactly one of ${stepKeys.join(', ')}`)
+  }
+  const allowed: ReadonlyArray<string> = [
+    kind,
+    ...(kind === 'press' ? ['times'] : []),
+    ...(kind === 'compose' ? ['replacing'] : []),
+  ]
+  const extra = Object.keys(value).filter(key => !allowed.includes(key))
+  if (extra.length > 0) {
+    return fail(`${kind} takes no field ${extra.join(', ')}`)
+  }
+  const body = value[kind]
+  const only = (
+    record: Record<string, unknown>,
+    names: ReadonlyArray<string>,
+  ) => {
+    const unknown = Object.keys(record).filter(key => !names.includes(key))
+    if (unknown.length > 0) {
+      fail(`${kind} takes only ${names.join(', ')}, not ${unknown.join(', ')}`)
+    }
+  }
+  const text = (): string =>
+    typeof body === 'string' ? body : fail(`${kind} takes a string`)
+  const number = (field: unknown, name: string): number =>
+    typeof field === 'number' && Number.isFinite(field)
+      ? field
+      : fail(`${name} takes a number`)
+  switch (kind) {
+    case 'type':
+    case 'paste':
+    case 'commit':
+      return { [kind]: text() } as Step
+    case 'shot':
+      return /^[\w-]+$/u.test(text())
+        ? { shot: text() }
+        : fail('shot takes a name of letters, digits, - and _')
+    case 'press': {
+      const times = value['times']
+      if (times === undefined) {
+        return { press: text() }
+      }
+      return Number.isInteger(times) && Number(times) > 0
+        ? { press: text(), times: Number(times) }
+        : fail('times takes a whole number above 0')
+    }
+    case 'compose': {
+      const replacing = value['replacing']
+      if (replacing === undefined) {
+        return { compose: text() }
+      }
+      if (isRecord(replacing)) {
+        only(replacing, ['start', 'end'])
+        if (Number(replacing['start']) > Number(replacing['end'])) {
+          fail('replacing.start comes after replacing.end')
+        }
+      }
+      return isRecord(replacing)
+        ? {
+            compose: text(),
+            replacing: {
+              start: number(replacing['start'], 'replacing.start'),
+              end: number(replacing['end'], 'replacing.end'),
+            },
+          }
+        : fail('replacing takes { start, end }')
+    }
+    case 'click':
+      if (isRecord(body)) {
+        only(body, 'row' in body ? ['row', 'cell'] : ['x', 'y'])
+      }
+      if (isRecord(body) && 'row' in body) {
+        return {
+          click: {
+            row: number(body['row'], 'click.row'),
+            cell: number(body['cell'], 'click.cell'),
+          },
+        }
+      }
+      return isRecord(body)
+        ? {
+            click: {
+              x: number(body['x'], 'click.x'),
+              y: number(body['y'], 'click.y'),
+            },
+          }
+        : fail('click takes { row, cell } or { x, y }')
+    case 'wheel':
+      return { wheel: number(body, 'wheel') }
+    case 'reload':
+      return body === true ? { reload: true } : fail('reload takes true')
+    case 'wait':
+      return number(body, 'wait') > 0 && number(body, 'wait') <= 10_000
+        ? { wait: number(body, 'wait') }
+        : fail('wait takes milliseconds from 1 to 10000')
+    case 'resize':
+      if (isRecord(body)) {
+        only(body, ['width', 'height'])
+      }
+      return isRecord(body)
+        ? {
+            resize: {
+              width: number(body['width'], 'resize.width'),
+              height: number(body['height'], 'resize.height'),
+            },
+          }
+        : fail('resize takes { width, height }')
+    case 'expect': {
+      if (!isRecord(body)) {
+        return fail(
+          'expect takes { text?, status?, under?, top?, full?, title?, finder? }',
+        )
+      }
+      const fields = [
+        'text',
+        'status',
+        'under',
+        'top',
+        'title',
+        'finder',
+      ] as const
+      const unknown = Object.keys(body).filter(
+        key => ![...fields, 'full'].includes(key),
+      )
+      if (unknown.length > 0) {
+        return fail(`expect has no field ${unknown.join(', ')}`)
+      }
+      const expectation: Record<string, string | boolean> = {}
+      if (body['full'] === true) {
+        expectation['full'] = true
+      } else if (body['full'] !== undefined) {
+        fail('expect.full takes true')
+      }
+      for (const name of fields) {
+        const field = body[name]
+        if (typeof field === 'string') {
+          expectation[name] = field
+        } else if (field !== undefined) {
+          fail(`expect.${name} takes a string`)
+        }
+      }
+      return Object.keys(expectation).length === 0
+        ? fail('expect names nothing to check')
+        : { expect: expectation }
+    }
+  }
+}
+
+export const parseSteps = (json: string): ReadonlyArray<Step> => {
+  const value: unknown = JSON.parse(json)
+  if (!Array.isArray(value)) {
+    throw new Error('steps must be a JSON array')
+  }
+  if (value.length === 0) {
+    throw new Error('steps is empty: nothing to prove')
+  }
+  return value.map(parseStep)
+}
+
+export const statusText = ({ status }: Screen): string =>
+  `${status.line}:${status.column} ${status.lineCount}L`
+
+const cursorText = ({ cursor }: Screen): string =>
+  cursor === null
+    ? 'cursor off screen'
+    : `cursor row ${cursor.row} cell ${cursor.cell} on ${JSON.stringify(cursor.char)}`
+
+export const picture = (screen: Screen): string => {
+  const rows = screen.rows.map((row, index) => {
+    const gutter = (row.number ?? '').padStart(5)
+    const line = `${String(index).padStart(3)} ${gutter} |${row.text}`
+    return screen.cursor?.row === index
+      ? `${line}\n${' '.repeat(11)}|${' '.repeat(screen.cursor.cell)}^`
+      : line
+  })
+  return [`status ${statusText(screen)}, ${cursorText(screen)}`, ...rows].join(
+    '\n',
+  )
+}
+
+export const describe = (step: Step): string => {
+  const json = JSON.stringify(step)
+  return json.length <= 100
+    ? json
+    : `${json.slice(0, 80)}… (${json.length} chars, full step in steps.json)`
+}
+
+type Page = Nullpad['page']
+
+const finderText = (page: Page): Promise<string> =>
+  page.evaluate(() => {
+    const finder = document.querySelector('.finder')
+    if (finder === null) {
+      return 'closed'
+    }
+    const prompt = finder.querySelector('.pl')?.textContent ?? ''
+    const rows = Array.from(
+      finder.querySelectorAll('.row'),
+      row =>
+        `${row.classList.contains('sel') ? '> ' : '  '}${Array.from(
+          row.children,
+          cell => cell.textContent ?? '',
+        ).join(' | ')}`,
+    )
+    return [`prompt ${prompt}`, ...rows].join('\n')
+  })
+
+const checkPage = async (
+  page: Page,
+  expectation: Expectation,
+): Promise<Array<string>> => {
+  const misses: Array<string> = []
+  const title = await page.title()
+  if (expectation.title !== undefined && title !== expectation.title) {
+    misses.push(`title is "${title}", expected "${expectation.title}"`)
+  }
+  if (expectation.finder !== undefined) {
+    const finder = await finderText(page)
+    if (finder !== expectation.finder) {
+      misses.push(
+        `finder shows ${JSON.stringify(finder)}, expected ${JSON.stringify(expectation.finder)}`,
+      )
+    }
+  }
+  return misses
+}
+
+export const seen = (screen: Screen) => ({
+  text: linesOf(screen).join('\n'),
+  status: statusText(screen),
+  under: screen.cursor?.char,
+  top: screen.rows.find(row => row.number !== null)?.number,
+})
+
+const check = (screen: Screen, expectation: Expectation): Array<string> => {
+  const misses: Array<string> = []
+  const { text, status, under, top } = seen(screen)
+  if (expectation.text !== undefined && text !== expectation.text) {
+    misses.push(
+      `text is ${JSON.stringify(text)}, expected ${JSON.stringify(expectation.text)}`,
+    )
+  }
+  if (expectation.status !== undefined && status !== expectation.status) {
+    misses.push(`status is "${status}", expected "${expectation.status}"`)
+  }
+  if (expectation.under !== undefined && under !== expectation.under) {
+    misses.push(
+      `cursor is on ${JSON.stringify(under ?? null)}, expected ${JSON.stringify(expectation.under)}`,
+    )
+  }
+  if (expectation.top !== undefined && top !== expectation.top) {
+    misses.push(
+      `the top line on screen is ${top ?? 'none'}, expected ${expectation.top}`,
+    )
+  }
+  const drawnHeight = screen.rows.length * screen.rowHeight
+  const areaHeight = screen.area.bottom - screen.area.top
+  if (
+    expectation.full === true &&
+    drawnHeight < areaHeight - screen.rowHeight
+  ) {
+    misses.push(
+      `rows fill ${drawnHeight}px of the ${areaHeight}px text area: blank screen`,
+    )
+  }
+  return misses
+}
+
+const clickPoint = (screen: Screen, target: Point | Spot): Point => {
+  if ('x' in target) {
+    return target
+  }
+  const row = screen.rows[target.row]
+  if (row === undefined) {
+    throw new Error(
+      `click row ${target.row}: the screen draws rows 0 to ${screen.rows.length - 1}`,
+    )
+  }
+  return {
+    x: row.left + (target.cell + 0.25) * screen.cell,
+    y: row.top + screen.rowHeight / 2,
+  }
+}
+
+export const play = async (
+  nullpad: Nullpad,
+  step: Step,
+  out: string,
+): Promise<ReadonlyArray<string>> => {
+  if ('type' in step) {
+    await nullpad.type(step.type)
+  } else if ('press' in step) {
+    await nullpad.press(step.press, step.times)
+  } else if ('paste' in step) {
+    await nullpad.paste(step.paste)
+  } else if ('compose' in step) {
+    await nullpad.compose(step.compose, step.replacing)
+  } else if ('commit' in step) {
+    await nullpad.commit(step.commit)
+  } else if ('click' in step) {
+    const point = clickPoint(await nullpad.screen(), step.click)
+    await nullpad.click(point.x, point.y)
+  } else if ('wheel' in step) {
+    await nullpad.wheel(step.wheel)
+  } else if ('resize' in step) {
+    await nullpad.resize(step.resize.width, step.resize.height)
+  } else if ('shot' in step) {
+    await nullpad.page.screenshot({
+      path: join(out, `${step.shot}.png`),
+      animations: 'disabled',
+    })
+  } else if ('reload' in step) {
+    await nullpad.page.reload()
+    await nullpad.page.locator('#caret').waitFor({ timeout: 10_000 })
+    await nullpad.page.evaluate(() =>
+      document.fonts.ready.then(() => undefined),
+    )
+  } else if ('wait' in step) {
+    await nullpad.page.waitForTimeout(step.wait)
+  } else {
+    return [
+      ...check(await nullpad.screen(), step.expect),
+      ...(await checkPage(nullpad.page, step.expect)),
+    ]
+  }
+  return []
+}
+
+export const stateLine = (screen: Screen, preedit: string): string =>
+  `${statusText(screen)} | ${cursorText(screen)}${preedit === '' ? '' : ` | composing ${JSON.stringify(preedit)}`}`
+
+export const openPage = async (
+  context: BrowserContext,
+  url: string,
+  pageErrors: Array<string>,
+) => {
+  await context.grantPermissions(['clipboard-read', 'clipboard-write'])
+  const page = await context.newPage()
+  page.on('pageerror', error => pageErrors.push(error.message))
+  page.on('console', message => {
+    if (message.type() === 'error') {
+      pageErrors.push(message.text())
+    }
+  })
+  const response = await page.goto(url)
+  if (response === null) {
+    throw new Error(`${url} gave no response`)
+  }
+  await page.locator('#caret').waitFor({ timeout: 10_000 })
+  await page.evaluate(() => document.fonts.ready.then(() => undefined))
+  return {
+    nullpad: driver(page, await context.newCDPSession(page)),
+    indexHtml: await response.body(),
+  }
+}

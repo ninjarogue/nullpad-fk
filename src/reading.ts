@@ -54,11 +54,16 @@ const inlineView = (inline: Reading.Inline, h: HtmlBuilder<Message>): Child =>
       h.img([h.Src(src), h.Alt(alt), h.Loading('lazy'), ...titled(title, h)]),
   })(inline)
 
-const taskBox = (box: Reading.Box, h: HtmlBuilder<Message>): Html =>
+const taskBox = (
+  box: Reading.Box,
+  inlines: ReadonlyArray<Reading.Inline>,
+  h: HtmlBuilder<Message>,
+): Html =>
   h.span([
     h.Class('box'),
     h.Role('checkbox'),
     h.AriaChecked(box.checked),
+    h.AriaLabel(Reading.label(inlines)),
     h.OnClick(Message.ClickedTask({ box })),
   ])
 
@@ -78,7 +83,7 @@ const leadChildren = (
 ): ReadonlyArray<Child> => [
   ...Option.match(box, {
     onNone: (): ReadonlyArray<Child> => [],
-    onSome: drawnBox => [taskBox(drawnBox, h)],
+    onSome: drawnBox => [taskBox(drawnBox, inlines, h)],
   }),
   ...inlinesView(inlines, h),
 ]

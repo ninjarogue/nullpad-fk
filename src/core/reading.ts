@@ -27,6 +27,24 @@ export type Inline =
       title: Option.Option<string>
     }>
 
+const spoken = (inlines: ReadonlyArray<Inline>): string =>
+  Array.join(Array.map(inlines, spokenOf), '')
+
+const spokenOf: (inline: Inline) => string = Match.typeTags<Inline, string>()({
+  Text: ({ text }) => text,
+  Raw: ({ text }) => text,
+  Code: ({ text }) => text,
+  SoftBreak: () => ' ',
+  HardBreak: () => ' ',
+  Emphasis: ({ children }) => spoken(children),
+  Strong: ({ children }) => spoken(children),
+  Link: ({ children }) => spoken(children),
+  Image: ({ alt }) => alt,
+})
+
+export const label = (inlines: ReadonlyArray<Inline>): string =>
+  spoken(inlines).trim()
+
 export const Box = Schema.Struct({
   ...Buffer.Position.fields,
   checked: Schema.Boolean,

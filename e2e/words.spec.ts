@@ -1,6 +1,6 @@
 import type { Page } from '@playwright/test'
 
-import { expect, openFresh, screenOf, test, textOf } from './nullpad'
+import { expect, openFresh, screenOf, statusOf, test, textOf } from './nullpad'
 import { type Pair, openPair } from './typist/run'
 
 test.describe.configure({ mode: 'parallel' })
@@ -97,8 +97,8 @@ const keysFor = (text: string, seed: number): ReadonlyArray<Key> => {
 type Caret = Readonly<{ line: number; column: number }>
 
 const nullpadCaret = async (page: Page): Promise<Caret> => {
-  const { status } = await screenOf(page)
-  return { line: status.line, column: status.column }
+  const { line, column } = await statusOf(page)
+  return { line, column }
 }
 
 const textareaCaret = (page: Page): Promise<Caret> =>

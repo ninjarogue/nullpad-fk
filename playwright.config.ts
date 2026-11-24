@@ -6,7 +6,7 @@ const prebuilt = process.env['NULLPAD_DIST']
 export default defineConfig({
   testDir: 'e2e',
   fullyParallel: true,
-  workers: '100%',
+  workers: '150%',
   forbidOnly: true,
   retries: 0,
   timeout: 60_000,

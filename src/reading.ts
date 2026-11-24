@@ -312,7 +312,7 @@ export const ReadingPort = Mount.defineStream('ReadingPort', {
       : Stream.never,
 })
 
-const { headings, ...sizes } = Reading.metrics
+const { headings, codeSpan, ...sizes } = Reading.metrics
 
 const kebab = (name: string): string =>
   name.replace(/[A-Z]/gu, letter => `-${letter.toLowerCase()}`)
@@ -322,6 +322,12 @@ const docMetrics: Readonly<Record<string, string>> = {
     Array.map(Record.toEntries(sizes), ([name, value]) => [
       `--read-${kebab(name)}`,
       `${value}px`,
+    ]),
+  ),
+  ...Record.fromEntries(
+    Array.map(Record.toEntries(codeSpan), ([name, value]) => [
+      `--read-code-span-${kebab(name)}`,
+      `${value}em`,
     ]),
   ),
   ...Record.fromEntries(

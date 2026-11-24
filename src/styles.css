@@ -274,11 +274,12 @@ body {
 }
 
 .doc code {
-  padding: 0.1em 0.35em;
+  padding: var(--read-code-span-pad-block) var(--read-code-span-pad-inline);
   border-radius: 3px;
   background: var(--sel);
   font-family: 'JetBrains Mono', ui-monospace, monospace;
-  font-size: 0.86em;
+  font-size: var(--read-code-span-size);
+  line-height: 1;
   letter-spacing: 0;
 }
 
@@ -302,6 +303,7 @@ body {
   padding: 0;
   background: none;
   font-size: inherit;
+  line-height: inherit;
 }
 
 .doc pre[data-info]::before {
@@ -329,21 +331,26 @@ body {
   white-space: pre-wrap;
 }
 
-.doc li:has(> [data-unit]:first-child > .box) {
+.doc ul > li:has(> [data-unit]:first-child > .box) {
   list-style: none;
 }
 
 .doc .box {
   display: inline-block;
   box-sizing: border-box;
-  width: 0.95em;
-  height: 0.95em;
-  margin: 0 calc(var(--read-list-indent) - 4px - 0.95em) 0
-    calc(4px - var(--read-list-indent));
+  width: var(--read-box-size);
+  height: var(--read-box-size);
+  margin: 0
+    calc(var(--read-list-indent) - var(--read-box-inset) - var(--read-box-size))
+    0 calc(var(--read-box-inset) - var(--read-list-indent));
   border: 1.5px solid var(--dim);
   border-radius: 3px;
   vertical-align: -0.12em;
   cursor: pointer;
+}
+
+.doc ol > li > [data-unit] > .box {
+  margin-left: 0;
 }
 
 .doc .box[aria-checked='true'] {
@@ -370,8 +377,8 @@ body {
 }
 
 .doc blockquote {
-  padding-left: calc(var(--read-quote-indent) - 3px);
-  border-left: 3px solid var(--sel);
+  padding-left: calc(var(--read-quote-indent) - var(--read-quote-rule));
+  border-left: var(--read-quote-rule) solid var(--sel);
   color: var(--quote);
 }
 

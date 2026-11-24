@@ -202,13 +202,17 @@ export const metrics = {
   itemGap: 4,
   looseGap: 8,
   quoteIndent: 20,
+  quoteRule: 3,
   quoteGap: 20,
   listIndent: 26,
+  boxSize: 16,
+  boxInset: 4,
   codeSize: 13.5,
   codeLeading: 22,
   codePad: 12,
   codeInset: 15,
   ruleGap: 33,
+  codeSpan: { size: 0.86, padBlock: 0.1, padInline: 0.35 },
   headings: {
     1: { size: 35, leading: 44, above: 41, below: 21, rule: 11 },
     2: { size: 24, leading: 30, above: 41, below: 14, rule: 7 },
@@ -244,14 +248,16 @@ const narrowInInter = /[ !'(),.:;I[\]fijlrt|]/gu
 
 const broadInInter = /[A-HJ-Z@%mw]/gu
 
-const fittedEms = {
+const glyphEms = {
   narrow: 0.31,
   usual: 0.59,
   broad: 0.72,
   wide: 1,
   mono: 0.6,
-  codeSpan: 0.86,
-  codeSpanPadding: 0.7,
+}
+
+const widthScales = {
+  body: 1,
   strong: 1.05,
   heading: 0.99,
 }
@@ -264,16 +270,16 @@ const emsOf = (value: string): number => {
     const narrows = matchCount(value, narrowInInter)
     const broads = matchCount(value, broadInInter)
     return (
-      narrows * fittedEms.narrow +
-      broads * fittedEms.broad +
-      (value.length - narrows - broads) * fittedEms.usual
+      narrows * glyphEms.narrow +
+      broads * glyphEms.broad +
+      (value.length - narrows - broads) * glyphEms.usual
     )
   }
   return Array.reduce(
     Array.fromIterable(Buffer.segmenter.segment(value)),
     0,
     (sum, { segment }) =>
-      sum + (eastAsianWide.test(segment) ? fittedEms.wide : fittedEms.usual),
+      sum + (eastAsianWide.test(segment) ? glyphEms.wide : glyphEms.usual),
   )
 }
 
@@ -287,12 +293,13 @@ const lengthOf = (inlines: ReadonlyArray<Inline>, width: number): number =>
         Text: ({ text }) => emsOf(text),
         Raw: ({ text }) => emsOf(text),
         Code: ({ text }) =>
-          text.length * fittedEms.mono * fittedEms.codeSpan +
-          fittedEms.codeSpanPadding,
-        SoftBreak: () => fittedEms.narrow,
+          (text.length * glyphEms.mono + 2 * metrics.codeSpan.padInline) *
+          metrics.codeSpan.size,
+        SoftBreak: () => glyphEms.narrow,
         HardBreak: () => 0,
         Emphasis: ({ children }) => lengthOf(children, width),
-        Strong: ({ children }) => lengthOf(children, width) * fittedEms.strong,
+        Strong: ({ children }) =>
+          lengthOf(children, width) * widthScales.strong,
         Link: ({ children }) => lengthOf(children, width),
         Image: () => width,
       })(inline),
@@ -301,37 +308,70 @@ const lengthOf = (inlines: ReadonlyArray<Inline>, width: number): number =>
 const linesOf = (length: number, width: number): number =>
   Math.max(1, Math.ceil(length / width))
 
+type TextStyle = Readonly<{
+  size: number
+  leading: number
+  scale: number
+  lead: number
+}>
+
 const textHeight = (
   inlines: ReadonlyArray<Inline>,
   inside: ReadonlyArray<Holder>,
-  size: number,
-  leading: number,
-  scale: number,
+  { size, leading, scale, lead }: TextStyle,
 ): number => {
   const width = widthInside(inside) / size
-  return linesOf(lengthOf(inlines, width) * scale, width) * leading
+  return (
+    linesOf(lengthOf(inlines, width) * scale + lead / size, width) * leading
+  )
 }
+
+const boxInText = (
+  box: Option.Option<Box>,
+  inside: ReadonlyArray<Holder>,
+): number =>
+  Option.isSome(box) && inside[inside.length - 2]?._tag === 'Numbers'
+    ? metrics.listIndent - metrics.boxInset
+    : 0
+
+const bodyHeight = (
+  box: Option.Option<Box>,
+  inlines: ReadonlyArray<Inline>,
+  inside: ReadonlyArray<Holder>,
+): number =>
+  textHeight(inlines, inside, {
+    size: metrics.size,
+    leading: metrics.leading,
+    scale: widthScales.body,
+    lead: boxInText(box, inside),
+  })
 
 const drawnHeight = ({ leaf, inside }: Unit): number =>
   Match.typeTags<Leaf, number>()({
-    Paragraph: ({ inlines }) =>
-      textHeight(inlines, inside, metrics.size, metrics.leading, 1),
-    Plain: ({ inlines }) =>
-      textHeight(inlines, inside, metrics.size, metrics.leading, 1),
+    Paragraph: ({ box, inlines }) => bodyHeight(box, inlines, inside),
+    Plain: ({ box, inlines }) => bodyHeight(box, inlines, inside),
     Heading: ({ level, inlines }) => {
       const { size, leading, rule } = metrics.headings[level]
       return (
-        textHeight(inlines, inside, size, leading, fittedEms.heading) + rule
+        textHeight(inlines, inside, {
+          size,
+          leading,
+          scale: widthScales.heading,
+          lead: 0,
+        }) + rule
       )
     },
     Rule: () => metrics.hairline,
     CodeLine: () => metrics.codeLeading,
     RawLine: ({ text }) =>
       linesOf(
-        (text.length * fittedEms.mono * metrics.codeSize) / metrics.size,
+        (text.length * glyphEms.mono * metrics.codeSize) / metrics.size,
         widthInside(inside) / metrics.size,
       ) * metrics.codeLeading,
-    Empty: () => metrics.row,
+    Empty: () =>
+      inside[inside.length - 1]?._tag === 'Item'
+        ? metrics.leading
+        : metrics.row,
   })(leaf)
 
 type Margins = Readonly<{ top: number; bottom: number }>
@@ -395,34 +435,43 @@ const panelEdge = metrics.codePad + metrics.hairline
 const isPanel = (inside: ReadonlyArray<Holder>, from: number): boolean =>
   Array.some(inside.slice(from), holder => holder._tag === 'Code')
 
+const fromDepth = (inside: ReadonlyArray<Holder>, depth: number) =>
+  Array.filter(
+    Array.map(inside, (_, at) => at),
+    at => at >= depth,
+  )
+
+const topMargins = (unit: Unit, depth: number): ReadonlyArray<number> => [
+  ...Array.map(
+    fromDepth(unit.inside, depth),
+    at => holderMargins(unit.inside, at, false).top,
+  ),
+  leafMargins(unit, false).top,
+]
+
 const gapAfter = (unit: Unit, next: Unit | undefined): number => {
-  if (next === undefined) {
-    return isPanel(unit.inside, 0) ? panelEdge : 0
-  }
-  const depth = sharedDepth(unit, next)
-  const deeper = (inside: ReadonlyArray<Holder>) =>
-    Array.filter(
-      Array.map(inside, (_, at) => at),
-      at => at >= depth,
-    )
-  const closing = deeper(unit.inside)
-  const opening = deeper(next.inside)
+  const depth = next === undefined ? 0 : sharedDepth(unit, next)
   const collapsed = Math.max(
     0,
     leafMargins(unit, depth < unit.inside.length).bottom,
     ...Array.map(
-      closing,
+      fromDepth(unit.inside, depth),
       at => holderMargins(unit.inside, at, depth < at).bottom,
     ),
-    ...Array.map(opening, at => holderMargins(next.inside, at, false).top),
-    leafMargins(next, false).top,
+    ...(next === undefined ? [] : topMargins(next, depth)),
   )
   return (
     collapsed +
     (isPanel(unit.inside, depth) ? panelEdge : 0) +
-    (isPanel(next.inside, depth) ? panelEdge : 0)
+    (next !== undefined && isPanel(next.inside, depth) ? panelEdge : 0)
   )
 }
+
+const drawnAboveFirst = (unit: Unit | undefined): number =>
+  unit === undefined
+    ? 0
+    : Math.max(0, ...topMargins(unit, 0)) +
+      (isPanel(unit.inside, 0) ? panelEdge : 0)
 
 const taskBoxLength = 4
 
@@ -887,7 +936,10 @@ export const drawn = (read: Page, top: number, screenRows: number): Drawn => {
   const to = Math.min(count, at + screenRows + past)
   const startOf = (index: number) => read.starts[index] ?? 0
   return {
-    above: { from: 0, height: startOf(from) },
+    above: {
+      from: 0,
+      height: Math.max(0, startOf(from) - drawnAboveFirst(read.units[from])),
+    },
     nodes: nest(
       read,
       from,

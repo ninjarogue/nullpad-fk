@@ -147,8 +147,9 @@ body {
 }
 
 .doc {
-  max-width: 76ch;
-  padding: 0 0 var(--row) 6ch;
+  --doc-gutter: 6ch;
+  max-width: calc(var(--text-columns) * 1ch + var(--doc-gutter));
+  padding: 0 0 var(--row) var(--doc-gutter);
   overflow-wrap: break-word;
 }
 
@@ -160,6 +161,18 @@ body {
 .doc li > .plain,
 .doc li > :last-child {
   margin-bottom: 0;
+}
+
+.doc [data-unit]:not(hr) {
+  min-height: var(--row);
+}
+
+.doc li.continued {
+  list-style: none;
+}
+
+.doc pre [data-unit] {
+  margin: 0;
 }
 
 .doc h1,
@@ -244,6 +257,10 @@ body {
   color: var(--dim);
 }
 
+.doc pre[data-info] > code > :first-child {
+  scroll-margin-top: var(--row);
+}
+
 .doc .raw {
   color: var(--dim);
 }
@@ -263,14 +280,14 @@ body {
 }
 
 .doc blockquote {
-  padding-left: 2ch;
+  padding-left: calc(var(--quote-indent) * 1ch);
   border-left: 1px solid var(--gut);
   color: var(--barfg);
 }
 
 .doc ul,
 .doc ol {
-  padding-left: 3ch;
+  padding-left: calc(var(--list-indent) * 1ch);
 }
 
 .doc ul {
@@ -638,4 +655,22 @@ body:has(.finder) #caret {
   .finder .keys {
     display: none;
   }
+}
+
+.stage {
+  position: relative;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.stage > .read {
+  position: absolute;
+  inset: 0;
+  background: var(--bg);
+}
+
+.stage.reading > .surface {
+  visibility: hidden;
 }

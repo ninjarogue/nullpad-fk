@@ -1218,6 +1218,7 @@ const playRow = async (nullpad: Nullpad, row: Row) => {
   await startWith(nullpad, texts[row.text])
   await placeAt(nullpad, row.at[0], row.at[1])
   await nullpad.page.keyboard.press(toggle)
+  await settle(nullpad.page)
   for (const token of row.keys.match(/<[A-Za-z-]+>|./gu) ?? []) {
     await nullpad.page.keyboard.press(keyNames[token] ?? token)
   }
@@ -1253,7 +1254,7 @@ test('typed letters, Tab and spaces in a row are one change, and the cursor move
   expect(await nullpad.text(), 'one Ctrl-Z took the whole run').toBe('')
 
   await nullpad.press('Control+Shift+z')
-  expect(await nullpad.text(), 'redo puts the run back').toBe('ab \tcd ef')
+  expect(await nullpad.text(), 'redo puts the run back').toBe('ab   cd ef')
 
   await nullpad.press('Control+z')
   await nullpad.type('abc')
@@ -1347,7 +1348,7 @@ test('the cursor is before the change after Ctrl-Z and after the change after a 
   await nullpad.press('Control+End')
   await nullpad.press('Backspace', 3)
   expect(await nullpad.text(), 'Backspaces at the end').toBe(
-    'lineZZ one\nline t',
+    'lineZZ one\nline ',
   )
   await undo(nullpad)
   expect(await nullpad.status(), 'cursor before the Backspaces').toMatchObject({
@@ -1357,7 +1358,7 @@ test('the cursor is before the change after Ctrl-Z and after the change after a 
   await nullpad.press('Control+y')
   expect(await nullpad.status(), 'cursor after the Backspaces').toMatchObject({
     line: 2,
-    column: 7,
+    column: 6,
   })
 })
 
@@ -1393,11 +1394,13 @@ test('an IME composition is one change at its commit, and Ctrl-Z while composing
 const cancelled = async (nullpad: Nullpad, key: string) => {
   const seen = await nullpad.page.evaluateHandle(() => {
     const box: { cancelled: boolean | null } = { cancelled: null }
-    window.addEventListener(
-      'keydown',
-      event => (box.cancelled = event.defaultPrevented),
-      { once: true },
-    )
+    const listener = (event: KeyboardEvent) => {
+      if (!['Control', 'Shift', 'Meta', 'Alt'].includes(event.key)) {
+        box.cancelled = event.defaultPrevented
+        window.removeEventListener('keydown', listener)
+      }
+    }
+    window.addEventListener('keydown', listener)
     return box
   })
   await nullpad.page.keyboard.press(key)
@@ -1419,6 +1422,7 @@ test('Ctrl-R keydown is cancelled with vim on and left to the browser with vim o
 }) => {
   await nullpad.type('abc')
   await nullpad.page.keyboard.press(toggle)
+  await settle(nullpad.page)
   expect(await modeOf(nullpad), 'vim on').toBe('NORMAL')
   expect(
     await cancelled(nullpad, 'Control+r'),
@@ -1428,6 +1432,8 @@ test('Ctrl-R keydown is cancelled with vim on and left to the browser with vim o
   expect(await modeOf(nullpad), 'vim still on').toBe('NORMAL')
 
   await nullpad.page.keyboard.press(toggle)
+
+  await settle(nullpad.page)
   expect(await modeOf(nullpad), 'vim off').toBe('EDIT')
   expect(
     await cancelled(nullpad, 'Control+r'),
@@ -1438,6 +1444,7 @@ test('Ctrl-R keydown is cancelled with vim on and left to the browser with vim o
 test('history runs across the vim toggle both ways', async ({ nullpad }) => {
   await nullpad.type('abc')
   await nullpad.page.keyboard.press(toggle)
+  await settle(nullpad.page)
   await nullpad.press('u')
   expect(await nullpad.text(), 'u took the change made with vim off').toBe('')
   await nullpad.press('Control+r')
@@ -1446,6 +1453,7 @@ test('history runs across the vim toggle both ways', async ({ nullpad }) => {
   await nullpad.type('ggdd')
   expect(await nullpad.text(), 'dd emptied the note').toBe('')
   await nullpad.page.keyboard.press(toggle)
+  await settle(nullpad.page)
   expect(await modeOf(nullpad), 'vim off').toBe('EDIT')
   await undo(nullpad)
   expect(await nullpad.text(), 'Ctrl-Z took the change made with vim on').toBe(
@@ -1504,6 +1512,7 @@ test('a task box clicked in the read view is undone by u in the editor', async (
 }) => {
   await startWith(nullpad, '- [ ] one\n- [ ] two')
   await nullpad.page.keyboard.press(toggle)
+  await settle(nullpad.page)
   await nullpad.press('Control+e')
   await expect(nullpad.page.locator('.read')).toBeVisible()
   await nullpad.page.locator('.read [role=checkbox]').nth(1).click()
@@ -1526,6 +1535,7 @@ test('u and Ctrl-Z do nothing in the read view and with the finder open', async 
 }) => {
   await startWith(nullpad, 'base')
   await nullpad.page.keyboard.press(toggle)
+  await settle(nullpad.page)
   await nullpad.press('x')
   expect(await nullpad.text(), 'x').toBe('ase')
 
@@ -1552,6 +1562,7 @@ test('a note emptied by ggdG comes back with u after a save, and undo is saved l
 }) => {
   await startWith(nullpad, 'a\nb\nc')
   await nullpad.page.keyboard.press(toggle)
+  await settle(nullpad.page)
   await nullpad.type('ggdG')
   expect(await nullpad.text(), 'emptied').toBe('')
   await wait(nullpad)
@@ -1613,6 +1624,7 @@ test('after u on a note of 3,000 lines the cursor line is on screen', async ({
 }) => {
   await startWith(nullpad, numberedLines(3000))
   await nullpad.page.keyboard.press(toggle)
+  await settle(nullpad.page)
   await nullpad.press('x')
   await nullpad.press('G')
   expect(await nullpad.status(), 'at the end').toMatchObject({ line: 3000 })

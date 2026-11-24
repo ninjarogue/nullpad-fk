@@ -354,13 +354,6 @@ const scrollRead = (scroll: (read: HTMLElement) => void): Effect.Effect<void> =>
     ),
   )
 
-export const showUnit = (unit: number): Effect.Effect<void> =>
-  scrollRead(read =>
-    read
-      .querySelector(`[data-unit="${unit}"]`)
-      ?.scrollIntoView({ block: 'start' }),
-  )
-
 const scrollTops = (
   read: HTMLElement,
 ): Readonly<Record<Reading.Scroll, number>> => {
@@ -376,5 +369,20 @@ const scrollTops = (
   }
 }
 
+const scrollTo = (read: HTMLElement, to: Reading.Scroll): void =>
+  read.scrollTo({ top: scrollTops(read)[to] })
+
 export const scrollReading = (to: Reading.Scroll): Effect.Effect<void> =>
-  scrollRead(read => read.scrollTo({ top: scrollTops(read)[to] }))
+  scrollRead(read => scrollTo(read, to))
+
+export const reveal = (target: Reading.Reveal): Effect.Effect<void> =>
+  scrollRead(read =>
+    Reading.Reveal.match(target, {
+      Start: () => scrollTo(read, 'Start'),
+      Unit: ({ unit }) =>
+        read
+          .querySelector(`[data-unit="${unit}"]`)
+          ?.scrollIntoView({ block: 'start' }),
+      End: () => scrollTo(read, 'End'),
+    }),
+  )

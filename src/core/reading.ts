@@ -741,22 +741,37 @@ export const At = Schema.TaggedUnion({
 })
 export type At = typeof At.Type
 
-export type Landing = Readonly<{ top: number; isPinned: boolean }>
+export const Reveal = Schema.TaggedUnion({
+  Start: {},
+  Unit: { unit: Schema.Int },
+  End: {},
+})
+export type Reveal = typeof Reveal.Type
+
+export const revealUnit = (unit: number): Reveal =>
+  unit === 0 ? Reveal.cases.Start.make({}) : Reveal.cases.Unit.make({ unit })
+
+export type Landing = Readonly<{ top: number; reveal: Option.Option<Reveal> }>
 
 export const landing = (read: Page, at: At, screenRows: number): Landing =>
   At.match(at, {
-    OnUnit: ({ unit }) => ({ top: unit, isPinned: false }),
+    OnUnit: ({ unit }) => ({ top: unit, reveal: Option.none() }),
     InSpacer: ({ from, pixelsPast }) => {
       const viewTop = (read.starts[from] ?? 0) + pixelsPast
-      const isAtEnd =
+      if (
         viewTop + screenRows * metrics.row >=
         (read.starts[read.units.length] ?? 0)
-      return {
-        top: isAtEnd
-          ? lastUnit(read)
-          : Math.min(lastUnit(read), Math.max(0, unitAtHeight(read, viewTop))),
-        isPinned: true,
+      ) {
+        return {
+          top: lastUnit(read),
+          reveal: Option.some(Reveal.cases.End.make({})),
+        }
       }
+      const top = Math.min(
+        lastUnit(read),
+        Math.max(0, unitAtHeight(read, viewTop)),
+      )
+      return { top, reveal: Option.some(revealUnit(top)) }
     },
   })
 

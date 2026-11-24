@@ -27,7 +27,6 @@ const Open = Schema.Struct({
   before: Buffer.Position,
   caret: Buffer.Position,
 })
-type Open = typeof Open.Type
 
 export const History = Schema.Struct({
   past: Schema.Array(Change),
@@ -71,6 +70,17 @@ export const empty = (buffer: Buffer.Buffer): History => ({
 
 const unitsOf = (lines: ReadonlyArray<Buffer.Line>): number =>
   Array.reduce(lines, 0, (sum, line) => sum + line.text.length + unitsPerLine)
+
+const withoutFuture = (history: History): History =>
+  history.future.length === 0
+    ? history
+    : {
+        ...history,
+        future: [],
+        units:
+          history.units -
+          Array.reduce(history.future, 0, (sum, { units }) => sum + units),
+      }
 
 const trimmed = (history: History): History => {
   const [oldest] = history.past
@@ -129,21 +139,17 @@ const close = (
       ? history
       : { ...history, open: Option.none() }
   }
-  const { before, caret: after } = Option.getOrElse(history.open, (): Open => ({
-    kind: 'Command',
-    before: caret,
-    caret,
-  }))
-  const change = changeBetween(history.base, lines, before, after)
+  const change = Option.match(history.open, {
+    onNone: () => changeBetween(history.base, lines, caret, caret),
+    onSome: open => changeBetween(history.base, lines, open.before, open.caret),
+  })
+  const kept = withoutFuture(history)
   return trimmed({
-    past: [...history.past, change],
+    past: [...kept.past, change],
     future: [],
     base: lines,
     open: Option.none(),
-    units:
-      history.units -
-      Array.reduce(history.future, 0, (sum, { units }) => sum + units) +
-      change.units,
+    units: kept.units + change.units,
   })
 }
 
@@ -167,11 +173,7 @@ export const record = (
     after.lines === before.lines
       ? kept
       : {
-          ...kept,
-          future: [],
-          units:
-            kept.units -
-            Array.reduce(kept.future, 0, (sum, { units }) => sum + units),
+          ...withoutFuture(kept),
           open: Option.some({
             kind: edit.kind,
             before: Option.match(kept.open, {

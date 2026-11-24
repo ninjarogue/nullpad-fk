@@ -740,16 +740,21 @@ export type At = typeof At.Type
 
 export type Landing = Readonly<{ top: number; isPinned: boolean }>
 
-export const landing = (read: Page, at: At): Landing =>
+export const landing = (read: Page, at: At, screenRows: number): Landing =>
   At.match(at, {
     OnUnit: ({ unit }) => ({ top: unit, isPinned: false }),
-    InSpacer: ({ from, pixelsPast }) => ({
-      top: Math.min(
-        lastUnit(read),
-        Math.max(0, unitAtHeight(read, (read.starts[from] ?? 0) + pixelsPast)),
-      ),
-      isPinned: true,
-    }),
+    InSpacer: ({ from, pixelsPast }) => {
+      const viewTop = (read.starts[from] ?? 0) + pixelsPast
+      const isAtEnd =
+        viewTop + screenRows * metrics.row >=
+        (read.starts[read.units.length] ?? 0)
+      return {
+        top: isAtEnd
+          ? lastUnit(read)
+          : Math.min(lastUnit(read), Math.max(0, unitAtHeight(read, viewTop))),
+        isPinned: true,
+      }
+    },
   })
 
 export type Node =

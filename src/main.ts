@@ -503,6 +503,7 @@ const scrolledReading = (model: Model, at: Reading.At): UpdateReturn => {
   const { top, isPinned } = Reading.landing(
     Reading.page(model.editor.buffer.lines),
     at,
+    model.editor.screenRows,
   )
   return {
     model: readAt(model, top),

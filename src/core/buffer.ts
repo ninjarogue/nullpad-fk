@@ -130,6 +130,26 @@ export const toText = (buffer: Buffer): string =>
     '\n',
   )
 
+export const overwrite = (
+  buffer: Buffer,
+  { line, column }: Position,
+  text: string,
+): Buffer => {
+  const current = lineAt(buffer, line)
+  return {
+    ...buffer,
+    lines: replaceLines(buffer, line, line, [
+      makeLine(
+        current.id,
+        current.text.slice(0, column) +
+          text +
+          current.text.slice(column + text.length),
+        current.joins,
+      ),
+    ]),
+  }
+}
+
 export const insert = (buffer: Buffer, text: string): Buffer => {
   const { line, column } = buffer.caret
   const current = lineAt(buffer, line)

@@ -91,11 +91,38 @@ const blocksView = (
 ): ReadonlyArray<Html> =>
   Array.map(blocks, block => blockView(block, [], nested(h), h))
 
+const taskBox = (box: Reading.Box, h: HtmlBuilder<Message>): Html =>
+  h.span(
+    [
+      h.Class('box'),
+      h.Role('checkbox'),
+      h.AriaChecked(box.checked),
+      h.OnClick(Message.ClickedTask({ box })),
+    ],
+    [box.checked ? '[x]' : '[ ]'],
+  )
+
+const itemView = (item: Reading.Item, h: HtmlBuilder<Message>): Html =>
+  Match.typeTags<Reading.Item, Html>()({
+    Item: ({ blocks }) => h.li([], blocksView(blocks, h)),
+    Task: ({ box, lead, rest }) => {
+      const boxed = [taskBox(box, h), ' ', ...inlinesView(lead.inlines, h)]
+      return h.li(
+        [],
+        [
+          lead._tag === 'Plain'
+            ? h.div([h.Class('plain')], boxed)
+            : h.p([], boxed),
+          ...blocksView(rest, h),
+        ],
+      )
+    },
+  })(item)
+
 const itemsView = (
-  items: ReadonlyArray<ReadonlyArray<Reading.Block>>,
+  items: ReadonlyArray<Reading.Item>,
   h: HtmlBuilder<Message>,
-): ReadonlyArray<Html> =>
-  Array.map(items, item => h.li([], blocksView(item, h)))
+): ReadonlyArray<Html> => Array.map(items, item => itemView(item, h))
 
 const blockView = (
   block: Reading.Block,

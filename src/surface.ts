@@ -204,11 +204,13 @@ const caretBox = (
   const style = getComputedStyle(line)
   const cell = pixels(style.fontSize) * jetBrainsMonoAdvanceEm
   const row = pixels(style.lineHeight)
+  const snapped = (top: number): number =>
+    edges.top + Math.floor((top - edges.top + row / 2) / row) * row
   const fitted = ({ left, top, width }: Box): Box => {
     const inside = Math.min(left, edges.right - minCaretWidthPx)
     return {
       left: inside,
-      top: edges.top + Math.floor((top - edges.top + row / 2) / row) * row,
+      top: snapped(top),
       width: Math.max(minCaretWidthPx, Math.min(width, edges.right - inside)),
     }
   }
@@ -230,6 +232,13 @@ const caretBox = (
     !(atRowEnd && wrapsAt(line, column)) && column < text.length
       ? rangeRect(line, column, graphemeAfter(text, column))
       : Option.none()
+  const hanging = Option.filter(
+    downstream,
+    rect => rect.left >= edges.right - minCaretWidthPx,
+  )
+  if (Option.isSome(hanging)) {
+    return { left: edges.right, top: snapped(hanging.value.top), width: cell }
+  }
   return fitted(
     Option.match(downstream, {
       onSome: rect => ({ left: rect.left, top: rect.top, width: rect.width }),

@@ -129,9 +129,10 @@ const show = (
   note: Pick<OpenNote, 'id' | 'folder' | 'revision'>,
   text: string,
   caretAt: 'Start' | 'End',
+  landing: 'AnotherNote' | 'SameNote' = 'SameNote',
 ): Model =>
   modifyFields(model, {
-    editor: editor => Editor.reopen(editor, text, caretAt),
+    editor: editor => Editor.reopen(editor, text, caretAt, landing),
     note: () => ({
       id: note.id,
       folder: note.folder,
@@ -385,7 +386,9 @@ const openStored = (model: Model, id: Notes.NoteId): UpdateReturn =>
               leave,
               left => ({
                 model: backToEditor(
-                  closeFinder(show(left, note, note.text, 'Start')),
+                  closeFinder(
+                    show(left, note, note.text, 'Start', 'AnotherNote'),
+                  ),
                 ),
               }),
             ]),
@@ -404,6 +407,7 @@ const createNote = (model: Model, folder: string, text: string): UpdateReturn =>
               { id: newNoteId(left), folder, revision: 0 },
               text,
               'End',
+              'AnotherNote',
             ),
           ),
         ),
@@ -477,9 +481,6 @@ const respond = (model: Model, outcome: Editor.Outcome): UpdateReturn => {
         ? []
         : [RevealCaret({ align: outcome.reveal })]),
       ...(changed ? [WaitBeforeSave({ edits })] : []),
-      ...(Editor.isVimOn(model.editor) === Editor.isVimOn(outcome.editor)
-        ? []
-        : [RememberVim({ isOn: Editor.isVimOn(outcome.editor) })]),
     ],
   }
 }
@@ -883,7 +884,7 @@ export const init: Runtime.ApplicationInit<
   )
 }
 
-export const update = (model: Model, message: Message) =>
+const handle = (model: Model, message: Message) =>
   Message.match<UpdateReturn>(message, {
     ReceivedInput: ({ input }) => receiveInput(model, input),
     ClickedText: ({ x, line, yInLine }) =>
@@ -1011,6 +1012,14 @@ export const update = (model: Model, message: Message) =>
     CompletedRevealReading: () => ({ model }),
     CompletedScrollReading: () => ({ model }),
   })
+
+export const update = (model: Model, message: Message): UpdateReturn => {
+  const next = handle(model, message)
+  const isOn = Editor.isVimOn(next.model.editor)
+  return Editor.isVimOn(model.editor) === isOn
+    ? next
+    : { ...next, commands: [...(next.commands ?? []), RememberVim({ isOn })] }
+}
 
 const unsaved = ({
   editor,

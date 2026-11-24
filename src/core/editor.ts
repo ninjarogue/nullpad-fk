@@ -144,12 +144,37 @@ export const isVimOn = (editor: Editor): boolean => Option.isSome(editor.vim)
 
 export const text = (editor: Editor): string => Buffer.toText(editor.buffer)
 
+const queuedToggles = (editor: Editor): number =>
+  Option.match(editor.locating, {
+    onNone: () => 0,
+    onSome: ({ cause, queued }) =>
+      Array.filter([cause, ...queued], ({ _tag }) => _tag === 'ToggledVim')
+        .length,
+  })
+
+const vimAfterReopen = (
+  editor: Editor,
+  landing: 'AnotherNote' | 'SameNote',
+): Option.Option<Vim.Vim> => {
+  const wasOn = Option.isSome(editor.vim)
+  const isOn = queuedToggles(editor) % 2 === 0 ? wasOn : !wasOn
+  return !isOn
+    ? Option.none()
+    : landing === 'SameNote' && wasOn
+      ? Option.map(editor.vim, Vim.interrupted)
+      : Option.some(Vim.start)
+}
+
 export const reopen = (
   editor: Editor,
   text: string,
   caretAt: 'Start' | 'End',
+  landing: 'AnotherNote' | 'SameNote',
 ): Editor => {
-  const opened = open(text, Option.isSome(editor.vim))
+  const opened = {
+    ...open(text),
+    vim: vimAfterReopen(editor, landing),
+  }
   return {
     ...opened,
     discards: editor.discards,

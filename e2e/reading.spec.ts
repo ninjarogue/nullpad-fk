@@ -703,3 +703,124 @@ test('a task in a numbered list keeps its number and draws its box', async ({
     expect(item.boxes, `item ${index + 1} draws its box`).toBe(1)
   }
 })
+
+type Placed = Readonly<{
+  top: number
+  left: number
+  holder: number
+  holderTag: string
+  bold: boolean
+}>
+
+const placeWords = (nullpad: Nullpad, words: ReadonlyArray<string>) =>
+  nullpad.page.evaluate((wanted): ReadonlyArray<Placed | null> => {
+    const read = document.querySelector('.read')
+    if (read === null) {
+      throw new Error('no .read')
+    }
+    const holders = Array.from(read.querySelectorAll('li, p'))
+    return wanted.map(word => {
+      const walker = document.createTreeWalker(read, NodeFilter.SHOW_TEXT)
+      for (
+        let node = walker.nextNode();
+        node !== null;
+        node = walker.nextNode()
+      ) {
+        const index = (node as Text).data.indexOf(word)
+        if (index < 0) {
+          continue
+        }
+        const range = document.createRange()
+        range.setStart(node, index)
+        range.setEnd(node, index + word.length)
+        const rect = range.getClientRects()[0]!
+        const parent = node.parentElement
+        const holder = parent?.closest('li, p') ?? null
+        return {
+          top: rect.top,
+          left: rect.left,
+          holder: holder === null ? -1 : holders.indexOf(holder),
+          holderTag: holder?.tagName ?? '',
+          bold: parent?.closest('strong') != null,
+        }
+      }
+      return null
+    })
+  }, words)
+
+const placed = (found: Placed | null, word: string): Placed => {
+  if (found === null) {
+    throw new Error(`"${word}" is not drawn in the read view`)
+  }
+  return found
+}
+
+test('a bold line under a bullet is drawn below it, in the same bullet', async ({
+  nullpad,
+}) => {
+  await nullpad.paste(
+    '# this is a title\n\n### weeeeeeeeeeeeee\n- bullet\n**bold**\n- oops',
+  )
+  await openRead(nullpad)
+  const [bullet, bold, oops] = (
+    await placeWords(nullpad, ['bullet', 'bold', 'oops'])
+  ).map((found, index) => placed(found, ['bullet', 'bold', 'oops'][index]!))
+  expect(bold!.bold, 'bold is drawn in bold weight').toBe(true)
+  expect(
+    bold!.top,
+    'bold starts its own visual line below bullet, not beside it',
+  ).toBeGreaterThan(bullet!.top + 10)
+  expect(
+    Math.abs(bold!.left - bullet!.left),
+    'bold’s left edge lines up with bullet’s',
+  ).toBeLessThanOrEqual(1.5)
+  expect(bold!.holder, 'bold is inside the same bullet as bullet').toBe(
+    bullet!.holder,
+  )
+  expect(bullet!.holderTag, 'the bullet is a list item').toBe('LI')
+  expect(oops!.holder, 'oops is the second bullet').not.toBe(bullet!.holder)
+  expect(oops!.holderTag, 'oops is a list item').toBe('LI')
+  expect(oops!.top, 'oops is below bold').toBeGreaterThan(bold!.top + 10)
+})
+
+test('a three-line paragraph draws three lines 27 px apart in one paragraph', async ({
+  nullpad,
+}) => {
+  await nullpad.paste('one\ntwo\nthree')
+  await openRead(nullpad)
+  const words = ['one', 'two', 'three']
+  const [one, two, three] = (await placeWords(nullpad, words)).map(
+    (found, index) => placed(found, words[index]!),
+  )
+  expect(two!.holder, 'two is in one’s paragraph').toBe(one!.holder)
+  expect(three!.holder, 'three is in one’s paragraph').toBe(one!.holder)
+  expect(one!.holderTag, 'the lines are in a p').toBe('P')
+  expect(
+    Math.abs(two!.top - one!.top - 27),
+    'two is 27 px under one',
+  ).toBeLessThanOrEqual(1)
+  expect(
+    Math.abs(three!.top - two!.top - 27),
+    'three is 27 px under two',
+  ).toBeLessThanOrEqual(1)
+})
+
+test('a hard break draws one line break, the same pitch as a typed line break', async ({
+  nullpad,
+}) => {
+  await nullpad.paste('aa  \nbb\\\ncc')
+  await openRead(nullpad)
+  const words = ['aa', 'bb', 'cc']
+  const [aa, bb, cc] = (await placeWords(nullpad, words)).map((found, index) =>
+    placed(found, words[index]!),
+  )
+  expect(bb!.holder, 'bb is in aa’s paragraph').toBe(aa!.holder)
+  expect(
+    Math.abs(bb!.top - aa!.top - 27),
+    'two trailing spaces draw one break: bb is 27 px under aa',
+  ).toBeLessThanOrEqual(1)
+  expect(
+    Math.abs(cc!.top - bb!.top - 27),
+    'a backslash break draws one break: cc is 27 px under bb',
+  ).toBeLessThanOrEqual(1)
+})

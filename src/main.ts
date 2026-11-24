@@ -542,9 +542,6 @@ const thenOpen = (
 }
 
 const editInput = (model: Model, input: Input): UpdateReturn => {
-  if (Editor.togglesVim(input)) {
-    return respond(model, Editor.toggledVim(model.editor))
-  }
   const fed = respond(model, Editor.feed(model.editor, input))
   if (Finder.opensFinder(input)) {
     return thenOpen(fed, openFinder)
@@ -576,6 +573,11 @@ const readInput = (model: Model, input: Input): UpdateReturn =>
   readAct(model, Reading.act(input))
 
 const receiveInput = (model: Model, input: Input): UpdateReturn =>
+  Editor.togglesVim(input)
+    ? respond(model, Editor.toggledVim(model.editor))
+    : routeInput(model, input)
+
+const routeInput = (model: Model, input: Input): UpdateReturn =>
   Option.match(model.finder, {
     onSome: open => applyFinder(model, Finder.feed(open, model.notes, input)),
     onNone: () =>

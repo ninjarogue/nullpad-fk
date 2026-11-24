@@ -28,7 +28,7 @@ import {
   keyboardPort,
 } from './keyboard'
 import { Message } from './message'
-import { readBounds, reading, scrollReading, showSourceLine } from './reading'
+import { readBounds, reading, scrollReading, showUnit } from './reading'
 import * as Storage from './storage'
 import { locate, revealCaret, statusLine, surface } from './surface'
 
@@ -250,13 +250,11 @@ const RevealFinderRow = Command.define('RevealFinderRow', {
   }).pipe(Effect.ignore, Effect.as(Message.CompletedRevealFinderRow())),
 })
 
-const ShowSourceLine = Command.define('ShowSourceLine', {
-  args: { sourceLine: Schema.Int },
-  messages: [Message.CompletedShowSourceLine],
-  execute: ({ sourceLine }) =>
-    showSourceLine(sourceLine).pipe(
-      Effect.as(Message.CompletedShowSourceLine()),
-    ),
+const ShowUnit = Command.define('ShowUnit', {
+  args: { unit: Schema.Int },
+  messages: [Message.CompletedShowUnit],
+  execute: ({ unit }) =>
+    showUnit(unit).pipe(Effect.as(Message.CompletedShowUnit())),
 })
 
 const ScrollReading = Command.define('ScrollReading', {
@@ -480,52 +478,37 @@ const openFinder = (model: Model): UpdateReturn => ({
 const readAt = (model: Model, top: number): Model =>
   modifyFields(model, { screen: () => Screen.cases.Read.make({ top }) })
 
-const openReading = (model: Model): UpdateReturn =>
-  Option.match(
-    Reading.sourceLineAt(
-      Reading.page(model.editor.buffer.lines),
-      model.editor.buffer.caret.line,
-    ),
-    {
-      onNone: () => ({ model: readAt(model, 1) }),
-      onSome: sourceLine => ({
-        model: readAt(model, sourceLine),
-        commands: [ShowSourceLine({ sourceLine })],
-      }),
-    },
+const openReading = (model: Model): UpdateReturn => {
+  const unit = Reading.unitOfLine(
+    Reading.page(model.editor.buffer.lines),
+    model.editor.buffer.caret.line,
   )
+  return { model: readAt(model, unit), commands: [ShowUnit({ unit })] }
+}
 
 const scrollReadingTo = (model: Model, to: Reading.Scroll): UpdateReturn => {
-  const page = Reading.page(model.editor.buffer.lines)
   const scrolled =
     to === 'Start'
-      ? readAt(model, Reading.firstSourceLine(page))
+      ? readAt(model, 0)
       : to === 'End'
-        ? readAt(model, Reading.lastSourceLine(page))
+        ? readAt(
+            model,
+            Reading.lastUnit(Reading.page(model.editor.buffer.lines)),
+          )
         : model
   return { model: scrolled, commands: [ScrollReading({ to })] }
 }
 
-const scrolledReading = (
-  model: Model,
-  drawnTop: number,
-  top: number,
-): UpdateReturn =>
-  Option.match(
-    Reading.pinnedAfterScroll(
-      Reading.page(model.editor.buffer.lines),
-      drawnTop,
-      top,
-      model.editor.screenRows,
-    ),
-    {
-      onNone: () => ({ model: readAt(model, top) }),
-      onSome: sourceLine => ({
-        model: readAt(model, sourceLine),
-        commands: [ShowSourceLine({ sourceLine })],
-      }),
-    },
+const scrolledReading = (model: Model, at: Reading.At): UpdateReturn => {
+  const { top, isPinned } = Reading.landing(
+    Reading.page(model.editor.buffer.lines),
+    at,
   )
+  return {
+    model: readAt(model, top),
+    commands: isPinned ? [ShowUnit({ unit: top })] : [],
+  }
+}
 
 const editInput = (model: Model, input: Input): UpdateReturn => {
   if (Finder.opensFinder(input)) {
@@ -548,8 +531,7 @@ const readAct = (model: Model, act: Reading.Act): UpdateReturn =>
     Close: () => ({ model: backToEditor(model) }),
     OpenFinder: () => openFinder(model),
     Scroll: ({ to }) => scrollReadingTo(model, to),
-    Overwrite: ({ at, text }) =>
-      respond(model, Editor.overwrite(model.editor, at, text)),
+    Flip: ({ box }) => respond(model, Reading.flip(model.editor, box)),
     Ignore: () => ({ model }),
   })
 
@@ -982,15 +964,13 @@ export const update = (model: Model, message: Message) =>
     }),
     ClickedFinderBackdrop: () => ({ model: closeFinder(model) }),
     ClickedReadToggle: () => receiveInput(model, Reading.toggle),
-    ScrolledReading: ({ top }) =>
-      model.screen._tag === 'Read'
-        ? scrolledReading(model, model.screen.top, top)
-        : { model },
+    ScrolledReading: ({ at }) =>
+      model.screen._tag === 'Read' ? scrolledReading(model, at) : { model },
     ClickedTask: ({ box }) =>
       model.screen._tag === 'Read'
         ? readAct(model, Reading.click(model.editor.buffer.lines, box))
         : { model },
-    CompletedShowSourceLine: () => ({ model }),
+    CompletedShowUnit: () => ({ model }),
     CompletedScrollReading: () => ({ model }),
   })
 

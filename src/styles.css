@@ -162,6 +162,18 @@ body {
   margin-bottom: 0;
 }
 
+.doc [data-unit]:not(hr) {
+  min-height: var(--row);
+}
+
+.doc li.continued {
+  list-style: none;
+}
+
+.doc pre [data-unit] {
+  margin: 0;
+}
+
 .doc h1,
 .doc h2,
 .doc h3,

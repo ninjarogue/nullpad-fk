@@ -30,13 +30,7 @@ import {
 import { Message } from './message'
 import { readBounds, reading, scrollReading, showSourceLine } from './reading'
 import * as Storage from './storage'
-import {
-  locate,
-  restoreSurfaceScroll,
-  revealCaret,
-  statusLine,
-  surface,
-} from './surface'
+import { locate, revealCaret, statusLine, surface } from './surface'
 
 export { Message }
 
@@ -114,7 +108,6 @@ export const Model = Schema.Struct({
   store: Schema.Literals(['Saving', 'Unavailable']),
   finder: Schema.Option(Finder.Finder),
   screen: Screen,
-  surfaceScrollTop: Schema.Finite,
   edits: Schema.Int,
   seed: Schema.String,
   created: Schema.Int,
@@ -137,7 +130,6 @@ const show = (
 ): Model =>
   modifyFields(model, {
     editor: editor => Editor.reopen(editor, text, caretAt),
-    surfaceScrollTop: () => 0,
     note: () => ({
       id: note.id,
       folder: note.folder,
@@ -272,15 +264,6 @@ const ScrollReading = Command.define('ScrollReading', {
   messages: [Message.CompletedScrollReading],
   execute: ({ to }) =>
     scrollReading(to).pipe(Effect.as(Message.CompletedScrollReading())),
-})
-
-const RestoreSurfaceScroll = Command.define('RestoreSurfaceScroll', {
-  args: { scrollTop: Schema.Finite },
-  messages: [Message.CompletedRestoreSurfaceScroll],
-  execute: ({ scrollTop }) =>
-    restoreSurfaceScroll(scrollTop).pipe(
-      Effect.as(Message.CompletedRestoreSurfaceScroll()),
-    ),
 })
 
 const isDirty = (model: Model): boolean => model.edits !== model.note.savedEdits
@@ -544,11 +527,6 @@ const scrolledReading = (
     },
   )
 
-const closeReading = (model: Model): UpdateReturn => ({
-  model: backToEditor(model),
-  commands: [RestoreSurfaceScroll({ scrollTop: model.surfaceScrollTop })],
-})
-
 const editInput = (model: Model, input: Input): UpdateReturn => {
   if (Finder.opensFinder(input)) {
     return openFinder(model)
@@ -567,7 +545,7 @@ const editInput = (model: Model, input: Input): UpdateReturn => {
 
 const readAct = (model: Model, act: Reading.Act): UpdateReturn =>
   Reading.Act.match(act, {
-    Close: () => closeReading(model),
+    Close: () => ({ model: backToEditor(model) }),
     OpenFinder: () => openFinder(model),
     Scroll: ({ to }) => scrollReadingTo(model, to),
     Overwrite: ({ at, text }) =>
@@ -870,7 +848,6 @@ export const init: Runtime.ApplicationInit<
     store: Option.isSome(maybeNotes) ? 'Saving' : 'Unavailable',
     finder: Option.none(),
     screen: Screen.cases.Edit.make({}),
-    surfaceScrollTop: 0,
     edits: 0,
     seed,
     created: 1,
@@ -899,10 +876,9 @@ export const update = (model: Model, message: Message) =>
           respond(stepModel, Editor.located(stepModel.editor, answer)),
         finishOpening,
       ]),
-    ScrolledSurface: ({ top, scrollTop }) => ({
+    ScrolledSurface: ({ top }) => ({
       model: modifyFields(model, {
         editor: editor => Editor.scrolled(editor, top),
-        surfaceScrollTop: () => scrollTop,
       }),
     }),
     ResizedScreen: ({ rows }) =>
@@ -1016,7 +992,6 @@ export const update = (model: Model, message: Message) =>
         : { model },
     CompletedShowSourceLine: () => ({ model }),
     CompletedScrollReading: () => ({ model }),
-    CompletedRestoreSurfaceScroll: () => ({ model }),
   })
 
 const unsaved = ({
@@ -1132,21 +1107,29 @@ const screenView = (
   frame: Editor.Frame,
   h: HtmlBuilder<Message>,
 ): Html => {
-  const editing = () =>
-    surface(frame, Option.isSome(model.finder) ? 'Blurred' : model.keyboard, h)
-  return Screen.match(model.screen, {
-    Edit: editing,
-    Opening: editing,
-    Read: ({ top }) =>
-      reading(
-        Reading.drawn(
-          Reading.page(model.editor.buffer.lines),
-          top,
-          model.editor.screenRows,
-        ),
-        h,
-      ),
-  })
+  const editing = surface(
+    frame,
+    Option.isSome(model.finder) ? 'Blurred' : model.keyboard,
+    h,
+  )
+  return h.div(
+    [h.Class(model.screen._tag === 'Read' ? 'stage reading' : 'stage')],
+    [
+      editing,
+      ...(model.screen._tag === 'Read'
+        ? [
+            reading(
+              Reading.drawn(
+                Reading.page(model.editor.buffer.lines),
+                model.screen.top,
+                model.editor.screenRows,
+              ),
+              h,
+            ),
+          ]
+        : []),
+    ],
+  )
 }
 
 export const view = (model: Model, h: HtmlBuilder<Message>): Document => {

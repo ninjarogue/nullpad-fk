@@ -639,3 +639,21 @@ body:has(.finder) #caret {
     display: none;
   }
 }
+
+.stage {
+  position: relative;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.stage > .read {
+  position: absolute;
+  inset: 0;
+  background: var(--bg);
+}
+
+.stage.reading > .surface {
+  visibility: hidden;
+}

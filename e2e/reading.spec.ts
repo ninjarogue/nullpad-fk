@@ -72,8 +72,11 @@ test('the read view is read-only and Ctrl+E returns to the same text and cursor'
   await openRead(nullpad)
   expect(await mode(nullpad), 'mode label while reading').toBe('READ')
   expect(
-    await nullpad.page.locator('[data-line-id]').count(),
-    'no editor rows while reading',
+    await nullpad.page
+      .locator('[data-line-id]')
+      .filter({ visible: true })
+      .count(),
+    'no editor row is visible while reading',
   ).toBe(0)
   const shown = await readText(nullpad)
   await nullpad.type('zzz')

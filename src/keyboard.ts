@@ -223,7 +223,12 @@ const listen = (
           const surroundingChanges = new MutationObserver(holdSurrounding)
           surroundingChanges.observe(port, {
             attributes: true,
-            attributeFilter: ['data-surrounding', 'data-caret', 'data-control'],
+            attributeFilter: [
+              'data-surrounding',
+              'data-caret',
+              'data-control',
+              'data-discards',
+            ],
           })
           signal.addEventListener('abort', () =>
             surroundingChanges.disconnect(),
@@ -399,6 +404,7 @@ export type Bounds = Readonly<{ control: string; selection: string }>
 
 export const keyboardPort = (
   surrounding: Readonly<{ text: string; caret: number }>,
+  discards: number,
   bounds: Bounds,
   keyboard: Keyboard,
   h: HtmlBuilder<Message>,
@@ -410,6 +416,7 @@ export const keyboardPort = (
       : [h.Role('textbox'), h.AriaLabel('editor'), h.Tabindex(0)]),
     h.DataAttribute('surrounding', surrounding.text),
     h.DataAttribute('caret', String(surrounding.caret)),
+    h.DataAttribute('discards', String(discards)),
     h.DataAttribute('control', bounds.control),
     h.DataAttribute('selection', bounds.selection),
     h.OnMount(KeyboardPort()),

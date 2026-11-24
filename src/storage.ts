@@ -335,3 +335,19 @@ export const clearLeavingStash = (): void =>
 export const persist: Effect.Effect<boolean, unknown> = Effect.tryPromise(() =>
   navigator.storage.persist(),
 )
+
+const vimSettingKey = 'nullpad-setting:vim'
+
+export const readVimSetting: Effect.Effect<boolean> = Effect.gen(function* () {
+  const store = yield* KeyValueStore.KeyValueStore
+  return (yield* store.get(vimSettingKey)) === 'on'
+}).pipe(
+  Effect.orElseSucceed(() => false),
+  Effect.provide(BrowserKeyValueStore.layerLocalStorage),
+)
+
+export const writeVimSetting = (isOn: boolean): Effect.Effect<void> =>
+  Effect.gen(function* () {
+    const store = yield* KeyValueStore.KeyValueStore
+    yield* store.set(vimSettingKey, isOn ? 'on' : 'off')
+  }).pipe(Effect.ignore, Effect.provide(BrowserKeyValueStore.layerLocalStorage))

@@ -431,13 +431,15 @@ body {
   color: var(--dim);
 }
 
-.toggle-read {
+.toggle-read,
+.toggle-vim {
   padding: 0;
   color: var(--dim);
   cursor: pointer;
 }
 
-.toggle-read:hover {
+.toggle-read:hover,
+.toggle-vim:hover {
   color: var(--fg);
 }
 
@@ -460,6 +462,10 @@ body {
   padding: 0 1ch;
   color: var(--fg);
   font-weight: 800;
+}
+
+.pending:empty {
+  display: none;
 }
 
 .file {

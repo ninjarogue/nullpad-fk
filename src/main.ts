@@ -57,6 +57,7 @@ export const Flags = Schema.Struct({
   seed: Schema.String,
   now: Schema.Finite,
   pane: Pane,
+  vim: Schema.Boolean,
 })
 export type Flags = typeof Flags.Type
 
@@ -69,7 +70,8 @@ export const flags: Effect.Effect<Flags, never, Storage.NoteStore> = Effect.gen(
     const stashed = yield* Storage.takeStashed
     const now = yield* Clock.currentTimeMillis
     const pane = paneOf(window.location.search)
-    return Flags.make({ maybeNotes, stashed, seed, now, pane })
+    const vim = yield* Storage.readVimSetting
+    return Flags.make({ maybeNotes, stashed, seed, now, pane, vim })
   },
 ).pipe(Effect.provide(BrowserCrypto.layerSecureRandom))
 
@@ -233,6 +235,15 @@ const RequestPersistence = Command.define('RequestPersistence', {
     Effect.orElseSucceed(() => false),
     Effect.as(Message.CompletedRequestPersistence()),
   ),
+})
+
+const RememberVim = Command.define('RememberVim', {
+  args: { isOn: Schema.Boolean },
+  messages: [Message.CompletedRememberVim],
+  execute: ({ isOn }) =>
+    Storage.writeVimSetting(isOn).pipe(
+      Effect.as(Message.CompletedRememberVim()),
+    ),
 })
 
 const ReadClock = Command.define('ReadClock', {
@@ -466,6 +477,9 @@ const respond = (model: Model, outcome: Editor.Outcome): UpdateReturn => {
         ? []
         : [RevealCaret({ align: outcome.reveal })]),
       ...(changed ? [WaitBeforeSave({ edits })] : []),
+      ...(Editor.isVimOn(model.editor) === Editor.isVimOn(outcome.editor)
+        ? []
+        : [RememberVim({ isOn: Editor.isVimOn(outcome.editor) })]),
     ],
   }
 }
@@ -515,20 +529,37 @@ const scrolledReading = (model: Model, at: Reading.At): UpdateReturn => {
   }
 }
 
+const thenOpen = (
+  fed: UpdateReturn,
+  open: (model: Model) => UpdateReturn,
+): UpdateReturn => {
+  const opened = open(fed.model)
+  return {
+    model: opened.model,
+    commands: [...(fed.commands ?? []), ...(opened.commands ?? [])],
+  }
+}
+
 const editInput = (model: Model, input: Input): UpdateReturn => {
+  if (Editor.togglesVim(input)) {
+    return respond(model, Editor.toggledVim(model.editor))
+  }
+  const fed = respond(model, Editor.feed(model.editor, input))
   if (Finder.opensFinder(input)) {
-    return openFinder(model)
+    return thenOpen(fed, openFinder)
   }
   if (Reading.togglesReading(input)) {
-    return Option.isSome(model.editor.locating)
-      ? {
-          model: modifyFields(model, {
-            screen: () => Screen.cases.Opening.make({ queued: [] }),
-          }),
-        }
-      : openReading(model)
+    return thenOpen(fed, fedModel =>
+      Option.isSome(fedModel.editor.locating)
+        ? {
+            model: modifyFields(fedModel, {
+              screen: () => Screen.cases.Opening.make({ queued: [] }),
+            }),
+          }
+        : openReading(fedModel),
+    )
   }
-  return respond(model, Editor.feed(model.editor, input))
+  return fed
 }
 
 const readAct = (model: Model, act: Reading.Act): UpdateReturn =>
@@ -817,10 +848,10 @@ export const init: Runtime.ApplicationInit<
   Message,
   Flags,
   Storage.NoteStore
-> = ({ maybeNotes, stashed, seed, now, pane }) => {
+> = ({ maybeNotes, stashed, seed, now, pane, vim }) => {
   const notes = Option.getOrElse(maybeNotes, () => [])
   const blank: Model = {
-    editor: Editor.open(''),
+    editor: Editor.open('', vim),
     keyboard: 'Blurred',
     notes,
     note: {
@@ -969,6 +1000,8 @@ export const update = (model: Model, message: Message) =>
     }),
     ClickedFinderBackdrop: () => ({ model: closeFinder(model) }),
     ClickedReadToggle: () => receiveInput(model, Reading.toggle),
+    ClickedVimToggle: () => respond(model, Editor.toggledVim(model.editor)),
+    CompletedRememberVim: () => ({ model }),
     ScrolledReading: ({ at }) =>
       model.screen._tag === 'Read' ? scrolledReading(model, at) : { model },
     ClickedTask: ({ box }) =>
@@ -1154,6 +1187,7 @@ export const view = (model: Model, h: HtmlBuilder<Message>): Document => {
             onNone: () => frame.surrounding,
             onSome: Finder.surrounding,
           }),
+          frame.discards,
           bounds,
           model.keyboard,
           h,

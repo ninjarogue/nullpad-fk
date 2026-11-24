@@ -36,6 +36,12 @@ module.exports = {
       to: { path: '^src/core/markdown/' },
     },
     {
+      name: 'vim-internals-outside-vim',
+      severity: 'error',
+      from: { pathNot: '^src/core/vim([.]ts$|/)' },
+      to: { path: '^src/core/vim/' },
+    },
+    {
       name: 'src-imports-outside-src',
       severity: 'error',
       from: { path: '^src/' },

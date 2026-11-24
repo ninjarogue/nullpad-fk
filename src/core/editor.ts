@@ -4,9 +4,10 @@ import * as Buffer from './buffer'
 import { Input, type Modifiers, type NamedKey } from './input'
 import * as Markdown from './markdown'
 import * as Notes from './notes'
+import * as Vim from './vim'
 import * as Words from './words'
 
-export const Mode = Schema.Literals(['Plain'])
+export const Mode = Schema.Literals(['Plain', 'Normal', 'Insert'])
 export type Mode = typeof Mode.Type
 
 export const Query = Schema.TaggedUnion({
@@ -51,6 +52,7 @@ export type Answer = typeof Answer.Type
 const Queued = Schema.TaggedUnion({
   Fed: { input: Input },
   Clicked: { x: Schema.Finite, line: Schema.Int, yInLine: Schema.Finite },
+  ToggledVim: {},
 })
 type Queued = typeof Queued.Type
 
@@ -58,7 +60,8 @@ const Locating = Schema.Struct({ cause: Queued, queued: Schema.Array(Queued) })
 
 export const Editor = Schema.Struct({
   buffer: Buffer.Buffer,
-  mode: Mode,
+  vim: Schema.Option(Vim.Vim),
+  discards: Schema.Int,
   preedit: Schema.String,
   goalX: Schema.Option(Schema.Finite),
   caretAtRowEnd: Schema.Boolean,
@@ -92,10 +95,17 @@ export type Frame = Readonly<{
   undrawnAbove: number
   undrawnBelow: number
   gutter: number
-  caret: Readonly<{ line: number; column: number; atRowEnd: boolean }>
+  caret: Readonly<{
+    line: number
+    column: number
+    atRowEnd: boolean
+    shape: 'Block' | 'Bar'
+  }>
   surrounding: Readonly<{ text: string; caret: number }>
+  discards: number
   status: Readonly<{
     mode: Mode
+    pending: string
     line: number
     column: number
     lineCount: number
@@ -103,9 +113,10 @@ export type Frame = Readonly<{
   revision: number
 }>
 
-export const open = (text: string): Editor => ({
+export const open = (text: string, vim = false): Editor => ({
   buffer: Buffer.fromText(text),
-  mode: 'Plain',
+  vim: vim ? Option.some(Vim.start) : Option.none(),
+  discards: 0,
   preedit: '',
   goalX: Option.none(),
   caretAtRowEnd: false,
@@ -116,6 +127,21 @@ export const open = (text: string): Editor => ({
   pendingReveals: 0,
 })
 
+const atRest = (editor: Editor, buffer: Buffer.Buffer): Buffer.Buffer =>
+  Option.match(editor.vim, {
+    onNone: () => buffer,
+    onSome: vim => Vim.rest(vim, buffer, editor.caretAtRowEnd),
+  })
+
+const rested = (editor: Editor): Editor => {
+  const buffer = atRest(editor, editor.buffer)
+  return buffer === editor.buffer
+    ? editor
+    : { ...editor, buffer, caretAtRowEnd: false }
+}
+
+export const isVimOn = (editor: Editor): boolean => Option.isSome(editor.vim)
+
 export const text = (editor: Editor): string => Buffer.toText(editor.buffer)
 
 export const reopen = (
@@ -123,13 +149,16 @@ export const reopen = (
   text: string,
   caretAt: 'Start' | 'End',
 ): Editor => {
-  const opened = open(text)
+  const opened = open(text, Option.isSome(editor.vim))
   return {
     ...opened,
-    buffer:
+    discards: editor.discards,
+    buffer: atRest(
+      opened,
       caretAt === 'End'
         ? Buffer.moveTo(opened.buffer, Buffer.documentEnd(opened.buffer))
         : opened.buffer,
+    ),
     screenRows: editor.screenRows,
     drawnRevision: editor.drawnRevision + 1,
   }
@@ -206,11 +235,14 @@ const withLineDrawn = (editor: Editor, line: number): Editor =>
 const withCaretDrawn = (editor: Editor): Editor =>
   withLineDrawn(editor, editor.buffer.caret.line)
 
-const done = (editor: Editor, reveal: Reveal = 'Nearest'): Outcome => ({
-  editor: reveal === 'None' ? editor : withCaretDrawn(editor),
-  locate: Option.none(),
-  reveal,
-})
+const done = (unrested: Editor, reveal: Reveal = 'Nearest'): Outcome => {
+  const editor = rested(unrested)
+  return {
+    editor: reveal === 'None' ? editor : withCaretDrawn(editor),
+    locate: Option.none(),
+    reveal,
+  }
+}
 
 type Plan =
   | Readonly<{ _tag: 'Done'; outcome: Outcome }>
@@ -488,7 +520,7 @@ const plainKeys: Readonly<
   PageDown: page(1),
 }
 
-const inputPlan = (editor: Editor, input: Input): Plan =>
+const plainPlan = (editor: Editor, input: Input): Plan =>
   Input.match(input, {
     Key: ({ key, modifiers }) => plainKeys[key](editor, modifiers),
     Chord: () => now(editor, 'None'),
@@ -518,6 +550,42 @@ const inputPlan = (editor: Editor, input: Input): Plan =>
     Commit: ({ text }) => now(insertText(text)({ ...editor, preedit: '' })),
   })
 
+const vimPlan = (editor: Editor, vim: Vim.Vim, input: Input): Plan => {
+  const step = Vim.press(vim, editor.buffer, input)
+  const stepped = { ...editor, vim: Option.some(step.vim) }
+  if (step.fate === 'Plain') {
+    return plainPlan(stepped, input)
+  }
+  const moved = step.buffer !== editor.buffer
+  return now(
+    changeDrawn(
+      {
+        ...stepped,
+        goalX: moved ? Option.none() : editor.goalX,
+        discards: editor.discards + (step.fate === 'Swallowed' ? 1 : 0),
+      },
+      moved ? { buffer: step.buffer, caretAtRowEnd: false } : {},
+    ),
+    moved ? 'Nearest' : 'None',
+  )
+}
+
+const inputPlan = (editor: Editor, input: Input): Plan =>
+  Option.match(editor.vim, {
+    onNone: () => plainPlan(editor, input),
+    onSome: vim => vimPlan(editor, vim, input),
+  })
+
+const toggleVim = (editor: Editor): Editor =>
+  Option.match(editor.vim, {
+    onSome: () => ({ ...editor, vim: Option.none() }),
+    onNone: () =>
+      changeDrawn(
+        { ...editor, vim: Option.some(Vim.start), goalX: Option.none() },
+        { preedit: '' },
+      ),
+  })
+
 const clickPlan = (
   editor: Editor,
   x: number,
@@ -531,7 +599,14 @@ const clickPlan = (
 const planOf = (editor: Editor, queued: Queued): Plan =>
   Queued.match(queued, {
     Fed: ({ input }) => inputPlan(editor, input),
-    Clicked: ({ x, line, yInLine }) => clickPlan(editor, x, line, yInLine),
+    Clicked: ({ x, line, yInLine }) =>
+      clickPlan(
+        { ...editor, vim: Option.map(editor.vim, Vim.interrupted) },
+        x,
+        line,
+        yInLine,
+      ),
+    ToggledVim: () => now(toggleVim(editor)),
   })
 
 const withQueriedLineDrawn = (editor: Editor, query: Query): Editor =>
@@ -613,6 +688,12 @@ export const click = (
     enqueue(editor, Queued.cases.Clicked.make({ x, line, yInLine })),
   )
 
+export const toggledVim = (editor: Editor): Outcome =>
+  countPendingReveal(enqueue(editor, Queued.cases.ToggledVim.make({})))
+
+export const togglesVim = (input: Input): boolean =>
+  input._tag === 'Chord' && input.char === ',' && input.modifiers.ctrl
+
 export const overwrite = (
   editor: Editor,
   at: Buffer.Position,
@@ -645,6 +726,7 @@ const awaitedLine = (editor: Editor): Option.Option<number> =>
         Queued.match(cause, {
           Fed: () => editor.buffer.caret.line,
           Clicked: ({ line }) => line,
+          ToggledVim: () => editor.buffer.caret.line,
         }),
       ),
   })
@@ -762,7 +844,13 @@ export const paint = (editor: Editor): Frame => {
     undrawnAbove: first,
     undrawnBelow: lines.length - 1 - last,
     gutter: gutterWidth(buffer),
-    caret: { ...caret, atRowEnd: editor.caretAtRowEnd },
+    caret: {
+      ...caret,
+      atRowEnd: editor.caretAtRowEnd,
+      shape: Option.exists(editor.vim, vim => vim.mode === 'Insert')
+        ? 'Bar'
+        : 'Block',
+    },
     surrounding: {
       text: (lines[caret.line]?.text ?? '').slice(
         near.from.column,
@@ -770,8 +858,16 @@ export const paint = (editor: Editor): Frame => {
       ),
       caret: caret.column - near.from.column,
     },
+    discards: editor.discards,
     status: {
-      mode: editor.mode,
+      mode: Option.match(editor.vim, {
+        onNone: () => 'Plain' as const,
+        onSome: vim => vim.mode,
+      }),
+      pending: Option.match(editor.vim, {
+        onNone: () => '',
+        onSome: Vim.pendingKeys,
+      }),
       line: caret.line + 1,
       column: caretGrapheme(lines[caret.line]?.text ?? '', caret.column) + 1,
       lineCount: lines.length,

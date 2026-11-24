@@ -599,3 +599,106 @@ test('opening the read view on a fence with an info string shows the info line',
     'the code block with its info line is on screen',
   ).toBeInViewport({ ratio: 1 })
 })
+
+test('one huge wheel turn down in the read view shows the end of a note whose last block is taller than the screen', async ({
+  nullpad,
+}) => {
+  const paragraphs = Array.from({ length: 1000 }, (_, i) => `para ${i + 1}`)
+  const last = `${Array.from({ length: 600 }, (_, i) => `word${i}`).join(' ')} THEEND`
+  await nullpad.paste([...paragraphs, last].join('\n\n'))
+  await openRead(nullpad)
+  const box = await nullpad.page.locator('.read').boundingBox()
+  expect(box, 'the read view has a box').not.toBeNull()
+  await nullpad.page.mouse.move(
+    (box?.x ?? 0) + (box?.width ?? 0) / 2,
+    (box?.y ?? 0) + (box?.height ?? 0) / 2,
+  )
+  await nullpad.page.mouse.wheel(0, 3_000_000)
+  await nullpad.page.waitForTimeout(800)
+  await settle(nullpad.page)
+  await expect
+    .poll(
+      () =>
+        nullpad.page.evaluate(() => {
+          const read = document.querySelector('.read')
+          if (read === null) {
+            return false
+          }
+          const view = read.getBoundingClientRect()
+          const walker = document.createTreeWalker(read, NodeFilter.SHOW_TEXT)
+          const range = document.createRange()
+          for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+            const at = node.textContent?.indexOf('THEEND') ?? -1
+            if (at >= 0) {
+              range.setStart(node, at)
+              range.setEnd(node, at + 6)
+              const rect = range.getBoundingClientRect()
+              return rect.bottom > view.top && rect.top < view.bottom
+            }
+          }
+          return false
+        }),
+      {
+        message: 'THEEND is in the viewport after one huge wheel turn',
+        timeout: 3000,
+      },
+    )
+    .toBe(true)
+})
+
+test('opening the read view on line 1 draws the title where Ctrl+Home leaves it', async ({
+  nullpad,
+}) => {
+  const note = [
+    '# Title',
+    ...Array.from({ length: 200 }, (_, i) => `para ${i + 1}`),
+  ].join('\n\n')
+  await nullpad.paste(note)
+  await nullpad.press('Control+Home')
+  await openRead(nullpad)
+  const offset = () =>
+    nullpad.page.evaluate(() => {
+      const read = document.querySelector('.read')
+      const title = document.querySelector('.read h1')
+      if (read === null || title === null) {
+        return null
+      }
+      return (
+        title.getBoundingClientRect().top - read.getBoundingClientRect().top
+      )
+    })
+  await settle(nullpad.page)
+  const opened = await offset()
+  await nullpad.page.keyboard.press('Control+Home')
+  await settle(nullpad.page)
+  await settle(nullpad.page)
+  const home = await offset()
+  expect(opened, 'the title is drawn after opening').not.toBeNull()
+  expect(home, 'the title is drawn after Ctrl+Home').not.toBeNull()
+  expect(
+    Math.abs((opened ?? 0) - (home ?? 0)),
+    `title offset after opening (${opened}) equals the offset after Ctrl+Home (${home})`,
+  ).toBeLessThanOrEqual(1)
+})
+
+test('a task in a numbered list keeps its number and draws its box', async ({
+  nullpad,
+}) => {
+  await nullpad.paste('1. [ ] first\n2. [x] second')
+  await openRead(nullpad)
+  const items = await nullpad.page.evaluate(() =>
+    Array.from(document.querySelectorAll('.read ol > li')).map(item => ({
+      listStyleType: getComputedStyle(item).listStyleType,
+      boxes: item.querySelectorAll('[role=checkbox]').length,
+      text: (item as HTMLElement).innerText,
+    })),
+  )
+  expect(items.length, 'two numbered items').toBe(2)
+  for (const [index, item] of items.entries()) {
+    expect(
+      item.listStyleType,
+      `item ${index + 1} is drawn as a numbered item`,
+    ).not.toBe('none')
+    expect(item.boxes, `item ${index + 1} draws its box`).toBe(1)
+  }
+})

@@ -37,6 +37,8 @@ export const Message = defineMessageUnion({
   ClickedFinderScope: { scope: Schema.String },
   ClickedFinderBackdrop: {},
   ClickedReadToggle: {},
+  ClickedVimToggle: {},
+  CompletedRememberVim: {},
   ScrolledReading: { at: At },
   ClickedTask: { box: Box },
   CompletedRevealReading: {},

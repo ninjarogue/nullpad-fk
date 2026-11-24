@@ -39,21 +39,21 @@ node e2e/drive.ts steps.json --width 600 --height 400 --out verify-out/my-check
 
 A step is an object with exactly one of these keys. A malformed step (an unknown key or field, a wrong type, `times` below 1, an empty list) exits 2 before anything builds. A key name Playwright does not know fails only when that step plays.
 
-| Step                                                                                                                  | What a person does                                                                                    |
-| --------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
-| `{"type": "abc"}`                                                                                                     | Types each character as a key press.                                                                  |
-| `{"press": "ArrowUp", "times": 3}`                                                                                    | Presses a key (Playwright key names, chords as `Control+Home`). `times` is optional.                  |
-| `{"paste": "a\nb"}`                                                                                                   | Pastes from the clipboard with Ctrl+V.                                                                |
-| `{"compose": "に", "replacing": {"start": 0, "end": 1}}`                                                              | Shows IME preedit text. `replacing` is optional and counts UTF-16 units of the EditContext text.      |
-| `{"commit": "日"}`                                                                                                    | Ends the composition, inserting the text.                                                             |
-| `{"click": {"row": 2, "cell": 5}}`                                                                                    | Clicks drawn row 2 (0 is the top row on screen) at cell 5.                                            |
-| `{"click": {"x": 120, "y": 40}}`                                                                                      | Clicks a page pixel, for clicks off the text such as below the last line.                             |
-| `{"wheel": 300}`                                                                                                      | Turns the mouse wheel by that many pixels over the text, and waits for the scroll to end.             |
-| `{"resize": {"width": 600, "height": 400}}`                                                                           | Resizes the window.                                                                                   |
-| `{"shot": "before-fix"}`                                                                                              | Saves a screenshot as `before-fix.png`. Names use letters, digits, `-` and `_`. Proves nothing alone. |
-| `{"reload": true}`                                                                                                    | Reloads the page and waits until the editor is ready again.                                           |
-| `{"wait": 900}`                                                                                                       | Waits that many milliseconds, up to 10000, such as for a save to land.                                |
-| `{"expect": {"text": "…", "status": "2:4 3L", "under": "o", "top": "40", "full": true, "title": "…", "finder": "…"}}` | Checks the screen. Give any of the fields. A miss prints `FAIL` and stops the run.                    |
+| Step                                                                                                                                                     | What a person does                                                                                    |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `{"type": "abc"}`                                                                                                                                        | Types each character as a key press.                                                                  |
+| `{"press": "ArrowUp", "times": 3}`                                                                                                                       | Presses a key (Playwright key names, chords as `Control+Home`). `times` is optional.                  |
+| `{"paste": "a\nb"}`                                                                                                                                      | Pastes from the clipboard with Ctrl+V.                                                                |
+| `{"compose": "に", "replacing": {"start": 0, "end": 1}}`                                                                                                 | Shows IME preedit text. `replacing` is optional and counts UTF-16 units of the EditContext text.      |
+| `{"commit": "日"}`                                                                                                                                       | Ends the composition, inserting the text.                                                             |
+| `{"click": {"row": 2, "cell": 5}}`                                                                                                                       | Clicks drawn row 2 (0 is the top row on screen) at cell 5.                                            |
+| `{"click": {"x": 120, "y": 40}}`                                                                                                                         | Clicks a page pixel, for clicks off the text such as below the last line.                             |
+| `{"wheel": 300}`                                                                                                                                         | Turns the mouse wheel by that many pixels over the text, and waits for the scroll to end.             |
+| `{"resize": {"width": 600, "height": 400}}`                                                                                                              | Resizes the window.                                                                                   |
+| `{"shot": "before-fix"}`                                                                                                                                 | Saves a screenshot as `before-fix.png`. Names use letters, digits, `-` and `_`. Proves nothing alone. |
+| `{"reload": true}`                                                                                                                                       | Reloads the page and waits until the editor is ready again.                                           |
+| `{"wait": 900}`                                                                                                                                          | Waits that many milliseconds, up to 10000, such as for a save to land.                                |
+| `{"expect": {"text": "…", "status": "2:4 3L", "under": "o", "top": "40", "full": true, "title": "…", "finder": "…", "mode": "NORMAL", "pending": "2g"}}` | Checks the screen. Give any of the fields. A miss prints `FAIL` and stops the run.                    |
 
 Each `expect` field is an exact match:
 
@@ -62,6 +62,7 @@ Each `expect` field is an exact match:
 - `under` is the character the block cursor covers, `" "` at a line end or on a space.
 - `top` is the line number of the first line on screen.
 - `title` is the tab title, which is the open note's title.
+- `mode` is the status line's mode (`EDIT`, `NORMAL`, `INSERT` or `READ`), and `pending` the vim keys waiting there, `""` when none.
 - `finder` is the finder as text: `prompt` and the prompt line, then one line per row with `>` on the highlighted one and cells joined by `|`, or `closed`.
 - `full: true` fails when the drawn rows leave more than a row of the text area blank, the check for a screen left blank after a scroll settles. A blank frame in the middle of a turn needs `e2e/flicker.spec.ts`, which watches pixels.
 

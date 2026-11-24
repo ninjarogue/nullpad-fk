@@ -27,3 +27,4 @@ Each file opens with what the person sees, then four sections: `Sub-features`, `
 - [Scrolling](./scrolling.md) covers the wheel on long notes and the cursor coming back on screen when a person types.
 - [IME and paste](./ime-and-paste.md) covers composing text with an input method and pasting from the clipboard.
 - [Notes and finder](./notes-and-finder.md) covers saving notes, reloading, and the Ctrl-P finder with its folders and moves.
+- [Vim](./vim.md) covers turning vim on and off, Normal mode motions, counts, `x`, entering and leaving Insert, and the remembered setting.

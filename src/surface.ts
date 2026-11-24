@@ -204,11 +204,13 @@ const caretBox = (
   const style = getComputedStyle(line)
   const cell = pixels(style.fontSize) * jetBrainsMonoAdvanceEm
   const row = pixels(style.lineHeight)
+  const snapped = (top: number): number =>
+    edges.top + Math.floor((top - edges.top + row / 2) / row) * row
   const fitted = ({ left, top, width }: Box): Box => {
     const inside = Math.min(left, edges.right - minCaretWidthPx)
     return {
       left: inside,
-      top: edges.top + Math.floor((top - edges.top + row / 2) / row) * row,
+      top: snapped(top),
       width: Math.max(minCaretWidthPx, Math.min(width, edges.right - inside)),
     }
   }
@@ -230,6 +232,13 @@ const caretBox = (
     !(atRowEnd && wrapsAt(line, column)) && column < text.length
       ? rangeRect(line, column, graphemeAfter(text, column))
       : Option.none()
+  const hanging = Option.filter(
+    downstream,
+    rect => rect.left >= edges.right - minCaretWidthPx,
+  )
+  if (Option.isSome(hanging)) {
+    return { left: edges.right, top: snapped(hanging.value.top), width: cell }
+  }
   return fitted(
     Option.match(downstream, {
       onSome: rect => ({ left: rect.left, top: rect.top, width: rect.width }),
@@ -681,7 +690,8 @@ const drawCaret = (surface: HTMLElement): void => {
       caret.style.display = ''
       caret.style.left = `${box.left - frame.left + surface.scrollLeft}px`
       caret.style.top = `${box.top - frame.top + surface.scrollTop}px`
-      caret.style.width = `${box.width}px`
+      caret.style.width =
+        surface.dataset['caretShape'] === 'Bar' ? '2px' : `${box.width}px`
     },
   })
 }
@@ -848,6 +858,7 @@ const observe = (surface: HTMLElement): Stream.Stream<SurfaceMessage> =>
               'data-caret-line',
               'data-caret-column',
               'data-caret-end',
+              'data-caret-shape',
             ],
           })
           surface.addEventListener('scroll', reportTop, {
@@ -960,6 +971,7 @@ export const surface = (
       h.DataAttribute('caret-line', String(frame.caret.line)),
       h.DataAttribute('caret-column', String(frame.caret.column)),
       h.DataAttribute('caret-end', String(frame.caret.atRowEnd)),
+      h.DataAttribute('caret-shape', frame.caret.shape),
       h.DataAttribute('last-line', String(frame.status.lineCount - 1)),
       h.OnMount(SurfacePort()),
     ],
@@ -980,7 +992,11 @@ export const surface = (
     ],
   )
 
-const modeLabels: Readonly<Record<Mode, string>> = { Plain: 'EDIT' }
+const modeLabels: Readonly<Record<Mode, string>> = {
+  Plain: 'EDIT',
+  Normal: 'NORMAL',
+  Insert: 'INSERT',
+}
 
 export const statusLine = (
   status: Frame['status'],
@@ -996,6 +1012,7 @@ export const statusLine = (
         [h.Class('mode')],
         [screen === 'Read' ? 'READ' : modeLabels[status.mode]],
       ),
+      h.span([h.Class('pending')], [status.pending]),
       h.span([h.Class('file')], [path]),
       ...Option.match(maybeWarning, {
         onNone: () => [],
@@ -1013,6 +1030,15 @@ export const statusLine = (
           h.OnClick(Message.ClickedReadToggle()),
         ],
         [screen === 'Read' ? 'edit ^E' : 'read ^E'],
+      ),
+      h.button(
+        [
+          h.Class('toggle-vim'),
+          h.Type('button'),
+          h.Tabindex(-1),
+          h.OnClick(Message.ClickedVimToggle()),
+        ],
+        [status.mode === 'Plain' ? 'vim off' : 'vim on'],
       ),
     ],
   )

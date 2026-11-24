@@ -36,8 +36,7 @@ const inlineView = (inline: Reading.Inline, h: HtmlBuilder<Message>): Child =>
     Text: ({ text }) => text,
     Raw: ({ text }) => h.span([h.Class('raw')], [text]),
     Code: ({ text }) => h.code([], [text]),
-    SoftBreak: () => '\n',
-    HardBreak: () => h.br([]),
+    Break: () => h.br([]),
     Emphasis: ({ children }) => h.em([], inlinesView(children, h)),
     Strong: ({ children }) => h.strong([], inlinesView(children, h)),
     Link: ({ href, title, children }) =>

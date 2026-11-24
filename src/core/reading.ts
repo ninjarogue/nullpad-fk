@@ -10,8 +10,7 @@ export type Inline =
   | Readonly<{ _tag: 'Text'; text: string }>
   | Readonly<{ _tag: 'Raw'; text: string }>
   | Readonly<{ _tag: 'Code'; text: string }>
-  | Readonly<{ _tag: 'SoftBreak' }>
-  | Readonly<{ _tag: 'HardBreak' }>
+  | Readonly<{ _tag: 'Break' }>
   | Readonly<{ _tag: 'Emphasis'; children: ReadonlyArray<Inline> }>
   | Readonly<{ _tag: 'Strong'; children: ReadonlyArray<Inline> }>
   | Readonly<{
@@ -34,8 +33,7 @@ const spokenOf: (inline: Inline) => string = Match.typeTags<Inline, string>()({
   Text: ({ text }) => text,
   Raw: ({ text }) => text,
   Code: ({ text }) => text,
-  SoftBreak: () => ' ',
-  HardBreak: () => ' ',
+  Break: () => ' ',
   Emphasis: ({ children }) => spoken(children),
   Strong: ({ children }) => spoken(children),
   Link: ({ children }) => spoken(children),
@@ -141,8 +139,8 @@ const readInline: (inline: Markdown.Inline) => ReadonlyArray<Inline> =
     Entity: inline => [text(inline.text)],
     Html: inline => [{ _tag: 'Raw', text: inline.text }],
     Code: inline => [{ _tag: 'Code', text: inline.text }],
-    SoftBreak: () => [{ _tag: 'SoftBreak' }],
-    HardBreak: () => [{ _tag: 'HardBreak' }],
+    SoftBreak: () => [{ _tag: 'Break' }],
+    HardBreak: () => [{ _tag: 'Break' }],
     Emphasis: inline => [
       { _tag: 'Emphasis', children: readInlines(inline.children) },
     ],
@@ -283,27 +281,50 @@ const emsOf = (value: string): number => {
   )
 }
 
-const lengthOf = (inlines: ReadonlyArray<Inline>, width: number): number =>
-  Array.reduce(
+type Piece = number | 'Break'
+
+const scaled = (pieces: ReadonlyArray<Piece>, scale: number) =>
+  Array.map(pieces, piece => (piece === 'Break' ? piece : piece * scale))
+
+const piecesOf = (
+  inlines: ReadonlyArray<Inline>,
+  width: number,
+): ReadonlyArray<Piece> =>
+  Array.flatMap(
     inlines,
-    0,
-    (sum, inline) =>
-      sum +
-      Match.typeTags<Inline, number>()({
-        Text: ({ text }) => emsOf(text),
-        Raw: ({ text }) => emsOf(text),
-        Code: ({ text }) =>
-          (text.length * glyphEms.mono + 2 * metrics.codeSpan.padInline) *
+    Match.typeTags<Inline, ReadonlyArray<Piece>>()({
+      Text: ({ text }) => [emsOf(text)],
+      Raw: ({ text }) => [emsOf(text)],
+      Code: ({ text }) => [
+        (text.length * glyphEms.mono + 2 * metrics.codeSpan.padInline) *
           metrics.codeSpan.size,
-        SoftBreak: () => glyphEms.narrow,
-        HardBreak: () => 0,
-        Emphasis: ({ children }) => lengthOf(children, width),
-        Strong: ({ children }) =>
-          lengthOf(children, width) * widthScales.strong,
-        Link: ({ children }) => lengthOf(children, width),
-        Image: () => width,
-      })(inline),
+      ],
+      Break: () => ['Break'],
+      Emphasis: ({ children }) => piecesOf(children, width),
+      Strong: ({ children }) =>
+        scaled(piecesOf(children, width), widthScales.strong),
+      Link: ({ children }) => piecesOf(children, width),
+      Image: () => [width],
+    }),
   )
+
+const segmentsOf = (
+  inlines: ReadonlyArray<Inline>,
+  width: number,
+): ReadonlyArray<number> => {
+  const pieces = piecesOf(inlines, width)
+  const breaks = Array.flatMap(pieces, (piece, index) =>
+    piece === 'Break' ? [index] : [],
+  )
+  return Array.zipWith(
+    [-1, ...breaks],
+    [...breaks, pieces.length],
+    (before, end) =>
+      Array.reduce(pieces.slice(before + 1, end), 0, (sum, piece) =>
+        piece === 'Break' ? sum : sum + piece,
+      ),
+  )
+}
 
 const linesOf = (length: number, width: number): number =>
   Math.max(1, Math.ceil(length / width))
@@ -322,7 +343,12 @@ const textHeight = (
 ): number => {
   const width = widthInside(inside) / size
   return (
-    linesOf(lengthOf(inlines, width) * scale + lead / size, width) * leading
+    Array.reduce(
+      segmentsOf(inlines, width),
+      0,
+      (lines, ems, index) =>
+        lines + linesOf(ems * scale + (index === 0 ? lead / size : 0), width),
+    ) * leading
   )
 }
 

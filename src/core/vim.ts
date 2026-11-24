@@ -4,7 +4,14 @@ import * as Buffer from './buffer'
 import { Input, type NamedKey } from './input'
 import { cellAt, cellCount, cellStart } from './vim/cells'
 import * as Keymap from './vim/keymap'
-import { Want, endOf, motions, positionOf, spotOf } from './vim/motions'
+import {
+  Want,
+  endOf,
+  firstFilled,
+  motions,
+  positionOf,
+  spotOf,
+} from './vim/motions'
 
 export const Mode = Schema.Literals(['Normal', 'Insert'])
 export type Mode = typeof Mode.Type
@@ -90,10 +97,10 @@ const placeInsert = (
     After: () => moved(endOf(buffer, from)),
     FirstNonBlank: () =>
       moved(
-        positionOf(
-          buffer,
-          motions.FirstNonBlank(buffer, from, 1, 'Unset').spot,
-        ),
+        positionOf(buffer, {
+          line: from.line,
+          cell: firstFilled(buffer, from.line),
+        }),
       ),
     LineEnd: () => moved(lineEnd),
     LineBelow: () => Buffer.insert(moved(lineEnd), '\n'),

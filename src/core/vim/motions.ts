@@ -2,13 +2,13 @@ import { Schema } from 'effect'
 
 import type * as Buffer from '../buffer'
 import {
+  caretColumnOf,
   cellAt,
   cellAtScreenColumn,
   cellCount,
   cellEnd,
   cellStart,
   kindAt,
-  screenColumnOf,
 } from './cells'
 
 export const Want = Schema.Union([
@@ -62,14 +62,17 @@ export const endOf = (buffer: Buffer.Buffer, spot: Spot): Buffer.Position => ({
 
 const free = (spot: Spot): Moved => ({ spot, want: 'Unset' })
 
-const firstNonBlank = (buffer: Buffer.Buffer, line: number): number => {
+export const firstFilled = (buffer: Buffer.Buffer, line: number): number => {
   const cells = cellsIn(buffer, line)
   let cell = 0
   while (cell < cells && kindOfSpot(buffer, { line, cell }) === 'Blank') {
     cell += 1
   }
-  return Math.min(cell, lastCell(buffer, line))
+  return cell
 }
+
+const firstNonBlank = (buffer: Buffer.Buffer, line: number): number =>
+  Math.min(firstFilled(buffer, line), lastCell(buffer, line))
 
 const vertical =
   (direction: -1 | 1): Motion =>
@@ -80,7 +83,7 @@ const vertical =
     )
     const kept =
       want === 'Unset'
-        ? screenColumnOf(lineOf(buffer, from.line), from.cell)
+        ? caretColumnOf(lineOf(buffer, from.line), from.cell)
         : want
     return {
       spot: {
@@ -185,22 +188,46 @@ const wordBackward = (buffer: Buffer.Buffer, from: Spot): Spot => {
   return { line, cell }
 }
 
+const lineCounted = (
+  buffer: Buffer.Buffer,
+  count: number | undefined,
+  fallback: 'First' | 'Last',
+): number => {
+  const wanted =
+    count === undefined
+      ? fallback === 'First'
+        ? 0
+        : lastLine(buffer)
+      : count - 1
+  return Math.max(0, Math.min(lastLine(buffer), wanted))
+}
+
 const toLine =
   (fallback: 'First' | 'Last'): Motion =>
   (buffer, _from, count) => {
-    const wanted =
-      count === undefined
-        ? fallback === 'First'
-          ? 0
-          : lastLine(buffer)
-        : count - 1
-    const line = Math.max(0, Math.min(lastLine(buffer), wanted))
+    const line = lineCounted(buffer, count, fallback)
     return free({ line, cell: firstNonBlank(buffer, line) })
   }
+
+const forwardAcrossLines = (buffer: Buffer.Buffer, from: Spot): Spot =>
+  from.cell + 1 < cellsIn(buffer, from.line)
+    ? { ...from, cell: from.cell + 1 }
+    : from.line < lastLine(buffer)
+      ? { line: from.line + 1, cell: 0 }
+      : from
+
+const backwardAcrossLines = (buffer: Buffer.Buffer, from: Spot): Spot =>
+  from.cell > 0
+    ? { ...from, cell: from.cell - 1 }
+    : from.line > 0
+      ? { line: from.line - 1, cell: lastCell(buffer, from.line - 1) }
+      : from
 
 export const MotionName = Schema.Literals([
   'Left',
   'Right',
+  'LeftAcrossLines',
+  'RightAcrossLines',
   'Down',
   'Up',
   'WordForward',
@@ -211,6 +238,7 @@ export const MotionName = Schema.Literals([
   'LineEnd',
   'FirstLine',
   'LastLine',
+  'LastLineEnd',
 ])
 export type MotionName = typeof MotionName.Type
 
@@ -222,6 +250,8 @@ export const motions: Readonly<Record<MotionName, Motion>> = {
       ...from,
       cell: Math.min(lastCell(buffer, from.line), from.cell + count),
     }),
+  LeftAcrossLines: repeated(backwardAcrossLines),
+  RightAcrossLines: repeated(forwardAcrossLines),
   Down: vertical(1),
   Up: vertical(-1),
   WordForward: repeated(wordForward),
@@ -236,4 +266,8 @@ export const motions: Readonly<Record<MotionName, Motion>> = {
   },
   FirstLine: toLine('First'),
   LastLine: toLine('Last'),
+  LastLineEnd: (buffer, _from, count) => {
+    const line = lineCounted(buffer, count, 'Last')
+    return { spot: { line, cell: lastCell(buffer, line) }, want: 'End' }
+  },
 }

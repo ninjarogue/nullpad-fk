@@ -220,13 +220,13 @@ const widthInside = (inside: ReadonlyArray<Holder>): number =>
 const printableAscii = /^[\x20-\x7e]*$/u
 
 const eastAsianWide =
-  /^(?:\p{Emoji_Presentation}|.️|[\u{1100}-\u{115F}\u{2E80}-\u{303E}\u{3041}-\u{33FF}\u{3400}-\u{4DBF}\u{4E00}-\u{9FFF}\u{A000}-\u{A4CF}\u{A960}-\u{A97F}\u{AC00}-\u{D7A3}\u{F900}-\u{FAFF}\u{FE10}-\u{FE19}\u{FE30}-\u{FE6F}\u{FF00}-\u{FF60}\u{FFE0}-\u{FFE6}\u{1B000}-\u{1B2FF}\u{20000}-\u{3FFFD}])/u
+  /^(?:\p{Emoji_Presentation}|.\uFE0F|[\u{1100}-\u{115F}\u{2E80}-\u{303E}\u{3041}-\u{33FF}\u{3400}-\u{4DBF}\u{4E00}-\u{9FFF}\u{A000}-\u{A4CF}\u{A960}-\u{A97F}\u{AC00}-\u{D7A3}\u{F900}-\u{FAFF}\u{FE10}-\u{FE19}\u{FE30}-\u{FE6F}\u{FF00}-\u{FF60}\u{FFE0}-\u{FFE6}\u{1B000}-\u{1B2FF}\u{20000}-\u{3FFFD}])/u
 
-const narrow = /[ !'(),.:;I[\]fijlrt|]/gu
+const narrowInInter = /[ !'(),.:;I[\]fijlrt|]/gu
 
-const broad = /[A-HJ-Z@%mw]/gu
+const broadInInter = /[A-HJ-Z@%mw]/gu
 
-const ems = {
+const fittedEms = {
   narrow: 0.31,
   usual: 0.59,
   broad: 0.72,
@@ -238,24 +238,24 @@ const ems = {
   heading: 0.99,
 }
 
-const countOf = (value: string, pattern: RegExp): number =>
+const matchCount = (value: string, pattern: RegExp): number =>
   value.length - value.replace(pattern, '').length
 
 const emsOf = (value: string): number => {
   if (printableAscii.test(value)) {
-    const narrows = countOf(value, narrow)
-    const broads = countOf(value, broad)
+    const narrows = matchCount(value, narrowInInter)
+    const broads = matchCount(value, broadInInter)
     return (
-      narrows * ems.narrow +
-      broads * ems.broad +
-      (value.length - narrows - broads) * ems.usual
+      narrows * fittedEms.narrow +
+      broads * fittedEms.broad +
+      (value.length - narrows - broads) * fittedEms.usual
     )
   }
   return Array.reduce(
     Array.fromIterable(Buffer.segmenter.segment(value)),
     0,
     (sum, { segment }) =>
-      sum + (eastAsianWide.test(segment) ? ems.wide : ems.usual),
+      sum + (eastAsianWide.test(segment) ? fittedEms.wide : fittedEms.usual),
   )
 }
 
@@ -269,11 +269,12 @@ const lengthOf = (inlines: ReadonlyArray<Inline>, width: number): number =>
         Text: ({ text }) => emsOf(text),
         Raw: ({ text }) => emsOf(text),
         Code: ({ text }) =>
-          text.length * ems.mono * ems.codeSpan + ems.codeSpanPadding,
-        SoftBreak: () => ems.narrow,
+          text.length * fittedEms.mono * fittedEms.codeSpan +
+          fittedEms.codeSpanPadding,
+        SoftBreak: () => fittedEms.narrow,
         HardBreak: () => 0,
         Emphasis: ({ children }) => lengthOf(children, width),
-        Strong: ({ children }) => lengthOf(children, width) * ems.strong,
+        Strong: ({ children }) => lengthOf(children, width) * fittedEms.strong,
         Link: ({ children }) => lengthOf(children, width),
         Image: () => width,
       })(inline),
@@ -301,13 +302,15 @@ const drawnHeight = ({ leaf, inside }: Unit): number =>
       textHeight(inlines, inside, metrics.size, metrics.leading, 1),
     Heading: ({ level, inlines }) => {
       const { size, leading, rule } = metrics.headings[level]
-      return textHeight(inlines, inside, size, leading, ems.heading) + rule
+      return (
+        textHeight(inlines, inside, size, leading, fittedEms.heading) + rule
+      )
     },
     Rule: () => metrics.hairline,
     CodeLine: () => metrics.codeLeading,
     RawLine: ({ text }) =>
       linesOf(
-        (text.length * ems.mono * metrics.codeSize) / metrics.size,
+        (text.length * fittedEms.mono * metrics.codeSize) / metrics.size,
         widthInside(inside) / metrics.size,
       ) * metrics.codeLeading,
     Empty: () => metrics.row,

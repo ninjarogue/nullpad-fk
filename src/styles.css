@@ -1,6 +1,8 @@
 @import 'tailwindcss';
 @import '@fontsource/jetbrains-mono/400.css';
 @import '@fontsource/jetbrains-mono/800.css';
+@import '@fontsource-variable/inter/wght.css';
+@import '@fontsource-variable/inter/wght-italic.css';
 
 :root {
   --bg: #0f1011;
@@ -139,7 +141,7 @@ body {
 .read {
   flex: 1;
   min-height: 0;
-  padding: 10px 2ch 0;
+  padding: 10px 16px 0;
   overflow-x: hidden;
   overflow-y: auto;
   scroll-padding-top: 10px;
@@ -147,24 +149,36 @@ body {
 }
 
 .doc {
-  --doc-gutter: 6ch;
-  max-width: calc(var(--text-columns) * 1ch + var(--doc-gutter));
-  padding: 0 0 var(--row) var(--doc-gutter);
+  --heading: #f1eee6;
+  --quote: #a9a69f;
+  --panel: #17171a;
+  max-width: var(--read-measure);
+  margin: 0 auto;
+  padding: 0 0 var(--row);
   overflow-wrap: break-word;
+  font:
+    var(--read-size) / var(--read-leading) 'Inter Variable',
+    system-ui,
+    sans-serif;
+  letter-spacing: -0.005em;
 }
 
-.doc > :not(.spacer),
-.doc li > * {
-  margin: 0 0 var(--row);
+.doc > :where(:not(.spacer)),
+.doc :where(blockquote, li) > * {
+  margin: 0 0 var(--read-gap);
 }
 
 .doc li > .plain,
-.doc li > :last-child {
+.doc :where(blockquote, li) > :last-child {
   margin-bottom: 0;
 }
 
+.doc li > p:last-child {
+  margin-bottom: var(--read-loose-gap);
+}
+
 .doc [data-unit]:not(hr) {
-  min-height: var(--row);
+  min-height: var(--read-row);
 }
 
 .doc li.continued {
@@ -181,84 +195,129 @@ body {
 .doc h4,
 .doc h5,
 .doc h6 {
-  color: var(--accent);
-  font-size: inherit;
-  font-weight: 800;
+  color: var(--heading);
+  font-weight: 650;
+  letter-spacing: -0.02em;
 }
 
-.doc h1::before,
-.doc h2::before,
-.doc h3::before,
-.doc h4::before,
-.doc h5::before,
-.doc h6::before {
-  color: var(--dim);
-  font-weight: 400;
+.doc h1 {
+  padding-bottom: calc(var(--read-h1-rule) - var(--read-hairline));
+  border-bottom: var(--read-hairline) solid var(--sel);
+  font-size: var(--read-h1-size);
+  font-weight: 750;
+  line-height: var(--read-h1-leading);
 }
 
-.doc h1::before {
-  content: '# ';
+.doc h2 {
+  padding-bottom: calc(var(--read-h2-rule) - var(--read-hairline));
+  border-bottom: var(--read-hairline) solid var(--rule);
+  font-size: var(--read-h2-size);
+  line-height: var(--read-h2-leading);
 }
 
-.doc h2::before {
-  content: '## ';
+.doc h3 {
+  font-size: var(--read-h3-size);
+  line-height: var(--read-h3-leading);
 }
 
-.doc h3::before {
-  content: '### ';
+.doc h4 {
+  font-size: var(--read-h4-size);
+  line-height: var(--read-h4-leading);
 }
 
-.doc h4::before {
-  content: '#### ';
+.doc h5 {
+  color: var(--barfg);
+  font-size: var(--read-h5-size);
+  line-height: var(--read-h5-leading);
 }
 
-.doc h5::before {
-  content: '##### ';
+.doc h6 {
+  color: var(--barfg);
+  font-size: var(--read-h6-size);
+  line-height: var(--read-h6-leading);
 }
 
-.doc h6::before {
-  content: '###### ';
+.doc > h1 {
+  margin: var(--read-h1-above) 0 var(--read-h1-below);
+}
+
+.doc > h2 {
+  margin: var(--read-h2-above) 0 var(--read-h2-below);
+}
+
+.doc > h3 {
+  margin: var(--read-h3-above) 0 var(--read-h3-below);
+}
+
+.doc > h4 {
+  margin: var(--read-h4-above) 0 var(--read-h4-below);
+}
+
+.doc > h5 {
+  margin: var(--read-h5-above) 0 var(--read-h5-below);
+}
+
+.doc > h6 {
+  margin: var(--read-h6-above) 0 var(--read-h6-below);
 }
 
 .doc strong {
-  color: var(--accent);
-  font-weight: 800;
+  color: var(--heading);
+  font-weight: 650;
 }
 
 .doc a {
   color: var(--ins);
   text-decoration: underline;
+  text-decoration-thickness: 1px;
   text-underline-offset: 3px;
 }
 
 .doc code {
-  padding: 0 0.5ch;
+  padding: var(--read-code-span-pad-block) var(--read-code-span-pad-inline);
+  border-radius: 3px;
   background: var(--sel);
-  font: inherit;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: var(--read-code-span-size);
+  line-height: 1;
+  letter-spacing: 0;
 }
 
 .doc pre {
-  padding: 0 1ch;
+  position: relative;
+  padding: var(--read-code-pad) var(--read-code-inset);
   overflow-x: auto;
-  background: var(--rule);
-  font: inherit;
+  border: var(--read-hairline) solid var(--rule);
+  border-radius: 6px;
+  background: var(--panel);
+  font:
+    var(--read-code-size) / var(--read-code-leading) 'JetBrains Mono',
+    ui-monospace,
+    monospace;
+  letter-spacing: 0;
   white-space: pre;
-  scrollbar-width: thin;
+  scrollbar-width: none;
 }
 
 .doc pre code {
   padding: 0;
   background: none;
+  font-size: inherit;
+  line-height: inherit;
 }
 
 .doc pre[data-info]::before {
   content: attr(data-info);
-  display: block;
+  position: absolute;
+  top: 6px;
+  right: 11px;
   color: var(--dim);
+  font-size: 11px;
+  line-height: 1.4;
 }
 
-.doc pre[data-info] > code > :first-child {
-  scroll-margin-top: var(--row);
+.doc pre > code > :first-child {
+  scroll-margin-top: calc(var(--read-code-pad) + var(--read-hairline));
 }
 
 .doc .raw {
@@ -266,46 +325,100 @@ body {
 }
 
 .doc pre.raw {
+  padding: 0;
+  border: 0;
   background: none;
   white-space: pre-wrap;
 }
 
+.doc ul > li:has(> [data-unit]:first-child > .box) {
+  list-style: none;
+}
+
 .doc .box {
-  color: var(--accent);
+  display: inline-block;
+  box-sizing: border-box;
+  width: var(--read-box-size);
+  height: var(--read-box-size);
+  margin: 0
+    calc(var(--read-list-indent) - var(--read-box-inset) - var(--read-box-size))
+    0 calc(var(--read-box-inset) - var(--read-list-indent));
+  border: 1.5px solid var(--dim);
+  border-radius: 3px;
+  vertical-align: -0.12em;
   cursor: pointer;
 }
 
+.doc ol > li > [data-unit] > .box {
+  margin-left: 0;
+}
+
 .doc .box[aria-checked='true'] {
-  color: var(--ins);
+  position: relative;
+  border-color: var(--ins);
+  background: var(--ins);
+}
+
+.doc .box[aria-checked='true']::after {
+  content: '';
+  position: absolute;
+  top: 0.04em;
+  left: 0.24em;
+  width: 0.22em;
+  height: 0.48em;
+  border: solid var(--bg);
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+
+.doc [data-unit]:has(> .box[aria-checked='true']) {
+  color: var(--dim);
+  text-decoration: line-through;
 }
 
 .doc blockquote {
-  padding-left: calc(var(--quote-indent) * 1ch);
-  border-left: 1px solid var(--gut);
-  color: var(--barfg);
+  padding-left: calc(var(--read-quote-indent) - var(--read-quote-rule));
+  border-left: var(--read-quote-rule) solid var(--sel);
+  color: var(--quote);
+}
+
+.doc > blockquote {
+  margin: var(--read-quote-gap) 0;
 }
 
 .doc ul,
 .doc ol {
-  padding-left: calc(var(--list-indent) * 1ch);
+  padding-left: var(--read-list-indent);
 }
 
 .doc ul {
-  list-style: '- ';
+  list-style: disc;
 }
 
 .doc ol {
   list-style: decimal;
 }
 
+.doc li {
+  margin: var(--read-item-gap) 0;
+}
+
 .doc li::marker {
   color: var(--dim);
+}
+
+.doc ol > li::marker {
+  color: var(--fg);
 }
 
 .doc hr {
   height: 0;
   border: 0;
-  border-top: 1px solid var(--gut);
+  border-top: var(--read-hairline) solid var(--sel);
+}
+
+.doc > hr {
+  margin: var(--read-rule-gap) 0;
 }
 
 .doc img {

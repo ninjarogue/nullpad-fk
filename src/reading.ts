@@ -1,4 +1,13 @@
-import { Array, Effect, Match, Option, Queue, Schema, Stream } from 'effect'
+import {
+  Array,
+  Effect,
+  Match,
+  Option,
+  Queue,
+  Record,
+  Schema,
+  Stream,
+} from 'effect'
 import { Mount, Render } from 'foldkit'
 import { type Html, type HtmlBuilder, createKeyedLazy } from 'foldkit/html'
 
@@ -45,16 +54,18 @@ const inlineView = (inline: Reading.Inline, h: HtmlBuilder<Message>): Child =>
       h.img([h.Src(src), h.Alt(alt), h.Loading('lazy'), ...titled(title, h)]),
   })(inline)
 
-const taskBox = (box: Reading.Box, h: HtmlBuilder<Message>): Html =>
-  h.span(
-    [
-      h.Class('box'),
-      h.Role('checkbox'),
-      h.AriaChecked(box.checked),
-      h.OnClick(Message.ClickedTask({ box })),
-    ],
-    [box.checked ? '[x]' : '[ ]'],
-  )
+const taskBox = (
+  box: Reading.Box,
+  inlines: ReadonlyArray<Reading.Inline>,
+  h: HtmlBuilder<Message>,
+): Html =>
+  h.span([
+    h.Class('box'),
+    h.Role('checkbox'),
+    h.AriaChecked(box.checked),
+    h.AriaLabel(Reading.label(inlines)),
+    h.OnClick(Message.ClickedTask({ box })),
+  ])
 
 const headingTags = {
   1: 'h1',
@@ -72,7 +83,7 @@ const leadChildren = (
 ): ReadonlyArray<Child> => [
   ...Option.match(box, {
     onNone: (): ReadonlyArray<Child> => [],
-    onSome: drawnBox => [taskBox(drawnBox, h), ' '],
+    onSome: drawnBox => [taskBox(drawnBox, inlines, h)],
   }),
   ...inlinesView(inlines, h),
 ]
@@ -147,13 +158,13 @@ const nodeView = (node: Reading.Node, h: HtmlBuilder<Message>): Html => {
 }
 
 const spacer = (
-  { from, rows }: Reading.Spacer,
+  { from, height }: Reading.Spacer,
   h: HtmlBuilder<Message>,
 ): Html =>
   h.div([
     h.Class('spacer'),
     h.DataAttribute('from', String(from)),
-    h.Style({ '--lines': String(rows) }),
+    h.Style({ height: `${height}px` }),
   ])
 
 const drawnView = (
@@ -178,9 +189,8 @@ const viewTopOf = (read: HTMLElement): number =>
 const spacerAt = (
   read: HTMLElement,
   viewTop: number,
-): Option.Option<Reading.At> => {
-  const row = pixels(getComputedStyle(read).lineHeight)
-  return Option.map(
+): Option.Option<Reading.At> =>
+  Option.map(
     Array.findFirst(
       Array.fromIterable(read.querySelectorAll<HTMLElement>('.doc > .spacer')),
       spacerElement => {
@@ -191,15 +201,12 @@ const spacerAt = (
     spacerElement =>
       Reading.At.cases.InSpacer.make({
         from: Number(spacerElement.dataset['from']),
-        rowsPast: Math.max(
+        pixelsPast: Math.max(
           0,
-          Math.floor(
-            (viewTop - spacerElement.getBoundingClientRect().top) / row,
-          ),
+          Math.floor(viewTop - spacerElement.getBoundingClientRect().top),
         ),
       }),
   )
-}
 
 const placeOf = (read: HTMLElement, viewTop: number): Option.Option<Place> => {
   const units = Array.fromIterable(
@@ -305,16 +312,38 @@ export const ReadingPort = Mount.defineStream('ReadingPort', {
       : Stream.never,
 })
 
-const docColumns = {
-  '--text-columns': String(Reading.columns.text),
-  '--quote-indent': String(Reading.columns.quote),
-  '--list-indent': String(Reading.columns.list),
+const { headings, codeSpan, ...sizes } = Reading.metrics
+
+const kebab = (name: string): string =>
+  name.replace(/[A-Z]/gu, letter => `-${letter.toLowerCase()}`)
+
+const docMetrics: Readonly<Record<string, string>> = {
+  ...Record.fromEntries(
+    Array.map(Record.toEntries(sizes), ([name, value]) => [
+      `--read-${kebab(name)}`,
+      `${value}px`,
+    ]),
+  ),
+  ...Record.fromEntries(
+    Array.map(Record.toEntries(codeSpan), ([name, value]) => [
+      `--read-code-span-${kebab(name)}`,
+      `${value}em`,
+    ]),
+  ),
+  ...Record.fromEntries(
+    Array.flatMap(Record.toEntries(headings), ([level, set]) =>
+      Array.map(Record.toEntries(set), ([name, value]) => [
+        `--read-h${level}-${name}`,
+        `${value}px`,
+      ]),
+    ),
+  ),
 }
 
 export const reading = (drawn: Reading.Drawn, h: HtmlBuilder<Message>): Html =>
   h.div(
     [h.Class('read'), h.OnMount(ReadingPort())],
-    [h.div([h.Class('doc'), h.Style(docColumns)], drawnView(drawn, h))],
+    [h.div([h.Class('doc'), h.Style(docMetrics)], drawnView(drawn, h))],
   )
 
 export const readBounds = { control: '.read', selection: '.read' }
@@ -336,17 +365,10 @@ const scrollRead = (scroll: (read: HTMLElement) => void): Effect.Effect<void> =>
     ),
   )
 
-export const showUnit = (unit: number): Effect.Effect<void> =>
-  scrollRead(read =>
-    read
-      .querySelector(`[data-unit="${unit}"]`)
-      ?.scrollIntoView({ block: 'start' }),
-  )
-
 const scrollTops = (
   read: HTMLElement,
 ): Readonly<Record<Reading.Scroll, number>> => {
-  const row = pixels(getComputedStyle(read).lineHeight)
+  const row = Reading.metrics.leading
   const page = Math.max(row, read.clientHeight - row)
   return {
     LineUp: read.scrollTop - row,
@@ -358,5 +380,20 @@ const scrollTops = (
   }
 }
 
+const scrollTo = (read: HTMLElement, to: Reading.Scroll): void =>
+  read.scrollTo({ top: scrollTops(read)[to] })
+
 export const scrollReading = (to: Reading.Scroll): Effect.Effect<void> =>
-  scrollRead(read => read.scrollTo({ top: scrollTops(read)[to] }))
+  scrollRead(read => scrollTo(read, to))
+
+export const reveal = (target: Reading.Reveal): Effect.Effect<void> =>
+  scrollRead(read =>
+    Reading.Reveal.match(target, {
+      Start: () => scrollTo(read, 'Start'),
+      Unit: ({ unit }) =>
+        read
+          .querySelector(`[data-unit="${unit}"]`)
+          ?.scrollIntoView({ block: 'start' }),
+      End: () => scrollTo(read, 'End'),
+    }),
+  )

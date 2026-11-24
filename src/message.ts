@@ -39,7 +39,7 @@ export const Message = defineMessageUnion({
   ClickedReadToggle: {},
   ScrolledReading: { at: At },
   ClickedTask: { box: Box },
-  CompletedShowUnit: {},
+  CompletedRevealReading: {},
   CompletedScrollReading: {},
 })
 export type Message = typeof Message.Type

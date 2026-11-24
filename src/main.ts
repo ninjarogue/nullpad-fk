@@ -28,7 +28,7 @@ import {
   keyboardPort,
 } from './keyboard'
 import { Message } from './message'
-import { readBounds, reading, scrollReading, showUnit } from './reading'
+import { readBounds, reading, reveal, scrollReading } from './reading'
 import * as Storage from './storage'
 import { locate, revealCaret, statusLine, surface } from './surface'
 
@@ -250,11 +250,11 @@ const RevealFinderRow = Command.define('RevealFinderRow', {
   }).pipe(Effect.ignore, Effect.as(Message.CompletedRevealFinderRow())),
 })
 
-const ShowUnit = Command.define('ShowUnit', {
-  args: { unit: Schema.Int },
-  messages: [Message.CompletedShowUnit],
-  execute: ({ unit }) =>
-    showUnit(unit).pipe(Effect.as(Message.CompletedShowUnit())),
+const RevealReading = Command.define('RevealReading', {
+  args: { target: Reading.Reveal },
+  messages: [Message.CompletedRevealReading],
+  execute: ({ target }) =>
+    reveal(target).pipe(Effect.as(Message.CompletedRevealReading())),
 })
 
 const ScrollReading = Command.define('ScrollReading', {
@@ -483,7 +483,10 @@ const openReading = (model: Model): UpdateReturn => {
     Reading.page(model.editor.buffer.lines),
     model.editor.buffer.caret.line,
   )
-  return { model: readAt(model, unit), commands: [ShowUnit({ unit })] }
+  return {
+    model: readAt(model, unit),
+    commands: [RevealReading({ target: Reading.revealUnit(unit) })],
+  }
 }
 
 const scrollReadingTo = (model: Model, to: Reading.Scroll): UpdateReturn => {
@@ -500,13 +503,17 @@ const scrollReadingTo = (model: Model, to: Reading.Scroll): UpdateReturn => {
 }
 
 const scrolledReading = (model: Model, at: Reading.At): UpdateReturn => {
-  const { top, isPinned } = Reading.landing(
+  const { top, reveal: target } = Reading.landing(
     Reading.page(model.editor.buffer.lines),
     at,
+    model.editor.screenRows,
   )
   return {
     model: readAt(model, top),
-    commands: isPinned ? [ShowUnit({ unit: top })] : [],
+    commands: Option.match(target, {
+      onNone: () => [],
+      onSome: shown => [RevealReading({ target: shown })],
+    }),
   }
 }
 
@@ -970,7 +977,7 @@ export const update = (model: Model, message: Message) =>
       model.screen._tag === 'Read'
         ? readAct(model, Reading.click(model.editor.buffer.lines, box))
         : { model },
-    CompletedShowUnit: () => ({ model }),
+    CompletedRevealReading: () => ({ model }),
     CompletedScrollReading: () => ({ model }),
   })
 

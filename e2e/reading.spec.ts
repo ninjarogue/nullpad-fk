@@ -579,3 +579,21 @@ test('opening the read view on the fence of an empty code block puts it at the t
 }) => {
   await opensAtBlockStartingOnNextLine(nullpad, ['```', '```'], 1, null)
 })
+
+test('opening the read view on a fence with an info string shows the info line', async ({
+  nullpad,
+}) => {
+  const paragraph = Array.from({ length: 400 }, (_, i) => `word ${i + 1}`)
+  const after = Array.from({ length: 200 }, (_, i) => `after ${i + 1}`)
+  await nullpad.paste(
+    [...paragraph, '', '```js', 'let a = 1', '```', '', ...after].join('\n'),
+  )
+  await nullpad.press('Control+End')
+  await nullpad.press('ArrowUp', after.length + 3)
+  expect((await nullpad.status()).line, 'cursor on the fence').toBe(402)
+  await openRead(nullpad)
+  await expect(
+    nullpad.page.locator('.read pre[data-info="js"]'),
+    'the code block with its info line is on screen',
+  ).toBeInViewport({ ratio: 1 })
+})

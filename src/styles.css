@@ -257,6 +257,10 @@ body {
   color: var(--dim);
 }
 
+.doc pre[data-info] > code > :first-child {
+  scroll-margin-top: var(--row);
+}
+
 .doc .raw {
   color: var(--dim);
 }

@@ -172,18 +172,36 @@ const lastCellBefore = (buffer: Buffer.Buffer): Buffer.Position => {
   return { line, column: cellStart(text, cellAt(text, column - 1)) }
 }
 
+const maxPutUnits = 4_000_000
+
+const maxPutLines = 200_000
+
+const boundedCount = (register: Register, count: number): number => {
+  const lines = register.text.split('\n').length - 1
+  return Math.max(
+    1,
+    Math.min(
+      count,
+      Math.floor(maxPutUnits / Math.max(1, register.text.length)),
+      lines === 0 ? count : Math.floor(maxPutLines / lines),
+    ),
+  )
+}
+
 export const put = (
   buffer: Buffer.Buffer,
   register: Register,
   side: Side,
   count: number,
 ): Buffer.Buffer => {
+  const times = boundedCount(register, count)
   if (register.kind === 'Linewise') {
     const at = buffer.caret.line + (side === 'After' ? 1 : 0)
+    const once = linesOf(register.text.slice(0, -1))
     const added = Buffer.insertLines(
       buffer,
       at,
-      linesOf(register.text.repeat(count).slice(0, -1)),
+      Array.flatten(Array.replicate(once, times)),
     )
     return atFirstNonBlank(added, at)
   }
@@ -195,7 +213,7 @@ export const put = (
     side === 'After' && cellsIn(buffer, spot.line) > 0
       ? endOf(buffer, spot)
       : positionOf(buffer, spot)
-  const text = register.text.repeat(count)
+  const text = register.text.repeat(times)
   const added = Buffer.insert(Buffer.moveTo(buffer, at), text)
   return Buffer.moveTo(added, text.includes('\n') ? at : lastCellBefore(added))
 }

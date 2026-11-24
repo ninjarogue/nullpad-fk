@@ -26,7 +26,7 @@ export type Inline =
       title: Option.Option<string>
     }>
 
-type Lead =
+export type Lead =
   | Readonly<{ _tag: 'Paragraph'; inlines: ReadonlyArray<Inline> }>
   | Readonly<{ _tag: 'Plain'; inlines: ReadonlyArray<Inline> }>
 

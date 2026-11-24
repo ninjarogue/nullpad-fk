@@ -102,21 +102,32 @@ const taskBox = (box: Reading.Box, h: HtmlBuilder<Message>): Html =>
     [box.checked ? '[x]' : '[ ]'],
   )
 
+const leadView = (
+  lead: Reading.Lead,
+  attributes: Attributes,
+  element: Element,
+  h: HtmlBuilder<Message>,
+  before: ReadonlyArray<Child> = [],
+): Html =>
+  lead._tag === 'Plain'
+    ? element(
+        'div',
+        [h.Class('plain'), ...attributes],
+        [...before, ...inlinesView(lead.inlines, h)],
+      )
+    : element('p', attributes, [...before, ...inlinesView(lead.inlines, h)])
+
 const itemView = (item: Reading.Item, h: HtmlBuilder<Message>): Html =>
   Match.typeTags<Reading.Item, Html>()({
     Item: ({ blocks }) => h.li([], blocksView(blocks, h)),
-    Task: ({ box, lead, rest }) => {
-      const boxed = [taskBox(box, h), ' ', ...inlinesView(lead.inlines, h)]
-      return h.li(
+    Task: ({ box, lead, rest }) =>
+      h.li(
         [],
         [
-          lead._tag === 'Plain'
-            ? h.div([h.Class('plain')], boxed)
-            : h.p([], boxed),
+          leadView(lead, [], nested(h), h, [taskBox(box, h), ' ']),
           ...blocksView(rest, h),
         ],
-      )
-    },
+      ),
   })(item)
 
 const itemsView = (
@@ -131,14 +142,8 @@ const blockView = (
   h: HtmlBuilder<Message>,
 ): Html =>
   Match.typeTags<Reading.Block, Html>()({
-    Paragraph: ({ inlines }) =>
-      element('p', attributes, inlinesView(inlines, h)),
-    Plain: ({ inlines }) =>
-      element(
-        'div',
-        [h.Class('plain'), ...attributes],
-        inlinesView(inlines, h),
-      ),
+    Paragraph: lead => leadView(lead, attributes, element, h),
+    Plain: lead => leadView(lead, attributes, element, h),
     Heading: ({ level, inlines }) =>
       element(headingTags[level], attributes, inlinesView(inlines, h)),
     Rule: () => element('hr', attributes),

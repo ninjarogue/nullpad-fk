@@ -824,3 +824,44 @@ test('a hard break draws one line break, the same pitch as a typed line break', 
     'a backslash break draws one break: cc is 27 px under bb',
   ).toBeLessThanOrEqual(1)
 })
+
+test('opening the read view on line 182 of a 200-line paragraph shows that line on screen', async ({
+  nullpad,
+}) => {
+  const lines = Array.from({ length: 200 }, (_, i) => `log line ${i + 1}`)
+  await nullpad.paste(lines.join('\n'))
+  await nullpad.press('Control+Home')
+  await nullpad.press('ArrowDown', 181)
+  expect(await nullpad.status(), 'the cursor is on line 182').toMatchObject({
+    line: 182,
+  })
+  await openRead(nullpad)
+  const found = await nullpad.page.evaluate(() => {
+    const read = document.querySelector('.read')!.getBoundingClientRect()
+    const walker = document.createTreeWalker(
+      document.querySelector('.read')!,
+      NodeFilter.SHOW_TEXT,
+    )
+    const hits: { top: number; bottom: number }[] = []
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      const text = node.textContent ?? ''
+      for (const match of text.matchAll(/log line 182(?!\d)/g)) {
+        const range = document.createRange()
+        range.setStart(node, match.index)
+        range.setEnd(node, match.index + match[0].length)
+        const rect = range.getBoundingClientRect()
+        hits.push({ top: rect.top, bottom: rect.bottom })
+      }
+    }
+    return { readTop: read.top, readBottom: read.bottom, hits }
+  })
+  expect(found.hits.length, 'log line 182 is drawn after opening').toBe(1)
+  expect(
+    found.hits[0]!.top,
+    'log line 182 starts at or below the top of the read view',
+  ).toBeGreaterThanOrEqual(found.readTop - 1)
+  expect(
+    found.hits[0]!.bottom,
+    'log line 182 ends at or above the bottom of the read view',
+  ).toBeLessThanOrEqual(found.readBottom + 1)
+})

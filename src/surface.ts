@@ -706,6 +706,17 @@ export const revealCaret = (align: 'Nearest' | 'Top'): Effect.Effect<void> =>
     ),
   )
 
+export const restoreSurfaceScroll = (scrollTop: number): Effect.Effect<void> =>
+  Render.afterCommit.pipe(
+    Effect.map(() =>
+      Option.map(findSurface(), surface =>
+        scrollApp(surface, () => {
+          surface.scrollTop = scrollTop
+        }),
+      ),
+    ),
+  )
+
 const topLine = (surface: HTMLElement, sheet: Sheet): number => {
   const lines = Array.fromIterable(
     surface.querySelectorAll<HTMLElement>('.line'),
@@ -763,6 +774,8 @@ const drawnScrollRange = (
   }
 }
 
+const measuredBox = { width: -1, height: -1 }
+
 const observe = (surface: HTMLElement): Stream.Stream<SurfaceMessage> =>
   Stream.callback<SurfaceMessage>(queue =>
     Effect.gen(function* () {
@@ -775,15 +788,26 @@ const observe = (surface: HTMLElement): Stream.Stream<SurfaceMessage> =>
           const controller = new AbortController()
           const { signal } = controller
           const measure = () => {
-            const sheet = sheetOf(surface)
-            Queue.offerUnsafe(
-              queue,
-              Message.ResizedScreen({
-                rows: Math.floor(
-                  (sheet.viewBottom - sheet.viewTop) / sheet.rowHeight + 0.01,
-                ),
-              }),
-            )
+            const box = {
+              width: surface.clientWidth,
+              height: surface.clientHeight,
+            }
+            if (
+              box.width !== measuredBox.width ||
+              box.height !== measuredBox.height
+            ) {
+              measuredBox.width = box.width
+              measuredBox.height = box.height
+              const sheet = sheetOf(surface)
+              Queue.offerUnsafe(
+                queue,
+                Message.ResizedScreen({
+                  rows: Math.floor(
+                    (sheet.viewBottom - sheet.viewTop) / sheet.rowHeight + 0.01,
+                  ),
+                }),
+              )
+            }
             drawCaret(surface)
           }
           const resizes = new ResizeObserver(measure)
@@ -795,7 +819,10 @@ const observe = (surface: HTMLElement): Stream.Stream<SurfaceMessage> =>
             }
           }
           const report = (top: number) =>
-            Queue.offerUnsafe(queue, Message.ScrolledSurface({ top }))
+            Queue.offerUnsafe(
+              queue,
+              Message.ScrolledSurface({ top, scrollTop: surface.scrollTop }),
+            )
           const reportTop = () => report(topLine(surface, sheetOf(surface)))
           /**
            * Chrome scrolls a wheel turn on its compositor, ahead of the drawn lines, and paints blank screen until they arrive;
@@ -984,6 +1011,7 @@ const modeLabels: Readonly<Record<Mode, string>> = { Plain: 'EDIT' }
 
 export const statusLine = (
   status: Frame['status'],
+  screen: 'Edit' | 'Read',
   path: string,
   maybeWarning: Option.Option<string>,
   h: HtmlBuilder<Message>,
@@ -991,7 +1019,10 @@ export const statusLine = (
   h.div(
     [h.Class('status')],
     [
-      h.span([h.Class('mode')], [modeLabels[status.mode]]),
+      h.span(
+        [h.Class('mode')],
+        [screen === 'Read' ? 'READ' : modeLabels[status.mode]],
+      ),
       h.span([h.Class('file')], [path]),
       ...Option.match(maybeWarning, {
         onNone: () => [],
@@ -1000,6 +1031,15 @@ export const statusLine = (
       h.span(
         [h.Class('pos')],
         [`${status.line}:${status.column} ${status.lineCount}L`],
+      ),
+      h.button(
+        [
+          h.Class('toggle-read'),
+          h.Type('button'),
+          h.Tabindex(-1),
+          h.OnClick(Message.ClickedReadToggle()),
+        ],
+        [screen === 'Read' ? 'edit ^E' : 'read ^E'],
       ),
     ],
   )

@@ -26,7 +26,7 @@ module.exports = {
       from: { path: '^src/', pathNot: core },
       to: {
         path: core,
-        pathNot: '^src/core/(editor|finder|input|notes)[.]ts$',
+        pathNot: '^src/core/(editor|finder|input|notes|reading)[.]ts$',
       },
     },
     {

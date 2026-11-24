@@ -223,7 +223,7 @@ const listen = (
           const surroundingChanges = new MutationObserver(holdSurrounding)
           surroundingChanges.observe(port, {
             attributes: true,
-            attributeFilter: ['data-surrounding', 'data-caret'],
+            attributeFilter: ['data-surrounding', 'data-caret', 'data-control'],
           })
           signal.addEventListener('abort', () =>
             surroundingChanges.disconnect(),

@@ -136,6 +136,172 @@ body {
   white-space: pre;
 }
 
+.read {
+  flex: 1;
+  min-height: 0;
+  padding: 10px 2ch 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  scroll-padding-top: 10px;
+  scrollbar-width: none;
+}
+
+.doc {
+  max-width: 76ch;
+  padding: 0 0 var(--row) 6ch;
+  overflow-wrap: break-word;
+}
+
+.doc > :not(.spacer),
+.doc li > * {
+  margin: 0 0 var(--row);
+}
+
+.doc li > .plain,
+.doc li > :last-child {
+  margin-bottom: 0;
+}
+
+.doc h1,
+.doc h2,
+.doc h3,
+.doc h4,
+.doc h5,
+.doc h6 {
+  color: var(--accent);
+  font-size: inherit;
+  font-weight: 800;
+}
+
+.doc h1::before,
+.doc h2::before,
+.doc h3::before,
+.doc h4::before,
+.doc h5::before,
+.doc h6::before {
+  color: var(--dim);
+  font-weight: 400;
+}
+
+.doc h1::before {
+  content: '# ';
+}
+
+.doc h2::before {
+  content: '## ';
+}
+
+.doc h3::before {
+  content: '### ';
+}
+
+.doc h4::before {
+  content: '#### ';
+}
+
+.doc h5::before {
+  content: '##### ';
+}
+
+.doc h6::before {
+  content: '###### ';
+}
+
+.doc strong {
+  color: var(--accent);
+  font-weight: 800;
+}
+
+.doc a {
+  color: var(--ins);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.doc code {
+  padding: 0 0.5ch;
+  background: var(--sel);
+  font: inherit;
+}
+
+.doc pre {
+  padding: 0 1ch;
+  overflow-x: auto;
+  background: var(--rule);
+  font: inherit;
+  white-space: pre;
+  scrollbar-width: thin;
+}
+
+.doc pre code {
+  padding: 0;
+  background: none;
+}
+
+.doc pre[data-info]::before {
+  content: attr(data-info);
+  display: block;
+  color: var(--dim);
+}
+
+.doc .raw {
+  color: var(--dim);
+}
+
+.doc pre.raw {
+  background: none;
+  white-space: pre-wrap;
+}
+
+.doc blockquote {
+  padding-left: 2ch;
+  border-left: 1px solid var(--gut);
+  color: var(--barfg);
+}
+
+.doc ul,
+.doc ol {
+  padding-left: 3ch;
+}
+
+.doc ul {
+  list-style: '- ';
+}
+
+.doc ol {
+  list-style: decimal;
+}
+
+.doc li::marker {
+  color: var(--dim);
+}
+
+.doc hr {
+  height: 0;
+  border: 0;
+  border-top: 1px solid var(--gut);
+}
+
+.doc img {
+  display: inline;
+  max-width: 100%;
+  vertical-align: top;
+}
+
+.doc .blank {
+  color: var(--dim);
+}
+
+.toggle-read {
+  padding: 0;
+  color: var(--dim);
+  cursor: pointer;
+}
+
+.toggle-read:hover {
+  color: var(--fg);
+}
+
 .status {
   display: flex;
   flex: none;

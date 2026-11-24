@@ -141,3 +141,40 @@ test('the status line button opens and closes the read view', async ({
   ).toHaveCount(0)
   expect(await nullpad.text(), 'text after closing').toBe(textBefore)
 })
+
+test('closing the read view leaves the editor scrolled where it was, cursor off screen', async ({
+  nullpad,
+}) => {
+  const note = Array.from(
+    { length: 400 },
+    (_, i) => `line ${i + 1} ${i % 3 === 0 ? 'word '.repeat(60) : 'short'}`,
+  ).join('\n')
+  await nullpad.paste(note)
+  await nullpad.press('Control+Home')
+  await nullpad.press('ArrowDown', 60)
+  await nullpad.wheel(4000)
+  await settle(nullpad.page)
+  const firstDrawn = async () => {
+    const screen = await nullpad.screen()
+    return {
+      numbers: screen.rows
+        .filter(
+          row => row.top >= screen.area.top && row.bottom <= screen.area.bottom,
+        )
+        .map(row => row.number),
+      status: screen.status,
+    }
+  }
+  const before = await firstDrawn()
+  expect(
+    before.numbers.includes(String(before.status.line)),
+    'the cursor’s line is off screen before reading',
+  ).toBe(false)
+  await openRead(nullpad)
+  await nullpad.page.keyboard.press('Control+e')
+  await settle(nullpad.page)
+  expect(
+    await firstDrawn(),
+    'the editor shows the same lines after Ctrl+E twice',
+  ).toEqual(before)
+})

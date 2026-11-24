@@ -1,0 +1,454 @@
+[
+  {
+    "paste": "one two three\nfour five\nsix"
+  },
+  {
+    "press": "Control+Comma"
+  },
+  {
+    "expect": {
+      "mode": "NORMAL",
+      "status": "3:3 3L"
+    }
+  },
+  {
+    "type": "gg"
+  },
+  {
+    "type": "d"
+  },
+  {
+    "expect": {
+      "pending": "d",
+      "status": "1:1 3L"
+    }
+  },
+  {
+    "shot": "1-pending-d"
+  },
+  {
+    "type": "w"
+  },
+  {
+    "expect": {
+      "text": "two three\nfour five\nsix",
+      "status": "1:1 3L",
+      "pending": ""
+    }
+  },
+  {
+    "type": "cw"
+  },
+  {
+    "expect": {
+      "mode": "INSERT",
+      "text": " three\nfour five\nsix"
+    }
+  },
+  {
+    "type": "TWO"
+  },
+  {
+    "shot": "2-cw-insert"
+  },
+  {
+    "press": "Escape"
+  },
+  {
+    "expect": {
+      "mode": "NORMAL",
+      "text": "TWO three\nfour five\nsix",
+      "status": "1:3 3L",
+      "under": "O"
+    }
+  },
+  {
+    "type": "dd"
+  },
+  {
+    "expect": {
+      "text": "four five\nsix",
+      "status": "1:1 2L"
+    }
+  },
+  {
+    "type": "p"
+  },
+  {
+    "expect": {
+      "text": "four five\nTWO three\nsix",
+      "status": "2:1 3L",
+      "under": "T"
+    }
+  },
+  {
+    "type": "0x"
+  },
+  {
+    "type": "p"
+  },
+  {
+    "expect": {
+      "text": "four five\nWTO three\nsix",
+      "status": "2:2 3L",
+      "under": "T"
+    }
+  },
+  {
+    "type": "2d3"
+  },
+  {
+    "expect": {
+      "pending": "2d3"
+    }
+  },
+  {
+    "shot": "3-pending-2d3"
+  },
+  {
+    "press": "Escape"
+  },
+  {
+    "expect": {
+      "pending": "",
+      "text": "four five\nWTO three\nsix"
+    }
+  },
+  {
+    "type": "ci"
+  },
+  {
+    "expect": {
+      "pending": "ci"
+    }
+  },
+  {
+    "press": "Control+e"
+  },
+  {
+    "expect": {
+      "mode": "READ"
+    }
+  },
+  {
+    "press": "Control+e"
+  },
+  {
+    "expect": {
+      "mode": "NORMAL",
+      "pending": ""
+    }
+  },
+  {
+    "type": "q"
+  },
+  {
+    "expect": {
+      "pending": ""
+    }
+  },
+  {
+    "type": "d"
+  },
+  {
+    "type": "z"
+  },
+  {
+    "expect": {
+      "pending": "",
+      "text": "four five\nWTO three\nsix",
+      "status": "2:2 3L"
+    }
+  },
+  {
+    "type": "G"
+  },
+  {
+    "type": "o"
+  },
+  {
+    "type": "call(a, \"b c\") end"
+  },
+  {
+    "press": "Escape"
+  },
+  {
+    "type": "0"
+  },
+  {
+    "type": "5l"
+  },
+  {
+    "expect": {
+      "under": "a",
+      "status": "4:6 4L"
+    }
+  },
+  {
+    "type": "di("
+  },
+  {
+    "expect": {
+      "text": "four five\nWTO three\nsix\ncall() end",
+      "status": "4:6 4L",
+      "under": ")"
+    }
+  },
+  {
+    "type": "o"
+  },
+  {
+    "type": "say \"hi there\" now"
+  },
+  {
+    "press": "Escape"
+  },
+  {
+    "type": "0"
+  },
+  {
+    "type": "5l"
+  },
+  {
+    "expect": {
+      "under": "h"
+    }
+  },
+  {
+    "type": "ci\""
+  },
+  {
+    "expect": {
+      "mode": "INSERT"
+    }
+  },
+  {
+    "type": "yo"
+  },
+  {
+    "press": "Escape"
+  },
+  {
+    "expect": {
+      "text": "four five\nWTO three\nsix\ncall() end\nsay \"yo\" now",
+      "status": "5:7 5L",
+      "under": "o"
+    }
+  },
+  {
+    "type": "$"
+  },
+  {
+    "type": "daw"
+  },
+  {
+    "expect": {
+      "text": "four five\nWTO three\nsix\ncall() end\nsay \"yo\"",
+      "status": "5:8 5L"
+    }
+  },
+  {
+    "shot": "4-text-objects"
+  },
+  {
+    "type": "gg"
+  },
+  {
+    "type": "O"
+  },
+  {
+    "type": "a b c d e f g h"
+  },
+  {
+    "press": "Escape"
+  },
+  {
+    "type": "0"
+  },
+  {
+    "type": "2d3w"
+  },
+  {
+    "expect": {
+      "text": "g h\nfour five\nWTO three\nsix\ncall() end\nsay \"yo\"",
+      "status": "1:1 6L"
+    }
+  },
+  {
+    "type": "j"
+  },
+  {
+    "type": "d2j"
+  },
+  {
+    "expect": {
+      "text": "g h\ncall() end\nsay \"yo\"",
+      "status": "2:1 3L"
+    }
+  },
+  {
+    "type": "G"
+  },
+  {
+    "type": "dj"
+  },
+  {
+    "expect": {
+      "text": "g h\ncall() end\nsay \"yo\"",
+      "status": "3:1 3L"
+    }
+  },
+  {
+    "type": "gg"
+  },
+  {
+    "type": "yy"
+  },
+  {
+    "expect": {
+      "text": "g h\ncall() end\nsay \"yo\"",
+      "status": "1:1 3L"
+    }
+  },
+  {
+    "press": "Control+p"
+  },
+  {
+    "type": "second"
+  },
+  {
+    "press": "Enter"
+  },
+  {
+    "expect": {
+      "text": "second",
+      "mode": "NORMAL"
+    }
+  },
+  {
+    "type": "p"
+  },
+  {
+    "expect": {
+      "text": "second\ng h",
+      "status": "2:1 2L"
+    }
+  },
+  {
+    "shot": "5-put-in-other-note"
+  },
+  {
+    "press": "Control+Comma"
+  },
+  {
+    "expect": {
+      "mode": "EDIT"
+    }
+  },
+  {
+    "press": "Control+Comma"
+  },
+  {
+    "expect": {
+      "mode": "NORMAL"
+    }
+  },
+  {
+    "type": "P"
+  },
+  {
+    "expect": {
+      "text": "second\ng h\ng h",
+      "status": "2:1 3L"
+    }
+  },
+  {
+    "type": "D"
+  },
+  {
+    "expect": {
+      "text": "second\n\ng h",
+      "status": "2:1 3L"
+    }
+  },
+  {
+    "type": "j"
+  },
+  {
+    "type": "Yp"
+  },
+  {
+    "expect": {
+      "text": "second\n\ng h\ng h",
+      "status": "4:1 4L"
+    }
+  },
+  {
+    "type": "x"
+  },
+  {
+    "type": "X"
+  },
+  {
+    "expect": {
+      "text": "second\n\ng h\n h",
+      "status": "4:1 4L"
+    }
+  },
+  {
+    "type": "S"
+  },
+  {
+    "expect": {
+      "mode": "INSERT",
+      "text": "second\n\ng h\n"
+    }
+  },
+  {
+    "type": "z"
+  },
+  {
+    "press": "Escape"
+  },
+  {
+    "expect": {
+      "text": "second\n\ng h\nz",
+      "status": "4:1 4L"
+    }
+  },
+  {
+    "wait": 1200
+  },
+  {
+    "reload": true
+  },
+  {
+    "expect": {
+      "mode": "NORMAL"
+    }
+  },
+  {
+    "type": "gg"
+  },
+  {
+    "type": "p"
+  },
+  {
+    "expect": {
+      "text": "second\n\ng h\nz",
+      "status": "1:1 4L"
+    }
+  },
+  {
+    "type": "dG"
+  },
+  {
+    "expect": {
+      "text": "",
+      "status": "1:1 1L"
+    }
+  },
+  {
+    "shot": "6-dG-empty"
+  }
+]

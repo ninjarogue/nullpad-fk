@@ -28,3 +28,4 @@ Each file opens with what the person sees, then four sections: `Sub-features`, `
 - [IME and paste](./ime-and-paste.md) covers composing text with an input method and pasting from the clipboard.
 - [Notes and finder](./notes-and-finder.md) covers saving notes, reloading, and the Ctrl-P finder with its folders and moves.
 - [Vim](./vim.md) covers turning vim on and off, Normal mode motions, counts, `x`, entering and leaving Insert, and the remembered setting.
+- [Vim operators](./vim-operators.md) covers `d c y` with motions, doubled keys and text objects, counts on both sides, the shorthands, `p P`, and the store across notes, vim off and a reload.

@@ -61,6 +61,7 @@ const Locating = Schema.Struct({ cause: Queued, queued: Schema.Array(Queued) })
 export const Editor = Schema.Struct({
   buffer: Buffer.Buffer,
   vim: Schema.Option(Vim.Vim),
+  registers: Vim.Registers,
   discards: Schema.Int,
   preedit: Schema.String,
   goalX: Schema.Option(Schema.Finite),
@@ -116,6 +117,7 @@ export type Frame = Readonly<{
 export const open = (text: string, vim = false): Editor => ({
   buffer: Buffer.fromText(text),
   vim: vim ? Option.some(Vim.start) : Option.none(),
+  registers: Vim.noRegisters,
   discards: 0,
   preedit: '',
   goalX: Option.none(),
@@ -177,6 +179,7 @@ export const reopen = (
   }
   return {
     ...opened,
+    registers: editor.registers,
     discards: editor.discards,
     buffer: atRest(
       opened,
@@ -576,8 +579,12 @@ const plainPlan = (editor: Editor, input: Input): Plan =>
   })
 
 const vimPlan = (editor: Editor, vim: Vim.Vim, input: Input): Plan => {
-  const step = Vim.press(vim, editor.buffer, input)
-  const stepped = { ...editor, vim: Option.some(step.vim) }
+  const step = Vim.press(vim, editor.buffer, editor.registers, input)
+  const stepped = {
+    ...editor,
+    vim: Option.some(step.vim),
+    registers: step.registers,
+  }
   if (step.fate === 'Plain') {
     return plainPlan(stepped, input)
   }

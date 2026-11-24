@@ -225,6 +225,24 @@ export const insertLines = (
   nextLineId: buffer.nextLineId + texts.length,
 })
 
+export const splice = (
+  buffer: Buffer,
+  at: number,
+  length: number,
+  lines: ReadonlyArray<Line>,
+): Buffer =>
+  Array.match(
+    [
+      ...buffer.lines.slice(0, at),
+      ...lines,
+      ...buffer.lines.slice(at + length),
+    ],
+    {
+      onEmpty: () => removeLines(buffer, 0, buffer.lines.length - 1),
+      onNonEmpty: spliced => ({ ...buffer, lines: spliced }),
+    },
+  )
+
 const isBefore = (a: Position, b: Position): boolean =>
   a.line < b.line || (a.line === b.line && a.column < b.column)
 

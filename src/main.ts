@@ -1199,6 +1199,7 @@ export const view = (model: Model, h: HtmlBuilder<Message>): Document => {
             onSome: Finder.surrounding,
           }),
           frame.discards,
+          Editor.isVimOn(model.editor) ? 'vim' : 'plain',
           bounds,
           model.keyboard,
           h,

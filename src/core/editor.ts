@@ -1,6 +1,7 @@
 import { Array, Option, Order, Schema } from 'effect'
 
 import * as Buffer from './buffer'
+import * as History from './history'
 import { Input, type Modifiers, type NamedKey } from './input'
 import * as Markdown from './markdown'
 import * as Notes from './notes'
@@ -60,6 +61,7 @@ const Locating = Schema.Struct({ cause: Queued, queued: Schema.Array(Queued) })
 
 export const Editor = Schema.Struct({
   buffer: Buffer.Buffer,
+  history: History.History,
   vim: Schema.Option(Vim.Vim),
   registers: Vim.Registers,
   discards: Schema.Int,
@@ -114,20 +116,24 @@ export type Frame = Readonly<{
   revision: number
 }>
 
-export const open = (text: string, vim = false): Editor => ({
-  buffer: Buffer.fromText(text),
-  vim: vim ? Option.some(Vim.start) : Option.none(),
-  registers: Vim.noRegisters,
-  discards: 0,
-  preedit: '',
-  goalX: Option.none(),
-  caretAtRowEnd: false,
-  topLine: 0,
-  screenRows: 24,
-  drawnRevision: 0,
-  locating: Option.none(),
-  pendingReveals: 0,
-})
+export const open = (text: string, vim = false): Editor => {
+  const buffer = Buffer.fromText(text)
+  return {
+    buffer,
+    history: History.empty(buffer),
+    vim: vim ? Option.some(Vim.start) : Option.none(),
+    registers: Vim.noRegisters,
+    discards: 0,
+    preedit: '',
+    goalX: Option.none(),
+    caretAtRowEnd: false,
+    topLine: 0,
+    screenRows: 24,
+    drawnRevision: 0,
+    locating: Option.none(),
+    pendingReveals: 0,
+  }
+}
 
 const atRest = (editor: Editor, buffer: Buffer.Buffer): Buffer.Buffer =>
   Option.match(editor.vim, {
@@ -273,16 +279,25 @@ const done = (unrested: Editor, reveal: Reveal = 'Nearest'): Outcome => {
 }
 
 type Plan =
-  | Readonly<{ _tag: 'Done'; outcome: Outcome }>
+  | Readonly<{
+      _tag: 'Done'
+      outcome: Outcome
+      began: Option.Option<Buffer.Position>
+    }>
   | Readonly<{
       _tag: 'Ask'
       query: Query
       land: (answer: Answer) => Outcome
     }>
 
-const now = (editor: Editor, reveal: Reveal = 'Nearest'): Plan => ({
+const now = (
+  editor: Editor,
+  reveal: Reveal = 'Nearest',
+  began: Option.Option<Buffer.Position> = Option.none(),
+): Plan => ({
   _tag: 'Done',
   outcome: done(editor, reveal),
+  began,
 })
 
 const ask = (query: Query, land: (answer: Answer) => Outcome): Plan => ({
@@ -548,10 +563,66 @@ const plainKeys: Readonly<
   PageDown: page(1),
 }
 
+type CaretRule = 'Vim' | 'Plain'
+
+const landedAfter = (
+  stepped: History.Stepped,
+  way: Vim.Way,
+  rule: CaretRule,
+): Buffer.Buffer =>
+  rule === 'Vim'
+    ? Vim.landed(stepped.buffer, stepped.change.before, {
+        at: stepped.change.at,
+        size: stepped.size,
+        changed: stepped.changed,
+      })
+    : Buffer.moveTo(
+        stepped.buffer,
+        way === 'Undo' ? stepped.change.before : stepped.change.after,
+      )
+
+const travelPlan = (
+  editor: Editor,
+  way: Vim.Way,
+  count: number,
+  rule: CaretRule,
+): Plan => {
+  const last =
+    editor.preedit === ''
+      ? History.travel(editor.history, editor.buffer, way, count)
+      : Option.none()
+  return Option.match(last, {
+    onNone: () => now(editor, 'None'),
+    onSome: stepped =>
+      now(
+        changeDrawn(
+          { ...editor, history: stepped.history, goalX: Option.none() },
+          {
+            buffer: landedAfter(stepped, way, rule),
+            caretAtRowEnd: false,
+          },
+        ),
+      ),
+  })
+}
+
+const plainChords: Readonly<Record<string, (editor: Editor) => Plan>> = {
+  z: editor => travelPlan(editor, 'Undo', 1, 'Plain'),
+  Z: editor => travelPlan(editor, 'Redo', 1, 'Plain'),
+  y: editor => travelPlan(editor, 'Redo', 1, 'Plain'),
+}
+
+const chordPlan = (editor: Editor, char: string, shift: boolean): Plan => {
+  const chord = Option.isNone(editor.vim)
+    ? plainChords[shift ? char.toUpperCase() : char.toLowerCase()]
+    : undefined
+  return chord === undefined ? now(editor, 'None') : chord(editor)
+}
+
 const plainPlan = (editor: Editor, input: Input): Plan =>
   Input.match(input, {
     Key: ({ key, modifiers }) => plainKeys[key](editor, modifiers),
-    Chord: () => now(editor, 'None'),
+    Chord: ({ char, modifiers }) => chordPlan(editor, char, modifiers.shift),
     Text: ({ text, byKey }) =>
       now(byKey ? typeText(text)(editor) : insertText(text)(editor)),
     Erase: span => {
@@ -585,21 +656,27 @@ const vimPlan = (editor: Editor, vim: Vim.Vim, input: Input): Plan => {
     vim: Option.some(step.vim),
     registers: step.registers,
   }
-  if (step.fate === 'Plain') {
-    return plainPlan(stepped, input)
+  const counted = {
+    ...stepped,
+    discards:
+      editor.discards +
+      (input._tag === 'Key' || input._tag === 'Chord' ? 0 : 1),
   }
-  const moved = step.buffer !== editor.buffer
-  return now(
-    changeDrawn(
-      {
-        ...stepped,
-        goalX: moved ? Option.none() : editor.goalX,
-        discards: editor.discards + (step.fate === 'Swallowed' ? 1 : 0),
-      },
-      moved ? { buffer: step.buffer, caretAtRowEnd: false } : {},
-    ),
-    moved ? 'Nearest' : 'None',
-  )
+  return Vim.Fate.match(step.fate, {
+    Plain: () => plainPlan(stepped, input),
+    Travel: ({ way, count }) => travelPlan(counted, way, count, 'Vim'),
+    Done: () => {
+      const moved = step.buffer !== editor.buffer
+      return now(
+        changeDrawn(
+          { ...counted, goalX: moved ? Option.none() : editor.goalX },
+          moved ? { buffer: step.buffer, caretAtRowEnd: false } : {},
+        ),
+        moved ? 'Nearest' : 'None',
+        step.began,
+      )
+    },
+  })
 }
 
 const inputPlan = (editor: Editor, input: Input): Plan =>
@@ -628,7 +705,7 @@ const clickPlan = (
     ? documentEdge(editor, 'End')
     : ask(Query.cases.Point.make({ x, line, yInLine }), landMove(editor))
 
-const planOf = (editor: Editor, queued: Queued): Plan =>
+const planFor = (editor: Editor, queued: Queued): Plan =>
   Queued.match(queued, {
     Fed: ({ input }) => inputPlan(editor, input),
     Clicked: ({ x, line, yInLine }) =>
@@ -640,6 +717,86 @@ const planOf = (editor: Editor, queued: Queued): Plan =>
       ),
     ToggledVim: () => now(toggleVim(editor)),
   })
+
+const isInInsert = (editor: Editor): boolean =>
+  Option.exists(editor.vim, vim => vim.mode === 'Insert')
+
+type Grouping = Pick<History.Edit, 'kind' | 'joins' | 'holds'>
+
+const alone: Grouping = { kind: 'Command', joins: false, holds: false }
+
+const typing: Grouping = { kind: 'Typing', joins: true, holds: true }
+
+const composing: Grouping = { kind: 'Compose', joins: true, holds: true }
+
+const plainKeyGroupings: Partial<Record<NamedKey, Grouping>> = {
+  Enter: { ...typing, joins: false },
+  Tab: typing,
+  Backspace: { kind: 'Backward', joins: true, holds: true },
+  Delete: { kind: 'Forward', joins: true, holds: true },
+}
+
+const plainGrouping = (input: Input): Grouping =>
+  Input.match(input, {
+    Key: ({ key }) => plainKeyGroupings[key] ?? alone,
+    Chord: () => alone,
+    Text: () => typing,
+    Erase: () => composing,
+    Preedit: () => composing,
+    Commit: () => ({ ...composing, holds: false }),
+    Paste: () => alone,
+  })
+
+const groupingOf = (before: Editor, after: Editor, queued: Queued): Grouping =>
+  isInInsert(before) || isInInsert(after)
+    ? { kind: 'Stay', joins: isInInsert(before), holds: isInInsert(after) }
+    : queued._tag === 'Fed' &&
+        Option.isNone(before.vim) &&
+        Option.isNone(after.vim)
+      ? plainGrouping(queued.input)
+      : alone
+
+const recorded = (
+  before: Editor,
+  outcome: Outcome,
+  edit: History.Edit,
+): Outcome => {
+  const after = outcome.editor
+  if (after.history !== before.history) {
+    return outcome
+  }
+  const history = History.record(
+    before.history,
+    before.buffer,
+    after.buffer,
+    edit,
+  )
+  return history === after.history
+    ? outcome
+    : { ...outcome, editor: { ...after, history } }
+}
+
+const tracked = (
+  before: Editor,
+  queued: Queued,
+  outcome: Outcome,
+  began: Option.Option<Buffer.Position>,
+): Outcome =>
+  recorded(before, outcome, {
+    ...groupingOf(before, outcome.editor, queued),
+    began,
+  })
+
+const planOf = (editor: Editor, queued: Queued): Plan => {
+  const plan = planFor(editor, queued)
+  return plan._tag === 'Done'
+    ? { ...plan, outcome: tracked(editor, queued, plan.outcome, plan.began) }
+    : {
+        ...plan,
+        land: answer =>
+          tracked(editor, queued, plan.land(answer), Option.none()),
+      }
+}
 
 const withQueriedLineDrawn = (editor: Editor, query: Query): Editor =>
   query._tag === 'Point'
@@ -731,9 +888,15 @@ export const overwrite = (
   at: Buffer.Position,
   text: string,
 ): Outcome =>
-  done(
-    changeDrawn(editor, { buffer: Buffer.overwrite(editor.buffer, at, text) }),
-    'None',
+  recorded(
+    editor,
+    done(
+      changeDrawn(editor, {
+        buffer: Buffer.overwrite(editor.buffer, at, text),
+      }),
+      'None',
+    ),
+    { ...alone, began: Option.none() },
   )
 
 export const located = (editor: Editor, answer: Answer): Outcome =>

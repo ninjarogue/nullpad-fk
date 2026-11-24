@@ -16,12 +16,16 @@ export const InsertAt = Schema.Literals([
 ])
 export type InsertAt = typeof InsertAt.Type
 
+export const Way = Schema.Literals(['Undo', 'Redo'])
+export type Way = typeof Way.Type
+
 export const Command = Schema.TaggedUnion({
   Move: { motion: MotionName },
   Operate: { operator: OperatorName, target: TargetName },
   Put: { side: Side },
   Insert: { at: InsertAt },
   Cancel: {},
+  Travel: { way: Way },
 })
 export type Command = typeof Command.Type
 
@@ -159,6 +163,8 @@ export const normal: ReadonlyArray<Binding> = [
   insert('A', 'LineEnd', 'append at line end'),
   insert('o', 'LineBelow', 'open line below'),
   insert('O', 'LineAbove', 'open line above'),
+  bind('u', Command.cases.Travel.make({ way: 'Undo' }), 'undo'),
+  bind('<C-r>', Command.cases.Travel.make({ way: 'Redo' }), 'redo'),
   bind('<Esc>', Command.cases.Cancel.make({}), 'cancel'),
   bind('<C-[>', Command.cases.Cancel.make({}), 'cancel'),
 ]

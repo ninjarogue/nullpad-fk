@@ -42,10 +42,10 @@ test('giant and reversed wheel turns stop at the first and last lines', async ({
     (await nullpad.screen()).rows[0]?.number,
     'a -1e9 px turn stops at the first line',
   ).toBe('1')
-  await nullpad.wheel(1e300)
+  await nullpad.wheel(3.4e38)
   expect(
     (await nullpad.screen()).rows.at(-1)?.number,
-    'a 1e300 px turn stops at the last line',
+    'a 3.4e38 px turn, the largest Chrome takes, stops at the last line',
   ).toBe('5000')
   expect(pageErrors).toEqual([])
 })

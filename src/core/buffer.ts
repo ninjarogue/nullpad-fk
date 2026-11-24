@@ -186,6 +186,45 @@ export const insert = (buffer: Buffer, text: string): Buffer => {
   }
 }
 
+export const removeLines = (
+  buffer: Buffer,
+  first: number,
+  last: number,
+): Buffer =>
+  Array.match(
+    [...buffer.lines.slice(0, first), ...buffer.lines.slice(last + 1)],
+    {
+      onEmpty: () => ({
+        lines: [makeLine(LineId.make(buffer.nextLineId), '', [])],
+        caret: { line: 0, column: 0 },
+        nextLineId: buffer.nextLineId + 1,
+      }),
+      onNonEmpty: lines => ({
+        ...buffer,
+        lines,
+        caret: { line: Math.min(first, lines.length - 1), column: 0 },
+      }),
+    },
+  )
+
+export const insertLines = (
+  buffer: Buffer,
+  at: number,
+  texts: Array.NonEmptyReadonlyArray<string>,
+): Buffer => ({
+  lines: Array.prependAll(
+    Array.appendAll(
+      Array.map(texts, (text, index) =>
+        makeLine(LineId.make(buffer.nextLineId + index), text, []),
+      ),
+      buffer.lines.slice(at),
+    ),
+    buffer.lines.slice(0, at),
+  ),
+  caret: { line: at, column: 0 },
+  nextLineId: buffer.nextLineId + texts.length,
+})
+
 const isBefore = (a: Position, b: Position): boolean =>
   a.line < b.line || (a.line === b.line && a.column < b.column)
 

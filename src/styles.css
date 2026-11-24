@@ -253,6 +253,15 @@ body {
   white-space: pre-wrap;
 }
 
+.doc .box {
+  color: var(--accent);
+  cursor: pointer;
+}
+
+.doc .box[aria-checked='true'] {
+  color: var(--ins);
+}
+
 .doc blockquote {
   padding-left: 2ch;
   border-left: 1px solid var(--gut);

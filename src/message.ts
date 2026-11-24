@@ -4,6 +4,7 @@ import { defineMessageUnion } from 'foldkit/message'
 import { Answer } from './core/editor'
 import { Input } from './core/input'
 import { Note, NoteId } from './core/notes'
+import { Box } from './core/reading'
 import { Draft, NoteChange } from './storage'
 
 export const Message = defineMessageUnion({
@@ -37,6 +38,7 @@ export const Message = defineMessageUnion({
   ClickedFinderBackdrop: {},
   ClickedReadToggle: {},
   ScrolledReading: { top: Schema.Int },
+  ClickedTask: { box: Box },
   CompletedShowSourceLine: {},
   CompletedScrollReading: {},
   CompletedRestoreSurfaceScroll: {},

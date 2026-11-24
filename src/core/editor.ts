@@ -613,6 +613,16 @@ export const click = (
     enqueue(editor, Queued.cases.Clicked.make({ x, line, yInLine })),
   )
 
+export const overwrite = (
+  editor: Editor,
+  at: Buffer.Position,
+  text: string,
+): Outcome =>
+  done(
+    changeDrawn(editor, { buffer: Buffer.overwrite(editor.buffer, at, text) }),
+    'None',
+  )
+
 export const located = (editor: Editor, answer: Answer): Outcome =>
   Option.match(editor.locating, {
     onNone: () => done(editor, 'None'),

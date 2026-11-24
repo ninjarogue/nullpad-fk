@@ -1,5 +1,6 @@
 import { Array, Match, Option, Schema } from 'effect'
 
+import * as Buffer from './buffer'
 import * as Finder from './finder'
 import { Input, type Modifiers, type NamedKey } from './input'
 import * as Markdown from './markdown'
@@ -25,9 +26,27 @@ export type Inline =
       title: Option.Option<string>
     }>
 
-export type Block =
+export type Lead =
   | Readonly<{ _tag: 'Paragraph'; inlines: ReadonlyArray<Inline> }>
   | Readonly<{ _tag: 'Plain'; inlines: ReadonlyArray<Inline> }>
+
+export const Box = Schema.Struct({
+  ...Buffer.Position.fields,
+  checked: Schema.Boolean,
+})
+export type Box = typeof Box.Type
+
+export type Item =
+  | Readonly<{ _tag: 'Item'; blocks: ReadonlyArray<Block> }>
+  | Readonly<{
+      _tag: 'Task'
+      box: Box
+      lead: Lead
+      rest: ReadonlyArray<Block>
+    }>
+
+export type Block =
+  | Lead
   | Readonly<{
       _tag: 'Heading'
       level: 1 | 2 | 3 | 4 | 5 | 6
@@ -37,14 +56,11 @@ export type Block =
   | Readonly<{ _tag: 'Code'; info: string; text: string }>
   | Readonly<{ _tag: 'Raw'; text: string }>
   | Readonly<{ _tag: 'Quote'; children: ReadonlyArray<Block> }>
-  | Readonly<{
-      _tag: 'BulletList'
-      items: ReadonlyArray<ReadonlyArray<Block>>
-    }>
+  | Readonly<{ _tag: 'BulletList'; items: ReadonlyArray<Item> }>
   | Readonly<{
       _tag: 'OrderedList'
       start: number
-      items: ReadonlyArray<ReadonlyArray<Block>>
+      items: ReadonlyArray<Item>
     }>
 
 export type Shown = Readonly<{
@@ -154,16 +170,93 @@ const readInline: (inline: Markdown.Inline) => ReadonlyArray<Inline> =
 
 const single = (block: Block): ReadonlyArray<Block> => [block]
 
+const lead = (
+  inlines: ReadonlyArray<Markdown.Inline>,
+  isTight: boolean,
+): Lead => ({
+  _tag: isTight ? 'Plain' : 'Paragraph',
+  inlines: readInlines(inlines),
+})
+
+const taskMark = /^\[([ xX])\][ \t]/u
+
+const taskMarkLength = 4
+
+const markAt = (
+  lines: ReadonlyArray<Markdown.SourceLine>,
+  { line, column }: Buffer.Position,
+): Option.Option<boolean> =>
+  Option.map(
+    Option.flatMapNullishOr(Array.get(lines, line), ({ text }) =>
+      taskMark.exec(text.slice(column)),
+    ),
+    ([, state]) => state !== ' ',
+  )
+
+const after = (
+  inlines: ReadonlyArray<Markdown.Inline>,
+  cut: Markdown.Point,
+): ReadonlyArray<Markdown.Inline> =>
+  Array.flatMap(inlines, inline => {
+    const { from, to } = inline.span
+    if (to.lineInSection === cut.lineInSection && to.column <= cut.column) {
+      return []
+    }
+    return inline._tag === 'Text' &&
+      from.lineInSection === cut.lineInSection &&
+      from.column < cut.column
+      ? [{ ...inline, text: inline.text.slice(cut.column - from.column) }]
+      : [inline]
+  })
+
+type Source = Readonly<{
+  lines: ReadonlyArray<Markdown.SourceLine>
+  placed: Markdown.Placed
+}>
+
+const plainItem = (
+  item: Markdown.Item<Markdown.Phrasing>,
+  isTight: boolean,
+  source: Source,
+): Item => ({
+  _tag: 'Item',
+  blocks: readBlocks(item.children, isTight, source),
+})
+
+const readItem = (
+  item: Markdown.Item<Markdown.Phrasing>,
+  isTight: boolean,
+  source: Source,
+): Item => {
+  const [first, ...rest] = item.children
+  if (first?._tag !== 'Paragraph') {
+    return plainItem(item, isTight, source)
+  }
+  const at = Markdown.positionOf(source.placed, first.span.from)
+  return Option.match(markAt(source.lines, at), {
+    onNone: () => plainItem(item, isTight, source),
+    onSome: checked => ({
+      _tag: 'Task',
+      box: { ...at, checked },
+      lead: lead(
+        after(first.content.inlines, {
+          lineInSection: first.span.from.lineInSection,
+          column: first.span.from.column + taskMarkLength,
+        }),
+        isTight,
+      ),
+      rest: readBlocks(rest, isTight, source),
+    }),
+  })
+}
+
 const readBlock = (
   block: Markdown.Block,
   isTight: boolean,
+  source: Source,
 ): ReadonlyArray<Block> =>
   Match.typeTags<Markdown.Block, ReadonlyArray<Block>>()({
-    Paragraph: paragraph =>
-      single({
-        _tag: isTight ? 'Plain' : 'Paragraph',
-        inlines: readInlines(paragraph.content.inlines),
-      }),
+    Paragraph: paragraph => single(lead(paragraph.content.inlines, isTight)),
     Heading: heading =>
       single({
         _tag: 'Heading',
@@ -180,10 +273,13 @@ const readBlock = (
     HtmlBlock: html => single({ _tag: 'Raw', text: html.text }),
     Definition: () => [],
     Quote: quote =>
-      single({ _tag: 'Quote', children: readBlocks(quote.children, false) }),
+      single({
+        _tag: 'Quote',
+        children: readBlocks(quote.children, false, source),
+      }),
     List: list => {
       const items = Array.map(list.items, item =>
-        readBlocks(item.children, list.tight),
+        readItem(item, list.tight, source),
       )
       return single(
         list.kind._tag === 'Ordered'
@@ -196,13 +292,14 @@ const readBlock = (
 const readBlocks = (
   blocks: ReadonlyArray<Markdown.Block>,
   isTight: boolean,
+  source: Source,
 ): ReadonlyArray<Block> =>
-  Array.flatMap(blocks, block => readBlock(block, isTight))
+  Array.flatMap(blocks, block => readBlock(block, isTight, source))
 
 const readPage = (lines: ReadonlyArray<Markdown.SourceLine>): Page => {
   const placed = Array.flatMap(Markdown.parse(lines).sections, section =>
     Array.flatMap(section.section.blocks, block =>
-      Array.map(readBlock(block, false), shown => ({
+      Array.map(readBlock(block, false, { lines, placed: section }), shown => ({
         sourceLine: Markdown.positionOf(section, block.span.from).line + 1,
         block: shown,
       })),
@@ -313,6 +410,7 @@ export const Act = Schema.TaggedUnion({
   Close: {},
   OpenFinder: {},
   Scroll: { to: Scroll },
+  Overwrite: { at: Buffer.Position, text: Schema.String },
   Ignore: {},
 })
 export type Act = typeof Act.Type
@@ -358,3 +456,35 @@ export const act = (input: Input): Act => {
   }
   return input._tag === 'Key' ? keys[input.key](input.modifiers) : ignore
 }
+
+const boxesIn = (block: Block): ReadonlyArray<Box> =>
+  Match.value(block).pipe(
+    Match.tags({
+      Quote: ({ children }) => Array.flatMap(children, boxesIn),
+      BulletList: ({ items }) => Array.flatMap(items, boxesInItem),
+      OrderedList: ({ items }) => Array.flatMap(items, boxesInItem),
+    }),
+    Match.orElse(() => []),
+  )
+
+const boxesInItem = (item: Item): ReadonlyArray<Box> =>
+  item._tag === 'Task'
+    ? [item.box, ...Array.flatMap(item.rest, boxesIn)]
+    : Array.flatMap(item.blocks, boxesIn)
+
+const sameBox = (a: Box, b: Box): boolean =>
+  a.line === b.line && a.column === b.column && a.checked === b.checked
+
+export const click = (
+  lines: ReadonlyArray<Markdown.SourceLine>,
+  box: Box,
+): Act =>
+  Option.exists(
+    Array.findLast(page(lines), shown => shown.sourceLine <= box.line + 1),
+    shown => Array.some(boxesIn(shown.block), drawn => sameBox(drawn, box)),
+  )
+    ? Act.cases.Overwrite.make({
+        at: { line: box.line, column: box.column + 1 },
+        text: box.checked ? ' ' : 'x',
+      })
+    : ignore

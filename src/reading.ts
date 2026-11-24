@@ -91,11 +91,49 @@ const blocksView = (
 ): ReadonlyArray<Html> =>
   Array.map(blocks, block => blockView(block, [], nested(h), h))
 
-const itemsView = (
-  items: ReadonlyArray<ReadonlyArray<Reading.Block>>,
+const taskBox = (box: Reading.Box, h: HtmlBuilder<Message>): Html =>
+  h.span(
+    [
+      h.Class('box'),
+      h.Role('checkbox'),
+      h.AriaChecked(box.checked),
+      h.OnClick(Message.ClickedTask({ box })),
+    ],
+    [box.checked ? '[x]' : '[ ]'],
+  )
+
+const leadView = (
+  lead: Reading.Lead,
+  attributes: Attributes,
+  element: Element,
   h: HtmlBuilder<Message>,
-): ReadonlyArray<Html> =>
-  Array.map(items, item => h.li([], blocksView(item, h)))
+  before: ReadonlyArray<Child> = [],
+): Html =>
+  lead._tag === 'Plain'
+    ? element(
+        'div',
+        [h.Class('plain'), ...attributes],
+        [...before, ...inlinesView(lead.inlines, h)],
+      )
+    : element('p', attributes, [...before, ...inlinesView(lead.inlines, h)])
+
+const itemView = (item: Reading.Item, h: HtmlBuilder<Message>): Html =>
+  Match.typeTags<Reading.Item, Html>()({
+    Item: ({ blocks }) => h.li([], blocksView(blocks, h)),
+    Task: ({ box, lead, rest }) =>
+      h.li(
+        [],
+        [
+          leadView(lead, [], nested(h), h, [taskBox(box, h), ' ']),
+          ...blocksView(rest, h),
+        ],
+      ),
+  })(item)
+
+const itemsView = (
+  items: ReadonlyArray<Reading.Item>,
+  h: HtmlBuilder<Message>,
+): ReadonlyArray<Html> => Array.map(items, item => itemView(item, h))
 
 const blockView = (
   block: Reading.Block,
@@ -104,14 +142,8 @@ const blockView = (
   h: HtmlBuilder<Message>,
 ): Html =>
   Match.typeTags<Reading.Block, Html>()({
-    Paragraph: ({ inlines }) =>
-      element('p', attributes, inlinesView(inlines, h)),
-    Plain: ({ inlines }) =>
-      element(
-        'div',
-        [h.Class('plain'), ...attributes],
-        inlinesView(inlines, h),
-      ),
+    Paragraph: lead => leadView(lead, attributes, element, h),
+    Plain: lead => leadView(lead, attributes, element, h),
     Heading: ({ level, inlines }) =>
       element(headingTags[level], attributes, inlinesView(inlines, h)),
     Rule: () => element('hr', attributes),

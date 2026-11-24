@@ -178,3 +178,118 @@ test('closing the read view leaves the editor scrolled where it was, cursor off 
     'the editor shows the same lines after Ctrl+E twice',
   ).toEqual(before)
 })
+
+const boxes = (nullpad: Nullpad) =>
+  nullpad.page.locator('.read [role=checkbox]')
+
+const states = async (nullpad: Nullpad) => {
+  await settle(nullpad.page)
+  return boxes(nullpad).evaluateAll(list =>
+    list.map(box => box.getAttribute('aria-checked')),
+  )
+}
+
+test('clicking a task box flips only that item among look-alikes, in nested lists and quotes', async ({
+  nullpad,
+}) => {
+  const note = (marks: ReadonlyArray<string>) =>
+    [
+      `- [${marks[0]}] a`,
+      `- [${marks[1]}] a`,
+      `  - [${marks[2]}] a`,
+      `  - [${marks[3]}] a`,
+      '',
+      `> - [${marks[4]}] a`,
+      `> - [${marks[5]}] a`,
+    ].join('\n')
+  await nullpad.paste(note([' ', ' ', ' ', 'X', ' ', ' ']))
+  await openRead(nullpad)
+  expect(await states(nullpad), 'six boxes at first').toEqual([
+    'false',
+    'false',
+    'false',
+    'true',
+    'false',
+    'false',
+  ])
+  const flipAndRead = async (index: number) => {
+    await boxes(nullpad).nth(index).click()
+    await settle(nullpad.page)
+    const after = await states(nullpad)
+    await expect(
+      nullpad.page.locator('.read'),
+      'the read view stays open after a click',
+    ).toBeVisible()
+    await nullpad.page.keyboard.press('Control+e')
+    await settle(nullpad.page)
+    const text = await nullpad.text()
+    await openRead(nullpad)
+    return { text, after }
+  }
+  const first = await flipAndRead(1)
+  expect(first.text, 'second item checked, others untouched').toBe(
+    note([' ', 'x', ' ', 'X', ' ', ' ']),
+  )
+  expect(first.after, 'boxes after the first click').toEqual([
+    'false',
+    'true',
+    'false',
+    'true',
+    'false',
+    'false',
+  ])
+  expect(
+    (await flipAndRead(2)).text,
+    'nested item checked, others untouched',
+  ).toBe(note([' ', 'x', 'x', 'X', ' ', ' ']))
+  expect((await flipAndRead(3)).text, 'capital X unchecked').toBe(
+    note([' ', 'x', 'x', ' ', ' ', ' ']),
+  )
+  expect((await flipAndRead(5)).text, 'item in a quote checked').toBe(
+    note([' ', 'x', 'x', ' ', ' ', 'x']),
+  )
+  expect((await flipAndRead(1)).text, 'x unchecked').toBe(
+    note([' ', ' ', 'x', ' ', ' ', 'x']),
+  )
+})
+
+test('square brackets that are not a task draw no checkbox', async ({
+  nullpad,
+}) => {
+  await nullpad.paste(
+    ['- [ ]x', '- [y] a', '- [] a', '- [  ] a', '', '[ ] a', '', '1. [x]'].join(
+      '\n',
+    ),
+  )
+  await openRead(nullpad)
+  expect(await boxes(nullpad).count(), 'no checkbox for look-alikes').toBe(0)
+  const text = await readText(nullpad)
+  for (const shown of ['[ ]x', '[y] a', '[] a', '[ ] a', '[x]']) {
+    expect(text, `"${shown}" is drawn as text`).toContain(shown)
+  }
+})
+
+test('a flipped task box survives a reload and the cursor stays where it was', async ({
+  nullpad,
+}) => {
+  await nullpad.paste('# Todo\n\n- [ ] one\n- [ ] two\n\nend')
+  await nullpad.press('Control+Home')
+  await nullpad.press('ArrowDown', 3)
+  await nullpad.press('ArrowRight', 5)
+  const before = await nullpad.status()
+  await openRead(nullpad)
+  await boxes(nullpad).nth(1).click()
+  await settle(nullpad.page)
+  expect(await states(nullpad), 'the box shows its new state').toEqual([
+    'false',
+    'true',
+  ])
+  await nullpad.page.keyboard.press('Control+e')
+  await settle(nullpad.page)
+  const expected = '# Todo\n\n- [ ] one\n- [x] two\n\nend'
+  expect(await nullpad.text(), 'editor text after the click').toBe(expected)
+  expect(await nullpad.status(), 'cursor where it was').toEqual(before)
+  await nullpad.page.waitForTimeout(1500)
+  await nullpad.reload()
+  expect(await nullpad.text(), 'text after a reload').toBe(expected)
+})

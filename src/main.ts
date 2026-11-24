@@ -565,13 +565,18 @@ const editInput = (model: Model, input: Input): UpdateReturn => {
   return respond(model, Editor.feed(model.editor, input))
 }
 
-const readInput = (model: Model, input: Input): UpdateReturn =>
-  Reading.Act.match(Reading.act(input), {
+const readAct = (model: Model, act: Reading.Act): UpdateReturn =>
+  Reading.Act.match(act, {
     Close: () => closeReading(model),
     OpenFinder: () => openFinder(model),
     Scroll: ({ to }) => scrollReadingTo(model, to),
+    Overwrite: ({ at, text }) =>
+      respond(model, Editor.overwrite(model.editor, at, text)),
     Ignore: () => ({ model }),
   })
+
+const readInput = (model: Model, input: Input): UpdateReturn =>
+  readAct(model, Reading.act(input))
 
 const receiveInput = (model: Model, input: Input): UpdateReturn =>
   Option.match(model.finder, {
@@ -1004,6 +1009,10 @@ export const update = (model: Model, message: Message) =>
     ScrolledReading: ({ top }) =>
       model.screen._tag === 'Read'
         ? scrolledReading(model, model.screen.top, top)
+        : { model },
+    ClickedTask: ({ box }) =>
+      model.screen._tag === 'Read'
+        ? readAct(model, Reading.click(model.editor.buffer.lines, box))
         : { model },
     CompletedShowSourceLine: () => ({ model }),
     CompletedScrollReading: () => ({ model }),

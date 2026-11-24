@@ -172,8 +172,6 @@ type ReadingMessage = typeof Message.ScrolledReading.Type
 
 type Place = Readonly<{ unit: number; offset: number }>
 
-const topPlace: { place: Option.Option<Place> } = { place: Option.none() }
-
 const viewTopOf = (read: HTMLElement): number =>
   read.getBoundingClientRect().top + pixels(getComputedStyle(read).paddingTop)
 
@@ -222,21 +220,25 @@ const placeOf = (read: HTMLElement, viewTop: number): Option.Option<Place> => {
   )
 }
 
-const atOf = (read: HTMLElement): Option.Option<Reading.At> => {
+type Top = Readonly<{
+  at: Option.Option<Reading.At>
+  place: Option.Option<Place>
+}>
+
+const topOf = (read: HTMLElement): Top => {
   const viewTop = viewTopOf(read)
   const inSpacer = spacerAt(read, viewTop)
-  topPlace.place = Option.isSome(inSpacer)
-    ? Option.none()
-    : placeOf(read, viewTop)
-  return Option.orElse(inSpacer, () =>
-    Option.map(topPlace.place, ({ unit }) =>
-      Reading.At.cases.OnUnit.make({ unit }),
+  const place = Option.isSome(inSpacer) ? Option.none() : placeOf(read, viewTop)
+  return {
+    at: Option.orElse(inSpacer, () =>
+      Option.map(place, ({ unit }) => Reading.At.cases.OnUnit.make({ unit })),
     ),
-  )
+    place,
+  }
 }
 
-const restoreTopPlace = (read: HTMLElement): void => {
-  Option.map(topPlace.place, ({ unit, offset }) =>
+const restorePlace = (read: HTMLElement, place: Option.Option<Place>): void => {
+  Option.map(place, ({ unit, offset }) =>
     Option.map(
       Option.fromNullishOr(
         read.querySelector<HTMLElement>(`[data-unit="${unit}"]`),
@@ -259,21 +261,26 @@ const observe = (read: HTMLElement): Stream.Stream<ReadingMessage> =>
     Effect.acquireRelease(
       Effect.sync(() => {
         const controller = new AbortController()
-        const reported: { at: Option.Option<Reading.At> } = {
-          at: Option.none(),
-        }
-        topPlace.place = Option.none()
-        const patches = new MutationObserver(() => restoreTopPlace(read))
+        const seen: {
+          reported: Option.Option<Reading.At>
+          place: Option.Option<Place>
+        } = { reported: Option.none(), place: Option.none() }
+        const patches = new MutationObserver(() =>
+          restorePlace(read, seen.place),
+        )
         patches.observe(read, { childList: true, subtree: true })
         read.addEventListener(
           'scroll',
-          () =>
-            Option.map(atOf(read), at => {
-              if (!Option.exists(reported.at, last => sameAt(last, at))) {
-                reported.at = Option.some(at)
+          () => {
+            const top = topOf(read)
+            seen.place = top.place
+            Option.map(top.at, at => {
+              if (!Option.exists(seen.reported, last => sameAt(last, at))) {
+                seen.reported = Option.some(at)
                 Queue.offerUnsafe(queue, Message.ScrolledReading({ at }))
               }
-            }),
+            })
+          },
           { signal: controller.signal, passive: true },
         )
         return { controller, patches }
@@ -312,6 +319,10 @@ export const reading = (drawn: Reading.Drawn, h: HtmlBuilder<Message>): Html =>
 
 export const readBounds = { control: '.read', selection: '.read' }
 
+const announceScroll = (read: HTMLElement): void => {
+  read.dispatchEvent(new Event('scroll'))
+}
+
 const scrollRead = (scroll: (read: HTMLElement) => void): Effect.Effect<void> =>
   Render.afterCommit.pipe(
     Effect.map(() =>
@@ -319,7 +330,7 @@ const scrollRead = (scroll: (read: HTMLElement) => void): Effect.Effect<void> =>
         Option.fromNullishOr(document.querySelector<HTMLElement>('.read')),
         read => {
           scroll(read)
-          topPlace.place = placeOf(read, viewTopOf(read))
+          announceScroll(read)
         },
       ),
     ),

@@ -2,6 +2,7 @@ import { Schema } from 'effect'
 
 import type * as Buffer from '../buffer'
 import {
+  type Kind,
   caretColumnOf,
   cellAt,
   cellAtScreenColumn,
@@ -31,13 +32,14 @@ export type Motion = (
 const lineOf = (buffer: Buffer.Buffer, line: number): Buffer.Line =>
   buffer.lines[line] ?? buffer.lines[0]
 
-const cellsIn = (buffer: Buffer.Buffer, line: number): number =>
+export const cellsIn = (buffer: Buffer.Buffer, line: number): number =>
   cellCount(lineOf(buffer, line))
 
 const lastCell = (buffer: Buffer.Buffer, line: number): number =>
   Math.max(0, cellsIn(buffer, line) - 1)
 
-const lastLine = (buffer: Buffer.Buffer): number => buffer.lines.length - 1
+export const lastLine = (buffer: Buffer.Buffer): number =>
+  buffer.lines.length - 1
 
 const kindOfSpot = (buffer: Buffer.Buffer, { line, cell }: Spot) =>
   kindAt(lineOf(buffer, line), cell)
@@ -71,7 +73,7 @@ export const firstFilled = (buffer: Buffer.Buffer, line: number): number => {
   return cell
 }
 
-const firstNonBlank = (buffer: Buffer.Buffer, line: number): number =>
+export const firstNonBlank = (buffer: Buffer.Buffer, line: number): number =>
   Math.min(firstFilled(buffer, line), lastCell(buffer, line))
 
 const vertical =
@@ -270,4 +272,178 @@ export const motions: Readonly<Record<MotionName, Motion>> = {
     const line = lineCounted(buffer, count, 'Last')
     return { spot: { line, cell: lastCell(buffer, line) }, want: 'End' }
   },
+}
+
+export const motionFails = (
+  name: MotionName,
+  buffer: Buffer.Buffer,
+  from: Spot,
+  count: number | undefined,
+): boolean =>
+  name === 'Down'
+    ? from.line === lastLine(buffer)
+    : name === 'Up'
+      ? from.line === 0
+      : name === 'LineEnd' && (count ?? 1) > 1 && from.line === lastLine(buffer)
+
+export type Crossing = 'Stuck' | 'InLine' | 'OtherLine' | 'OntoLineEnd'
+
+export type Stepped = Readonly<{ spot: Spot; crossing: Crossing }>
+
+export const inc = (buffer: Buffer.Buffer, { line, cell }: Spot): Stepped => {
+  const cells = cellsIn(buffer, line)
+  return cell < cells
+    ? cell + 1 < cells
+      ? { spot: { line, cell: cell + 1 }, crossing: 'InLine' }
+      : { spot: { line, cell: cells }, crossing: 'OntoLineEnd' }
+    : line < lastLine(buffer)
+      ? { spot: { line: line + 1, cell: 0 }, crossing: 'OtherLine' }
+      : { spot: { line, cell }, crossing: 'Stuck' }
+}
+
+export const dec = (buffer: Buffer.Buffer, { line, cell }: Spot): Stepped =>
+  cell > 0
+    ? { spot: { line, cell: cell - 1 }, crossing: 'InLine' }
+    : line > 0
+      ? {
+          spot: { line: line - 1, cell: cellsIn(buffer, line - 1) },
+          crossing: 'OtherLine',
+        }
+      : { spot: { line, cell }, crossing: 'Stuck' }
+
+export const incl = (buffer: Buffer.Buffer, spot: Spot): Stepped => {
+  const stepped = inc(buffer, spot)
+  return stepped.crossing !== 'InLine' &&
+    stepped.crossing !== 'Stuck' &&
+    stepped.spot.cell > 0
+    ? inc(buffer, stepped.spot)
+    : stepped
+}
+
+export const decl = (buffer: Buffer.Buffer, spot: Spot): Stepped => {
+  const stepped = dec(buffer, spot)
+  return stepped.crossing === 'OtherLine' && stepped.spot.cell > 0
+    ? dec(buffer, stepped.spot)
+    : stepped
+}
+
+export type WordClass = Kind | 'Filled'
+
+export const classAt = (
+  buffer: Buffer.Buffer,
+  spot: Spot,
+  big: boolean,
+): WordClass => {
+  const kind = kindOfSpot(buffer, spot)
+  return kind === 'Empty' || kind === 'Blank' ? 'Blank' : big ? 'Filled' : kind
+}
+
+const isEmptyLineStart = (buffer: Buffer.Buffer, spot: Spot): boolean =>
+  spot.cell === 0 && cellsIn(buffer, spot.line) === 0
+
+export type Walked = Readonly<{ spot: Spot; failed: boolean }>
+
+export const forwardWordStoppingAtLineEnd = (
+  buffer: Buffer.Buffer,
+  from: Spot,
+  count: number,
+  big: boolean,
+): Walked => {
+  let spot = from
+  const crossed = (stepped: Stepped) => stepped.crossing !== 'InLine'
+  for (let left = count; left > 0; left -= 1) {
+    const isLast = left === 1
+    const startClass = classAt(buffer, spot, big)
+    const onLastLine = spot.line === lastLine(buffer)
+    let stepped = inc(buffer, spot)
+    spot = stepped.spot
+    if (stepped.crossing === 'Stuck' || (crossed(stepped) && onLastLine)) {
+      return { spot, failed: true }
+    }
+    if (crossed(stepped) && isLast) {
+      return { spot, failed: false }
+    }
+    if (startClass !== 'Blank') {
+      while (classAt(buffer, spot, big) === startClass) {
+        stepped = inc(buffer, spot)
+        spot = stepped.spot
+        if (stepped.crossing === 'Stuck' || (crossed(stepped) && isLast)) {
+          return { spot, failed: false }
+        }
+      }
+    }
+    while (
+      classAt(buffer, spot, big) === 'Blank' &&
+      !isEmptyLineStart(buffer, spot)
+    ) {
+      stepped = inc(buffer, spot)
+      spot = stepped.spot
+      if (stepped.crossing === 'Stuck' || (crossed(stepped) && onLastLine)) {
+        return { spot, failed: true }
+      }
+      if (crossed(stepped) && isLast) {
+        return { spot, failed: false }
+      }
+    }
+  }
+  return { spot, failed: false }
+}
+
+export const endOfWord = (
+  buffer: Buffer.Buffer,
+  from: Spot,
+  count: number,
+  options: Readonly<{
+    stayOnEnd: boolean
+    stopAtEmptyLine: boolean
+    big: boolean
+  }>,
+): Walked => {
+  let spot = from
+  let stayOnEnd = options.stayOnEnd
+  const classHere = () => classAt(buffer, spot, options.big)
+  const step = (): boolean => {
+    const stepped = inc(buffer, spot)
+    spot = stepped.spot
+    return stepped.crossing !== 'Stuck'
+  }
+  const skip = (wordClass: WordClass): boolean => {
+    while (classHere() === wordClass) {
+      if (!step()) {
+        return false
+      }
+    }
+    return true
+  }
+  const failed = () => ({ spot, failed: true })
+  for (let left = count; left > 0; left -= 1) {
+    const startClass = classHere()
+    if (!step()) {
+      return failed()
+    }
+    if (classHere() === startClass && startClass !== 'Blank') {
+      if (!skip(startClass)) {
+        return failed()
+      }
+    } else if (!stayOnEnd || startClass === 'Blank') {
+      while (
+        classHere() === 'Blank' &&
+        !(options.stopAtEmptyLine && isEmptyLineStart(buffer, spot))
+      ) {
+        if (!step()) {
+          return failed()
+        }
+      }
+      if (classHere() === 'Blank') {
+        stayOnEnd = false
+        continue
+      }
+      if (!skip(classHere())) {
+        return failed()
+      }
+    }
+    spot = dec(buffer, spot).spot
+    stayOnEnd = false
+  }
+  return { spot, failed: false }
 }

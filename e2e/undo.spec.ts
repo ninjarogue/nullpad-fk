@@ -1620,3 +1620,16 @@ test('after u on a note of 3,000 lines the cursor line is on screen', async ({
   expect(screen.rows[0]?.text, 'the first line is drawn, undone').toBe('line 1')
   expect(screen.cursor?.inside, 'the cursor is on screen').toBe(true)
 })
+
+test('a cancelled IME composition leaves no change, so one Ctrl-Z takes back the typed run', async ({
+  nullpad,
+}) => {
+  await nullpad.type('ab')
+  await nullpad.compose('k')
+  await nullpad.compose('')
+  expect(await nullpad.text(), 'after the cancel').toBe('ab')
+  await undo(nullpad)
+  expect(await nullpad.text(), 'one Ctrl-Z takes the run of ab').toBe('')
+  await nullpad.press('Control+Shift+z')
+  expect(await nullpad.text(), 'Ctrl-Shift-Z brings ab back').toBe('ab')
+})

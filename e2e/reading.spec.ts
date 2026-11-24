@@ -426,13 +426,15 @@ test('paragraphs after a 600-item list fill the screen when the list ends mid-sc
   await nullpad.press('Control+Home')
   await openRead(nullpad)
   await nullpad.page.locator('.read').hover()
+  const stepUnderHalfTheView = 250
+  const turnsPastTheList = 150
   let now = await onScreen(nullpad)
-  for (let i = 0; i < 150; i++) {
+  for (let i = 0; i < turnsPastTheList; i++) {
     const end = find(now.seen, 'item 600')
     if (end !== undefined && end.top < (now.box.top + now.box.bottom) / 2) {
       break
     }
-    await nullpad.page.mouse.wheel(0, 250)
+    await nullpad.page.mouse.wheel(0, stepUnderHalfTheView)
     await settle(nullpad.page)
     now = await onScreen(nullpad)
   }

@@ -606,6 +606,7 @@ test('one huge wheel turn down in the read view shows the end of a note whose la
   const paragraphs = Array.from({ length: 1000 }, (_, i) => `para ${i + 1}`)
   const last = `${Array.from({ length: 600 }, (_, i) => `word${i}`).join(' ')} THEEND`
   await nullpad.paste([...paragraphs, last].join('\n\n'))
+  await nullpad.press('Control+Home')
   await openRead(nullpad)
   const box = await nullpad.page.locator('.read').boundingBox()
   expect(box, 'the read view has a box').not.toBeNull()
@@ -613,7 +614,7 @@ test('one huge wheel turn down in the read view shows the end of a note whose la
     (box?.x ?? 0) + (box?.width ?? 0) / 2,
     (box?.y ?? 0) + (box?.height ?? 0) / 2,
   )
-  await nullpad.page.mouse.wheel(0, 3_000_000)
+  await nullpad.page.mouse.wheel(0, 10_000_000)
   await nullpad.page.waitForTimeout(800)
   await settle(nullpad.page)
   await expect

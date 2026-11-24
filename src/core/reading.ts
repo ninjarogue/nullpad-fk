@@ -185,6 +185,20 @@ const widthInside = (inside: ReadonlyArray<Holder>): number =>
       Array.reduce(inside, 0, (sum, holder) => sum + indentOf[holder._tag]),
   )
 
+const printableAscii = /^[\x20-\x7e]*$/u
+
+const eastAsianWide =
+  /^(?:\p{Emoji_Presentation}|.\uFE0F|[\u{1100}-\u{115F}\u{2E80}-\u{303E}\u{3041}-\u{33FF}\u{3400}-\u{4DBF}\u{4E00}-\u{9FFF}\u{A000}-\u{A4CF}\u{A960}-\u{A97F}\u{AC00}-\u{D7A3}\u{F900}-\u{FAFF}\u{FE10}-\u{FE19}\u{FE30}-\u{FE6F}\u{FF00}-\u{FF60}\u{FFE0}-\u{FFE6}\u{1B000}-\u{1B2FF}\u{20000}-\u{3FFFD}])/u
+
+const columnsOf = (value: string): number =>
+  printableAscii.test(value)
+    ? value.length
+    : Array.reduce(
+        Array.fromIterable(Buffer.segmenter.segment(value)),
+        0,
+        (sum, { segment }) => sum + (eastAsianWide.test(segment) ? 2 : 1),
+      )
+
 const lengthOf = (inlines: ReadonlyArray<Inline>, width: number): number =>
   Array.reduce(
     inlines,
@@ -192,9 +206,9 @@ const lengthOf = (inlines: ReadonlyArray<Inline>, width: number): number =>
     (sum, inline) =>
       sum +
       Match.typeTags<Inline, number>()({
-        Text: ({ text }) => text.length,
-        Raw: ({ text }) => text.length,
-        Code: ({ text }) => text.length,
+        Text: ({ text }) => columnsOf(text),
+        Raw: ({ text }) => columnsOf(text),
+        Code: ({ text }) => columnsOf(text),
         SoftBreak: () => 1,
         HardBreak: () => 0,
         Emphasis: ({ children }) => lengthOf(children, width),

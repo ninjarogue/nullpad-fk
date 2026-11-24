@@ -977,6 +977,780 @@ const statedRows: ReadonlyArray<Row> = [
   },
 ]
 
+const operatorsRows: ReadonlyArray<Row> = [
+  {
+    name: 'dw in the middle of a line',
+    text: 'foo bar baz',
+    at: [1, 5],
+    keys: 'dw',
+    after: 'foo baz',
+    line: 1,
+    column: 5,
+  },
+  {
+    name: 'dw on the last word of a line stops at the line end',
+    text: 'foo bar\nbaz',
+    at: [1, 5],
+    keys: 'dw',
+    after: 'foo \nbaz',
+    line: 1,
+    column: 4,
+  },
+  {
+    name: '2d3w deletes six words',
+    text: 'a b c d e f g h',
+    at: [1, 1],
+    keys: '2d3w',
+    after: 'g h',
+    line: 1,
+    column: 1,
+  },
+  {
+    name: 'd2w across a line end',
+    text: 'foo\nbar baz\nqux',
+    at: [1, 1],
+    keys: 'd2w',
+    after: 'baz\nqux',
+    line: 1,
+    column: 1,
+  },
+  {
+    name: 'cw keeps the space after the word',
+    text: 'foo bar baz',
+    at: [1, 5],
+    keys: 'cwX<Esc>',
+    after: 'foo X baz',
+    line: 1,
+    column: 5,
+  },
+  {
+    name: 'cw on a last letter changes that one letter',
+    text: 'foo bar',
+    at: [1, 3],
+    keys: 'cwX<Esc>',
+    after: 'foX bar',
+    line: 1,
+    column: 3,
+  },
+  {
+    name: 'cw on the last word of a line',
+    text: 'foo bar\nbaz',
+    at: [1, 5],
+    keys: 'cwX<Esc>',
+    after: 'foo X\nbaz',
+    line: 1,
+    column: 5,
+  },
+  {
+    name: 'db leaves the letter under the cursor',
+    text: 'foo bar baz',
+    at: [1, 9],
+    keys: 'db',
+    after: 'foo baz',
+    line: 1,
+    column: 5,
+  },
+  {
+    name: 'de takes the last letter',
+    text: 'foo bar baz',
+    at: [1, 1],
+    keys: 'de',
+    after: ' bar baz',
+    line: 1,
+    column: 1,
+  },
+  {
+    name: 'd$ takes the last letter',
+    text: 'foo bar baz',
+    at: [1, 5],
+    keys: 'd$',
+    after: 'foo ',
+    line: 1,
+    column: 4,
+  },
+  {
+    name: 'd0 leaves the letter under the cursor',
+    text: 'foo bar baz',
+    at: [1, 5],
+    keys: 'd0',
+    after: 'bar baz',
+    line: 1,
+    column: 1,
+  },
+  {
+    name: 'd^ stops at the first non-blank',
+    text: '  foo bar',
+    at: [1, 7],
+    keys: 'd^',
+    after: '  bar',
+    line: 1,
+    column: 3,
+  },
+  {
+    name: 'dh leaves the letter under the cursor',
+    text: 'abcdef',
+    at: [1, 4],
+    keys: 'dh',
+    after: 'abdef',
+    line: 1,
+    column: 3,
+  },
+  {
+    name: 'dj takes two whole lines',
+    text: 'a\nb\nc\nd',
+    at: [2, 1],
+    keys: 'dj',
+    after: 'a\nd',
+    line: 2,
+    column: 1,
+  },
+  {
+    name: 'dj on the last line does nothing',
+    text: 'a\nb',
+    at: [2, 1],
+    keys: 'dj',
+    after: 'a\nb',
+    line: 2,
+    column: 1,
+  },
+  {
+    name: 'dk takes two whole lines',
+    text: 'a\nb\nc\nd',
+    at: [3, 1],
+    keys: 'dk',
+    after: 'a\nd',
+    line: 2,
+    column: 1,
+  },
+  {
+    name: 'dk on the first line does nothing',
+    text: 'a\nb',
+    at: [1, 1],
+    keys: 'dk',
+    after: 'a\nb',
+    line: 1,
+    column: 1,
+  },
+  {
+    name: 'dG takes the rest of the lines',
+    text: 'a\nb\nc\nd',
+    at: [2, 1],
+    keys: 'dG',
+    after: 'a',
+    line: 1,
+    column: 1,
+  },
+  {
+    name: 'dgg takes the lines up to the first',
+    text: 'a\nb\nc\nd',
+    at: [3, 1],
+    keys: 'dgg',
+    after: 'd',
+    line: 1,
+    column: 1,
+  },
+  {
+    name: 'dd on the last line puts the cursor on the line above',
+    text: 'ab\n  cd',
+    at: [2, 3],
+    keys: 'dd',
+    after: 'ab',
+    line: 1,
+    column: 1,
+  },
+  {
+    name: '3dd',
+    text: 'a\nb\nc\nd\ne',
+    at: [2, 1],
+    keys: '3dd',
+    after: 'a\ne',
+    line: 2,
+    column: 1,
+  },
+  {
+    name: 'dd on the only line leaves one empty line',
+    text: 'abc',
+    at: [1, 2],
+    keys: 'dd',
+    after: '',
+    line: 1,
+    column: 1,
+  },
+  {
+    name: 'deleting every line leaves one empty line',
+    text: 'a\nb\nc',
+    at: [2, 1],
+    keys: 'dG<Up>dgg',
+    after: '',
+    line: 1,
+    column: 1,
+  },
+  {
+    name: 'arrows are motions after d',
+    text: 'abcdef\nghijkl',
+    at: [1, 3],
+    keys: 'd<Right>',
+    after: 'abdef\nghijkl',
+    line: 1,
+    column: 3,
+  },
+  {
+    name: 'd End takes the last letter',
+    text: 'abcdef',
+    at: [1, 3],
+    keys: 'd<End>',
+    after: 'ab',
+    line: 1,
+    column: 2,
+  },
+  {
+    name: 'd Home',
+    text: 'abcdef',
+    at: [1, 4],
+    keys: 'd<Home>',
+    after: 'def',
+    line: 1,
+    column: 1,
+  },
+  {
+    name: 'cc empties the line and copies no indent',
+    text: '  abc\ndef',
+    at: [1, 4],
+    keys: 'ccX<Esc>',
+    after: 'X\ndef',
+    line: 1,
+    column: 1,
+  },
+  {
+    name: 'cj changes two lines into one',
+    text: 'a\nb\nc',
+    at: [1, 1],
+    keys: 'cjX<Esc>',
+    after: 'X\nc',
+    line: 1,
+    column: 1,
+  },
+  {
+    name: 'yy leaves the text and the cursor',
+    text: 'abc\ndef',
+    at: [1, 2],
+    keys: 'yy',
+    after: 'abc\ndef',
+    line: 1,
+    column: 2,
+  },
+  {
+    name: 'yw leaves the cursor',
+    text: 'foo bar',
+    at: [1, 2],
+    keys: 'yw',
+    after: 'foo bar',
+    line: 1,
+    column: 2,
+  },
+  {
+    name: 'yb moves the cursor back',
+    text: 'foo bar',
+    at: [1, 6],
+    keys: 'yb',
+    after: 'foo bar',
+    line: 1,
+    column: 5,
+  },
+  {
+    name: 'x deletes one letter',
+    text: 'abcdef',
+    at: [1, 3],
+    keys: 'x',
+    after: 'abdef',
+    line: 1,
+    column: 3,
+  },
+  {
+    name: 'X deletes the letter before',
+    text: 'abcdef',
+    at: [1, 3],
+    keys: 'X',
+    after: 'acdef',
+    line: 1,
+    column: 2,
+  },
+  {
+    name: 'X at column 1 does nothing',
+    text: 'abc',
+    at: [1, 1],
+    keys: 'X',
+    after: 'abc',
+    line: 1,
+    column: 1,
+  },
+  {
+    name: 'D deletes to the line end',
+    text: 'abc def',
+    at: [1, 3],
+    keys: 'D',
+    after: 'ab',
+    line: 1,
+    column: 2,
+  },
+  {
+    name: 'C changes to the line end',
+    text: 'abc def',
+    at: [1, 3],
+    keys: 'CX<Esc>',
+    after: 'abX',
+    line: 1,
+    column: 3,
+  },
+  {
+    name: 's changes one letter',
+    text: 'abc',
+    at: [1, 2],
+    keys: 'sX<Esc>',
+    after: 'aXc',
+    line: 1,
+    column: 2,
+  },
+  {
+    name: 'S changes the whole line',
+    text: '  abc\ndef',
+    at: [1, 4],
+    keys: 'SX<Esc>',
+    after: 'X\ndef',
+    line: 1,
+    column: 1,
+  },
+]
+
+const putsRows: ReadonlyArray<Row> = [
+  {
+    name: 'p with an empty store does nothing',
+    text: 'abc',
+    at: [1, 2],
+    keys: 'p',
+    after: 'abc',
+    line: 1,
+    column: 2,
+  },
+  {
+    name: 'ddp swaps two lines',
+    text: 'a\nb\nc',
+    at: [1, 1],
+    keys: 'ddp',
+    after: 'b\na\nc',
+    line: 2,
+    column: 1,
+  },
+  {
+    name: 'dd on the last line then p',
+    text: 'a\nb',
+    at: [2, 1],
+    keys: 'ddp',
+    after: 'a\nb',
+    line: 2,
+    column: 1,
+  },
+  {
+    name: 'xp swaps two letters',
+    text: 'abcd',
+    at: [1, 2],
+    keys: 'xp',
+    after: 'acbd',
+    line: 1,
+    column: 3,
+  },
+  {
+    name: 'yyp puts the line below, cursor on its first non-blank',
+    text: '  a\nb',
+    at: [1, 3],
+    keys: 'yyp',
+    after: '  a\n  a\nb',
+    line: 2,
+    column: 3,
+  },
+  {
+    name: 'yyP puts the line above',
+    text: 'a\n  b',
+    at: [2, 3],
+    keys: 'yyP',
+    after: 'a\n  b\n  b',
+    line: 2,
+    column: 3,
+  },
+  {
+    name: '3p repeats a line',
+    text: 'a\nb',
+    at: [1, 1],
+    keys: 'yy3p',
+    after: 'a\na\na\na\nb',
+    line: 2,
+    column: 1,
+  },
+  {
+    name: '2yyp puts two lines',
+    text: 'a\nb\nc',
+    at: [1, 1],
+    keys: '2yyp',
+    after: 'a\na\nb\nb\nc',
+    line: 2,
+    column: 1,
+  },
+  {
+    name: 'Y is yy',
+    text: 'a\nb',
+    at: [1, 1],
+    keys: 'Yp',
+    after: 'a\na\nb',
+    line: 2,
+    column: 1,
+  },
+  {
+    name: 'yw then p puts after the cursor, cursor on the last letter put',
+    text: 'foo bar',
+    at: [1, 1],
+    keys: 'ywp',
+    after: 'ffoo oo bar',
+    line: 1,
+    column: 5,
+  },
+  {
+    name: 'yw then P puts before the cursor',
+    text: 'foo bar',
+    at: [1, 5],
+    keys: 'ywP',
+    after: 'foo barbar',
+    line: 1,
+    column: 7,
+  },
+  {
+    name: '2p of letters repeats them',
+    text: 'abcd',
+    at: [1, 1],
+    keys: 'yl2p',
+    after: 'aaabcd',
+    line: 1,
+    column: 3,
+  },
+  {
+    name: 'yb then P',
+    text: 'foo bar',
+    at: [1, 5],
+    keys: 'ybP',
+    after: 'foo foo bar',
+    line: 1,
+    column: 4,
+  },
+  {
+    name: 'dj then p puts both lines below',
+    text: 'a\nb\nc',
+    at: [1, 1],
+    keys: 'djp',
+    after: 'c\na\nb',
+    line: 2,
+    column: 1,
+  },
+  {
+    name: 'dk then P',
+    text: 'a\nb\nc',
+    at: [3, 1],
+    keys: 'dkP',
+    after: 'b\nc\na',
+    line: 1,
+    column: 1,
+  },
+  {
+    name: 'D then p',
+    text: 'abc def',
+    at: [1, 3],
+    keys: 'Dp',
+    after: 'abc def',
+    line: 1,
+    column: 7,
+  },
+  {
+    name: 'dd then deleting letters then p puts the last delete',
+    text: 'a\nbcd',
+    at: [1, 1],
+    keys: 'ddxp',
+    after: 'cbd',
+    line: 1,
+    column: 2,
+  },
+  {
+    name: 'a yank after a delete replaces the store',
+    text: 'abc def',
+    at: [1, 1],
+    keys: 'xwywP',
+    after: 'bc defdef',
+    line: 1,
+    column: 6,
+  },
+  {
+    name: 'cw fills the store with the old word',
+    text: 'foo bar',
+    at: [1, 1],
+    keys: 'cwX<Esc>wp',
+    after: 'X bfooar',
+    line: 1,
+    column: 6,
+  },
+  {
+    name: 'S fills the store with the line',
+    text: 'a\nb',
+    at: [2, 1],
+    keys: 'SX<Esc>P',
+    after: 'a\nb\nX',
+    line: 2,
+    column: 1,
+  },
+  {
+    name: 's fills the store with the letter',
+    text: 'abc',
+    at: [1, 2],
+    keys: 'sX<Esc>p',
+    after: 'aXbc',
+    line: 1,
+    column: 3,
+  },
+  {
+    name: 'C fills the store with the rest',
+    text: 'abc def',
+    at: [1, 3],
+    keys: 'CX<Esc>p',
+    after: 'abXc def',
+    line: 1,
+    column: 8,
+  },
+  {
+    name: 'p of lines after deleting every line',
+    text: 'a\nb',
+    at: [1, 1],
+    keys: 'ddddp',
+    after: '\nb',
+    line: 2,
+    column: 1,
+  },
+]
+
+const objectsRows: ReadonlyArray<Row> = [
+  {
+    name: 'diw',
+    text: 'foo bar baz',
+    at: [1, 6],
+    keys: 'diw',
+    after: 'foo  baz',
+    line: 1,
+    column: 5,
+  },
+  {
+    name: 'daw takes the space after',
+    text: 'foo bar baz',
+    at: [1, 5],
+    keys: 'daw',
+    after: 'foo baz',
+    line: 1,
+    column: 5,
+  },
+  {
+    name: 'diW takes punctuation inside',
+    text: 'a foo.bar-x b',
+    at: [1, 6],
+    keys: 'diW',
+    after: 'a  b',
+    line: 1,
+    column: 3,
+  },
+  {
+    name: 'yiw then P',
+    text: 'foo bar baz',
+    at: [1, 6],
+    keys: 'yiwP',
+    after: 'foo barbar baz',
+    line: 1,
+    column: 7,
+  },
+  {
+    name: 'dip takes a paragraph',
+    text: 'a\nb\n\nc\nd',
+    at: [1, 1],
+    keys: 'dip',
+    after: '\nc\nd',
+    line: 1,
+    column: 1,
+  },
+  {
+    name: 'dap takes the blank lines after',
+    text: 'a\nb\n\nc\nd',
+    at: [2, 1],
+    keys: 'dap',
+    after: 'c\nd',
+    line: 1,
+    column: 1,
+  },
+  {
+    name: 'dap on the last paragraph takes the blank lines before',
+    text: 'a\nb\n\nc\nd',
+    at: [4, 1],
+    keys: 'dap',
+    after: 'a\nb',
+    line: 2,
+    column: 1,
+  },
+  {
+    name: 'yap then p',
+    text: 'a\nb\n\nc',
+    at: [1, 1],
+    keys: 'yapGp',
+    after: 'a\nb\n\nc\na\nb\n',
+    line: 5,
+    column: 1,
+  },
+  {
+    name: 'di" inside quotes',
+    text: 'say "hello there" now',
+    at: [1, 8],
+    keys: 'di"',
+    after: 'say "" now',
+    line: 1,
+    column: 6,
+  },
+  {
+    name: 'da" takes the space after',
+    text: 'say "hello there" now',
+    at: [1, 8],
+    keys: 'da"',
+    after: 'say now',
+    line: 1,
+    column: 5,
+  },
+  {
+    name: 'di" with the cursor before the quotes',
+    text: 'say "hello" now',
+    at: [1, 1],
+    keys: 'di"',
+    after: 'say "" now',
+    line: 1,
+    column: 6,
+  },
+  {
+    name: "di' and da'",
+    text: "it 'is' ok 'yes' fine",
+    at: [1, 15],
+    keys: "da'",
+    after: "it 'is' ok fine",
+    line: 1,
+    column: 12,
+  },
+  {
+    name: 'di(',
+    text: 'f(a, b) c',
+    at: [1, 4],
+    keys: 'di(',
+    after: 'f() c',
+    line: 1,
+    column: 3,
+  },
+  {
+    name: 'di( inside nested brackets takes the inner pair',
+    text: 'f(a (b) c)',
+    at: [1, 6],
+    keys: 'di(',
+    after: 'f(a () c)',
+    line: 1,
+    column: 6,
+  },
+  {
+    name: 'da( of nested brackets from the outer part',
+    text: 'f(a (b) c)',
+    at: [1, 4],
+    keys: 'da(',
+    after: 'f',
+    line: 1,
+    column: 1,
+  },
+  {
+    name: 'ci(',
+    text: 'f(a, b) c',
+    at: [1, 4],
+    keys: 'ci(X<Esc>',
+    after: 'f(X) c',
+    line: 1,
+    column: 3,
+  },
+  {
+    name: 'yi( then P',
+    text: 'f(a, b) c',
+    at: [1, 4],
+    keys: 'yi(P',
+    after: 'f(a, ba, b) c',
+    line: 1,
+    column: 6,
+  },
+  {
+    name: 'di{ and da{',
+    text: 'x{1, 2} y',
+    at: [1, 4],
+    keys: 'di{',
+    after: 'x{} y',
+    line: 1,
+    column: 3,
+  },
+  {
+    name: 'di{ over lines takes the inner lines',
+    text: 'if {\n  a\n  b\n}',
+    at: [2, 3],
+    keys: 'di{',
+    after: 'if {\n}',
+    line: 2,
+    column: 1,
+  },
+  {
+    name: 'da{ over lines',
+    text: 'if {\n  a\n}\nz',
+    at: [2, 3],
+    keys: 'da{',
+    after: 'if \nz',
+    line: 1,
+    column: 3,
+  },
+  {
+    name: 'i) ib a) ab spell the round pair',
+    text: '(a) (b) (c) (d)',
+    at: [1, 2],
+    keys: 'di)fbdibfcda)fddab',
+    after: '() ()  ',
+    line: 1,
+    column: 7,
+  },
+  {
+    name: 'i[ a[ i] a] spell the square pair',
+    text: '[a] [b] [c] [d]',
+    at: [1, 2],
+    keys: 'di[fbda[fcdi]fdda]',
+    after: '[]  [] ',
+    line: 1,
+    column: 7,
+  },
+  {
+    name: 'i{ a{ i} a} iB aB spell the curly pair',
+    text: '{a} {b} {c} {d} {e} {f}',
+    at: [1, 2],
+    keys: 'di{fbda{fcdi}fdda}fedaBffdiB',
+    after: '{}  {}   {}',
+    line: 1,
+    column: 11,
+  },
+  {
+    name: 'di( with no bracket does nothing',
+    text: 'abc def',
+    at: [1, 2],
+    keys: 'di(',
+    after: 'abc def',
+    line: 1,
+    column: 2,
+  },
+]
+
 const keyNames: Readonly<Record<string, string>> = {
   '<Esc>': 'Escape',
   '<CR>': 'Enter',
@@ -1036,6 +1810,12 @@ const tables: ReadonlyArray<readonly [string, ReadonlyArray<Row>]> = [
     'Esc, counts on insert keys and keys with no meaning',
     [...miscRows, ...statedRows],
   ],
+  [
+    'd c y with motions and counts, and x X D C s S, act as in Vim',
+    operatorsRows,
+  ],
+  ['p P and the store that d c y fill act as in Vim', putsRows],
+  ['text objects with d c y act as in Vim', objectsRows],
 ]
 
 for (const [name, rows] of tables) {
@@ -1268,4 +2048,108 @@ test('a save from another tab leaves a tab in Normal in Normal', async ({
     'letters in Normal are commands, never typed text',
   ).toBeLessThan('base B'.length)
   expect(await modeOf(nullpad), 'still NORMAL after the keys').toBe('NORMAL')
+})
+
+test('operator-pending keys show in the status line and Esc, Ctrl+P, Ctrl+E and a non-target key drop them without a change', async ({
+  nullpad,
+}) => {
+  await nullpad.paste('one two three\nfour')
+  await nullpad.press('Control+Home')
+  await nullpad.press(toggle)
+  await nullpad.press('d')
+  expect(await pendingOf(nullpad), 'd waits for a target').toBe('d')
+  await nullpad.press('Escape')
+  expect(await pendingOf(nullpad), 'Esc drops d').toBe('')
+  await nullpad.press('2')
+  await nullpad.press('d')
+  await nullpad.press('3')
+  expect(await pendingOf(nullpad), 'counts and operator show').toBe('2d3')
+  await nullpad.press('Control+p')
+  await nullpad.press('Escape')
+  expect(await pendingOf(nullpad), 'Ctrl+P drops 2d3').toBe('')
+  await nullpad.press('c')
+  await nullpad.press('i')
+  expect(await pendingOf(nullpad), 'ci waits for an object').toBe('ci')
+  await nullpad.press('Control+e')
+  await nullpad.press('Control+e')
+  expect(await pendingOf(nullpad), 'Ctrl+E drops ci').toBe('')
+  await nullpad.press('d')
+  await nullpad.press('q')
+  expect(await pendingOf(nullpad), 'q is no target and drops d').toBe('')
+  await nullpad.press('c')
+  await nullpad.press('i')
+  await nullpad.press('Z')
+  expect(await pendingOf(nullpad), 'Z is no object and drops ci').toBe('')
+  expect(await modeOf(nullpad), 'no change of mode').toBe('NORMAL')
+  expect(await nullpad.text(), 'nothing was deleted or typed').toBe(
+    'one two three\nfour',
+  )
+  expect(await nullpad.status(), 'the cursor did not move').toMatchObject({
+    line: 1,
+    column: 1,
+  })
+  await nullpad.press('w')
+  expect(
+    await nullpad.status(),
+    'w after a dropped d only moves',
+  ).toMatchObject({ line: 1, column: 5 })
+})
+
+test('c lands in Insert with the bar cursor, typed text goes in and Esc returns to Normal', async ({
+  nullpad,
+}) => {
+  await nullpad.paste('foo bar')
+  await nullpad.press('Control+Home')
+  await nullpad.press(toggle)
+  await nullpad.press('c')
+  await nullpad.press('w')
+  expect(await modeOf(nullpad), 'cw lands in Insert').toBe('INSERT')
+  const bar = await nullpad.cursor()
+  expect(bar?.width, 'Insert caret is a thin bar').toBeGreaterThan(1)
+  expect(bar?.width).toBeLessThan(3.5)
+  await nullpad.type('xy')
+  expect(await nullpad.text(), 'typed text replaces the word').toBe('xy bar')
+  await nullpad.press('Escape')
+  expect(await modeOf(nullpad), 'Esc returns to Normal').toBe('NORMAL')
+  expect(await nullpad.status(), 'Esc steps one letter left').toMatchObject({
+    line: 1,
+    column: 2,
+  })
+  const block = await nullpad.cursor()
+  expect(block?.width, 'Normal caret is a block again').toBeGreaterThan(5)
+})
+
+test('yy in one note and p in another note puts the line, and after a reload p does nothing', async ({
+  nullpad,
+}) => {
+  await nullpad.type('alpha')
+  await nullpad.page.waitForTimeout(SAVED)
+  await nullpad.press(toggle)
+  await nullpad.press('y')
+  await nullpad.press('y')
+  await nullpad.press('Control+p')
+  await nullpad.type('second')
+  for (let i = 0; i < 20; i++) {
+    const selected = (await nullpad.finder())?.rows.find(row => row.selected)
+    if (selected?.text.startsWith('+ new note')) {
+      break
+    }
+    await nullpad.press('ArrowDown')
+  }
+  await nullpad.press('Enter')
+  expect(await nullpad.text(), 'the second note is open').toBe('second')
+  expect(await modeOf(nullpad), 'a note opened with vim on is Normal').toBe(
+    'NORMAL',
+  )
+  await nullpad.press('p')
+  expect(await nullpad.text(), 'p puts the yanked line below').toBe(
+    'second\nalpha',
+  )
+  await nullpad.page.waitForTimeout(SAVED)
+  await nullpad.reload()
+  expect(await nullpad.text(), 'the note came back').toBe('second\nalpha')
+  await nullpad.press('p')
+  expect(await nullpad.text(), 'the store is empty after a reload').toBe(
+    'second\nalpha',
+  )
 })

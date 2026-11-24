@@ -174,15 +174,21 @@ const lastCellBefore = (buffer: Buffer.Buffer): Buffer.Position => {
 
 const maxPutUnits = 4_000_000
 
+const maxPutUnitsOnOneLine = 50_000
+
 const maxPutLines = 200_000
 
 const boundedCount = (register: Register, count: number): number => {
   const lines = register.text.split('\n').length - 1
+  const units =
+    register.kind === 'Charwise' && lines === 0
+      ? maxPutUnitsOnOneLine
+      : maxPutUnits
   return Math.max(
     1,
     Math.min(
       count,
-      Math.floor(maxPutUnits / Math.max(1, register.text.length)),
+      Math.floor(units / Math.max(1, register.text.length)),
       lines === 0 ? count : Math.floor(maxPutLines / lines),
     ),
   )

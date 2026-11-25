@@ -32,6 +32,7 @@ export const Command = Schema.TaggedUnion({
   Travel: { way: History.Way },
   Repeat: {},
   Select: { kind: SelectionKind },
+  Reselect: {},
 })
 export type Command = typeof Command.Type
 
@@ -197,6 +198,7 @@ export const normal: ReadonlyArray<Binding<Command>> = [
   bind('.', Command.cases.Repeat.make({}), 'repeat last change'),
   bind('v', Command.cases.Select.make({ kind: 'Letters' }), 'select letters'),
   bind('V', Command.cases.Select.make({ kind: 'Lines' }), 'select lines'),
+  bind('gv', Command.cases.Reselect.make({}), 'select the last selection'),
   bind('<Esc>', Command.cases.Cancel.make({}), 'cancel'),
   bind('<C-[>', Command.cases.Cancel.make({}), 'cancel'),
 ]

@@ -814,7 +814,10 @@ const planFor = (editor: Editor, queued: Queued): Plan =>
     Fed: ({ input }) => inputPlan(editor, input),
     Clicked: ({ x, line, yInLine }) =>
       clickPlan(
-        { ...editor, vim: Option.map(editor.vim, Vim.clicked) },
+        {
+          ...editor,
+          vim: Option.map(editor.vim, vim => Vim.clicked(vim, editor.buffer)),
+        },
         x,
         line,
         yInLine,

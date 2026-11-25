@@ -1,6 +1,6 @@
 import { Schema } from 'effect'
 
-import type * as Buffer from '../buffer'
+import * as Buffer from '../buffer'
 import {
   type Spot,
   cellsIn,
@@ -9,7 +9,7 @@ import {
   positionOf,
   spotAt,
 } from './motions'
-import type { Range } from './targets'
+import type { OperatorName, Range } from './targets'
 
 export const Kind = Schema.Literals(['Letters', 'Lines'])
 export type Kind = typeof Kind.Type
@@ -106,4 +106,54 @@ export const rangeOf = (
     kind: 'Charwise',
     inclusive: false,
   }
+}
+
+export const Mark = Schema.Struct({
+  id: Buffer.LineId,
+  line: Schema.Int,
+  column: Schema.Int,
+})
+export type Mark = typeof Mark.Type
+
+export const markAt = (
+  buffer: Buffer.Buffer,
+  { line, column }: Buffer.Position,
+  gone: Buffer.LineId,
+): Mark => ({ id: buffer.lines[line]?.id ?? gone, line, column })
+
+const lineOf = ({ lines }: Buffer.Buffer, mark: Mark): number => {
+  if (lines[mark.line]?.id === mark.id) {
+    return mark.line
+  }
+  const moved = lines.findIndex(line => line.id === mark.id)
+  return moved < 0 ? mark.line : moved
+}
+
+export const marked = (
+  buffer: Buffer.Buffer,
+  mark: Mark,
+  pastEnd: 'LastLine' | 'Nowhere',
+): Buffer.Position | undefined => {
+  const found = lineOf(buffer, mark)
+  const line =
+    pastEnd === 'LastLine' ? Math.min(found, lastLine(buffer)) : found
+  const text = buffer.lines[line]
+  return text === undefined
+    ? undefined
+    : { line, column: Math.min(mark.column, text.text.length) }
+}
+
+export const movedBy = (
+  operator: OperatorName,
+  range: Range,
+  from: Buffer.Position,
+  mark: Buffer.Position,
+): Buffer.Position => {
+  if (operator === 'Yank' || mark.line <= from.line) {
+    return mark
+  }
+  if (range.kind === 'Charwise') {
+    return { line: from.line, column: from.column + mark.column }
+  }
+  return { ...mark, line: operator === 'Delete' ? from.line : from.line + 1 }
 }

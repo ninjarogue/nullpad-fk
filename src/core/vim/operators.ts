@@ -332,43 +332,57 @@ export const put = (
   return Buffer.moveTo(added, text.includes('\n') ? at : lastCellBefore(added))
 }
 
+export type PutOver = Readonly<{
+  buffer: Buffer.Buffer
+  first: Buffer.Position
+  last: Buffer.Position
+}>
+
+const lastLetterOf = (buffer: Buffer.Buffer, line: number): Buffer.Position =>
+  positionOf(buffer, { line, cell: Math.max(0, cellsIn(buffer, line) - 1) })
+
 export const putOver = (
   before: Buffer.Buffer,
   after: Buffer.Buffer,
   range: Range,
   register: Register,
   count: number,
-): Buffer.Buffer => {
+): PutOver => {
   const times = boundedCount(register, count)
   const isLines = register.kind === 'Linewise'
-  if (range.kind === 'Linewise') {
-    const at = range.from.line
-    const once = linesOf(isLines ? register.text.slice(0, -1) : register.text)
-    const added = Buffer.insertLines(
-      after,
-      at,
-      Array.flatten(Array.replicate(once, times)),
-    )
-    const last = added.lines.length - 1
-    const removedAll =
-      range.to.line - range.from.line + 1 === before.lines.length
-    return atFirstNonBlank(
-      removedAll ? Buffer.removeLines(added, last, last) : added,
-      at,
-    )
-  }
   const at = positionOf(before, range.from)
-  const placed = Buffer.moveTo(after, at)
-  if (isLines) {
-    const added = Buffer.insert(placed, `\n${register.text.repeat(times)}`)
-    return atFirstNonBlank(added, at.line + 1)
+  if (range.kind === 'Linewise' || isLines) {
+    const once = linesOf(isLines ? register.text.slice(0, -1) : register.text)
+    const lines = Array.flatten(Array.replicate(once, times))
+    const first = range.kind === 'Linewise' ? at.line : at.line + 1
+    const added =
+      range.kind === 'Linewise'
+        ? Buffer.insertLines(after, first, lines)
+        : Buffer.insert(Buffer.moveTo(after, at), `\n${lines.join('\n')}\n`)
+    const leftover = added.lines.length - 1
+    const removedAll =
+      range.kind === 'Linewise' &&
+      range.to.line - range.from.line + 1 === before.lines.length
+    return {
+      buffer: atFirstNonBlank(
+        removedAll ? Buffer.removeLines(added, leftover, leftover) : added,
+        first,
+      ),
+      first: { line: first, column: 0 },
+      last: lastLetterOf(added, first + lines.length - 1),
+    }
   }
   if (register.text === '') {
-    return after
+    return { buffer: after, first: at, last: at }
   }
   const text = register.text.repeat(times)
-  const added = Buffer.insert(placed, text)
-  return Buffer.moveTo(added, text.includes('\n') ? at : lastCellBefore(added))
+  const added = Buffer.insert(Buffer.moveTo(after, at), text)
+  const last = lastCellBefore(added)
+  return {
+    buffer: Buffer.moveTo(added, text.includes('\n') ? at : last),
+    first: at,
+    last,
+  }
 }
 
 export const blackHole = RegisterName.cases.BlackHole.make({})

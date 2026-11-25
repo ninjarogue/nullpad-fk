@@ -16,6 +16,8 @@ subtree_prompted: false
 
 Every colour in `src/styles.css` is a `light-dark()` token on `:root` or `.doc`. The finder's backdrop is the one `light-dark()` written in place. `color-scheme: light dark` makes light the default and follows the system to dark. `index.html` declares the scheme and the theme colour before the stylesheet loads.
 
+The cursor swaps two colours: the background under it becomes `--cur` and a letter under it becomes the background colour. `#caret` holds three layers that each blend with the page: `.cur-flip` (`difference`), `.cur-lift` (`plus-lighter`) and `.cur-cap` (`darken`). With a white flip, a channel `x` becomes `255 - x`, the lift adds `--cur` plus the background less 255, and the cap holds the result at the background colour. So `--cur-lift` is `--cur` plus `--bg` less white, and it changes with either. The dark theme flips with `--cur` alone and its lift and cap add nothing. No layer may sit in a stacking context of the cursor's own, or it would blend with the cursor and not the page.
+
 ## Editor
 
 The editor types like a browser text box because the browser makes the decisions a text box makes. The core owns the text, the caret and which lines are drawn. The browser owns typed text, IME composition, line wrap, caret steps, hit testing and scrolling.

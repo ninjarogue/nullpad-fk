@@ -10,8 +10,10 @@
   --dim: light-dark(#6a6861, #6f6d68);
   --number: light-dark(#c9c6bc, #2b2a28);
   --rule: light-dark(#e4e1d8, #1d1d1c);
-  --cur: light-dark(#26251f, #e8e3d6);
-  --cur-blend: light-dark(#d0cfcf, #e8e3d6);
+  --cur: light-dark(#6a6861, #e8e3d6);
+  --cur-flip: light-dark(#ffffff, #e8e3d6);
+  --cur-lift: light-dark(#615d50, #000000);
+  --cur-cap: light-dark(#f6f4ee, #ffffff);
   --barfg: light-dark(#5b5953, #8a8781);
   --gut: light-dark(#b3b0a6, #3a3936);
   --ins: light-dark(#86651a, #c9b37e);
@@ -154,16 +156,36 @@ body {
   position: absolute;
   height: var(--row);
   anchor-name: --caret;
-  background: var(--cur-blend);
-  mix-blend-mode: difference;
   pointer-events: none;
   overflow-anchor: none;
 }
 
+.cur span {
+  position: absolute;
+  inset: 0;
+}
+
+.cur-flip {
+  background: var(--cur-flip);
+  mix-blend-mode: difference;
+}
+
+.cur-lift {
+  background: var(--cur-lift);
+  mix-blend-mode: plus-lighter;
+}
+
+.cur-cap {
+  background: var(--cur-cap);
+  mix-blend-mode: darken;
+}
+
 .surface:not(.focused) .cur {
-  background: transparent;
-  mix-blend-mode: normal;
   box-shadow: inset 0 0 0 1px var(--cur);
+}
+
+.surface:not(.focused) .cur span {
+  display: none;
 }
 
 .pre {

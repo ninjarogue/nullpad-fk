@@ -859,15 +859,39 @@ const enqueue = (editor: Editor, queued: Queued): Outcome =>
 
 const strongest = (a: Reveal, b: Reveal): Reveal => (b === 'None' ? a : b)
 
-const replay = (start: Outcome, queued: ReadonlyArray<Queued>): Outcome =>
-  Array.reduce(queued, start, (outcome, next) => {
-    const result = enqueue(outcome.editor, next)
-    return {
-      editor: result.editor,
-      locate: Option.isSome(result.locate) ? result.locate : outcome.locate,
-      reveal: strongest(outcome.reveal, result.reveal),
-    }
-  })
+const held = (editor: Editor, queued: ReadonlyArray<Queued>): Editor => ({
+  ...editor,
+  locating: Option.map(editor.locating, locating => ({
+    ...locating,
+    queued: [...locating.queued, ...queued],
+  })),
+})
+
+const replay = (start: Outcome, queued: ReadonlyArray<Queued>): Outcome => {
+  const { outcome, ran } = Array.reduce(
+    queued,
+    { outcome: start, ran: 0 },
+    (reached, next) => {
+      if (Option.isSome(reached.outcome.editor.locating)) {
+        return reached
+      }
+      const result = run(reached.outcome.editor, next)
+      return {
+        outcome: {
+          editor: result.editor,
+          locate: Option.isSome(result.locate)
+            ? result.locate
+            : reached.outcome.locate,
+          reveal: strongest(reached.outcome.reveal, result.reveal),
+        },
+        ran: reached.ran + 1,
+      }
+    },
+  )
+  return ran === queued.length
+    ? outcome
+    : { ...outcome, editor: held(outcome.editor, queued.slice(ran)) }
+}
 
 const countPendingReveal = (outcome: Outcome): Outcome =>
   outcome.reveal === 'None'

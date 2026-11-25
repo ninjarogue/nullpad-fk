@@ -99,6 +99,24 @@ body {
   background: var(--sel);
 }
 
+/* In forced colours Chrome paints a plate of the page colour behind text, over a highlight drawn under the letters.
+   Text that takes its parent's forced colour gets no plate. Highlight is the selection's system colour, mixed with
+   the page colour because the letters over it keep the text colour. */
+@media (forced-colors: active) {
+  .line {
+    forced-color-adjust: preserve-parent-color;
+  }
+
+  .line::before {
+    forced-color-adjust: auto;
+  }
+
+  #selection > div {
+    forced-color-adjust: none;
+    background: color-mix(in srgb, Highlight 40%, Canvas);
+  }
+}
+
 .spacer {
   height: calc(var(--lines) * var(--row));
   overflow-anchor: none;

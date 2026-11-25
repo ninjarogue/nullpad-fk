@@ -413,21 +413,72 @@ const putStep = (
   }
 }
 
+const putOverStep = (
+  vim: Vim,
+  buffer: Buffer.Buffer,
+  kept: Kept,
+  visual: Visual,
+  { side, count }: Put,
+  held: Option.Option<Operators.Register>,
+): Step => {
+  const normal: Vim = { ...leaveVisual(vim), want: 'Unset' }
+  const range = Selection.rangeOf(
+    buffer,
+    Selection.endsOf(buffer, visual.kind, visual.anchor),
+    'AsSelected',
+  )
+  const deleted = Operators.operators.Delete(
+    buffer,
+    range,
+    kept.registers,
+    side === 'After' ? Operators.defaultRegister : Operators.blackHole,
+  )
+  return {
+    vim: normal,
+    buffer: rest(
+      normal,
+      Option.match(held, {
+        onNone: () => deleted.buffer,
+        onSome: register =>
+          Operators.putOver(
+            buffer,
+            deleted.buffer,
+            range,
+            register,
+            count ?? 1,
+          ),
+      }),
+      false,
+    ),
+    kept: { ...kept, registers: deleted.registers },
+    fate: done,
+    began: Option.some(positionOf(buffer, range.from)),
+    clipboard: Option.none(),
+  }
+}
+
 export const putClipboard = (
   vim: Vim,
   buffer: Buffer.Buffer,
   kept: Kept,
   put: Put,
   text: Option.Option<string>,
-): Step =>
-  putStep(
-    vim,
-    buffer,
-    kept,
-    put,
-    Operators.clipboardRegister,
-    Option.map(text, Operators.fromClipboard),
-  )
+): Step => {
+  const held = Option.map(text, Operators.fromClipboard)
+  if (vim.mode._tag !== 'Visual') {
+    return putStep(vim, buffer, kept, put, Operators.clipboardRegister, held)
+  }
+  return Option.isSome(held)
+    ? putOverStep(vim, buffer, kept, vim.mode, put, held)
+    : {
+        vim: idle(vim),
+        buffer,
+        kept,
+        fate: done,
+        began: Option.none(),
+        clipboard: Option.none(),
+      }
+}
 
 const run = (
   vim: Vim,
@@ -584,6 +635,23 @@ const runVisual = (
         clipboard: applied.clipboard,
       }
     },
+    Replace: ({ side }) => {
+      const source = Operators.registerFor(kept.registers, register)
+      return source._tag === 'Clipboard'
+        ? {
+            ...unchanged,
+            vim,
+            fate: Fate.cases.ReadClipboard.make({ put: { side, count } }),
+          }
+        : putOverStep(
+            vim,
+            buffer,
+            kept,
+            visual,
+            { side, count },
+            source.register,
+          )
+    },
     Move: ({ motion }) => {
       const from = spotAt(buffer, buffer.caret, 'LineBreak')
       if (motionFails(motion, buffer, from, count)) {
@@ -686,6 +754,26 @@ const pressVisual = (
       ...unchanged,
       vim: interrupted(vim),
       fate: { _tag: 'Plain', input },
+    }
+  }
+  if (input._tag === 'Paste') {
+    const range = Selection.rangeOf(
+      buffer,
+      Selection.endsOf(buffer, visual.kind, visual.anchor),
+      'AsSelected',
+    )
+    const erased = Operators.operators.Change(
+      buffer,
+      range,
+      kept.registers,
+      Operators.blackHole,
+    )
+    return {
+      ...unchanged,
+      vim: interrupted(leaveVisual(vim)),
+      buffer: erased.buffer,
+      fate: { _tag: 'Plain', input },
+      began: Option.some(changeBegan(buffer, 'Change', 'Selection', range)),
     }
   }
   return Option.match(keyOf(input), {

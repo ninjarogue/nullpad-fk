@@ -731,10 +731,18 @@ const vimPlan = (
   step: Vim.Step,
   swallowed: number,
 ): Plan => {
-  const stepped = { ...editor, vim: Option.some(step.vim), kept: step.kept }
+  const stepped = changeDrawn(
+    { ...editor, vim: Option.some(step.vim), kept: step.kept },
+    step.buffer === editor.buffer
+      ? {}
+      : { buffer: step.buffer, caretAtRowEnd: false },
+  )
   const counted = { ...stepped, discards: editor.discards + swallowed }
   return Vim.Fate.match(step.fate, {
-    Plain: ({ input }) => plainPlan(stepped, input),
+    Plain: ({ input }) => {
+      const plan = plainPlan(stepped, input)
+      return plan._tag === 'Done' ? { ...plan, began: step.began } : plan
+    },
     Travel: ({ way, count }) => travelPlan(counted, way, count, 'Vim'),
     Replay: ({ steps }): Plan => ({
       _tag: 'Done',

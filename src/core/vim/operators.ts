@@ -331,3 +331,44 @@ export const put = (
   const added = Buffer.insert(Buffer.moveTo(buffer, at), text)
   return Buffer.moveTo(added, text.includes('\n') ? at : lastCellBefore(added))
 }
+
+export const putOver = (
+  before: Buffer.Buffer,
+  after: Buffer.Buffer,
+  range: Range,
+  register: Register,
+  count: number,
+): Buffer.Buffer => {
+  const times = boundedCount(register, count)
+  const isLines = register.kind === 'Linewise'
+  if (range.kind === 'Linewise') {
+    const at = range.from.line
+    const once = linesOf(isLines ? register.text.slice(0, -1) : register.text)
+    const added = Buffer.insertLines(
+      after,
+      at,
+      Array.flatten(Array.replicate(once, times)),
+    )
+    const last = added.lines.length - 1
+    const removedAll =
+      range.to.line - range.from.line + 1 === before.lines.length
+    return atFirstNonBlank(
+      removedAll ? Buffer.removeLines(added, last, last) : added,
+      at,
+    )
+  }
+  const at = positionOf(before, range.from)
+  const placed = Buffer.moveTo(after, at)
+  if (isLines) {
+    const added = Buffer.insert(placed, `\n${register.text.repeat(times)}`)
+    return atFirstNonBlank(added, at.line + 1)
+  }
+  if (register.text === '') {
+    return after
+  }
+  const text = register.text.repeat(times)
+  const added = Buffer.insert(placed, text)
+  return Buffer.moveTo(added, text.includes('\n') ? at : lastCellBefore(added))
+}
+
+export const blackHole = RegisterName.cases.BlackHole.make({})

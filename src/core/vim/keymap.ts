@@ -41,6 +41,7 @@ export type Reach = typeof Reach.Type
 export const VisualCommand = Schema.TaggedUnion({
   Move: { motion: MotionName },
   Operate: { operator: OperatorName, reach: Reach },
+  Replace: { side: Side },
   Swap: {},
   Select: { kind: SelectionKind },
   Leave: {},
@@ -259,6 +260,16 @@ export const visual: ReadonlyArray<Binding<VisualCommand>> = [
   operateOn('C', 'Change', 'WholeLines'),
   operateOn('S', 'Change', 'WholeLines'),
   operateOn('R', 'Change', 'WholeLines'),
+  bind(
+    'p',
+    VisualCommand.cases.Replace.make({ side: 'After' }),
+    'put over the selection, and keep what it held',
+  ),
+  bind(
+    'P',
+    VisualCommand.cases.Replace.make({ side: 'Before' }),
+    'put over the selection',
+  ),
   bind('<Esc>', leave, 'leave'),
   bind('<C-[>', leave, 'leave'),
   bind('<C-e>', leave, 'leave'),

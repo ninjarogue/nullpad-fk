@@ -728,6 +728,7 @@ export const textareaRowStarts = (
         whiteSpace: 'pre-wrap',
         overflowWrap: 'break-word',
         wordBreak: 'normal',
+        tabSize: '8',
       })
       document.body.append(mirror)
       const range = document.createRange()

@@ -41,7 +41,7 @@ const openTextarea = async (
       body: [
         '<!doctype html><meta charset="utf-8">',
         `<link rel="stylesheet" href="${stylesheet}">`,
-        `<textarea spellcheck="false" style="position:absolute;left:${left}px;top:${top}px;width:${right - left}px;height:1000px;font:inherit;box-sizing:content-box;margin:0;padding:0;border:0;outline:0;resize:none;overflow:hidden;white-space:pre-wrap;overflow-wrap:break-word"></textarea>`,
+        `<textarea spellcheck="false" style="position:absolute;left:${left}px;top:${top}px;width:${right - left}px;height:1000px;font:inherit;box-sizing:content-box;margin:0;padding:0;border:0;outline:0;resize:none;overflow:hidden;white-space:pre-wrap;overflow-wrap:break-word;tab-size:8"></textarea>`,
       ].join(''),
     }),
   )

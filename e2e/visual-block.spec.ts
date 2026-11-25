@@ -2738,7 +2738,20 @@ test('v, V and Ctrl-V switch between the three kinds and keep both ends', async 
   expect(await modeOf(nullpad), 'Ctrl-V from V-LINE').toBe('V-BLOCK')
   expect(await nullpad.selection(), 'both ends were kept again').toBe('ab\ngh')
   await play(nullpad, 'ip')
-  expect(await modeOf(nullpad), 'ip makes it V-LINE').toBe('V-LINE')
+  expect(
+    await modeOf(nullpad),
+    'ip from a block on two lines keeps the block, as Vim does',
+  ).toBe('V-BLOCK')
+  expect(
+    await nullpad.selection(),
+    'the cursor corner went to the start of the last line',
+  ).toBe('a\ng\nm')
+  await play(nullpad, '<Esc>gg<C-v>lip')
+  expect(
+    await modeOf(nullpad),
+    'ip from a block on one line makes V-LINE, as Vim does',
+  ).toBe('V-LINE')
+  expect(await kindOf(nullpad), 'whole lines').toBe('lines')
 })
 
 test('Ctrl-V still pastes with vim off, in INSERT, in the finder and in the read view', async ({

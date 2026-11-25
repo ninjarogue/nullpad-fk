@@ -1899,3 +1899,40 @@ test('with vim off a dot is typed, even after changes made with vim on', async (
     'a dot with vim off is typed, not a repeat',
   ).toBe('.b..')
 })
+
+test('a dot answers at once after a stay of 4,000 typed letters', async ({
+  nullpad,
+}) => {
+  test.setTimeout(90_000)
+  const letters = 'abcdefghij'.repeat(400)
+  await nullpad.paste('\n')
+  await vimOn(nullpad)
+  await play(nullpad, 'ki')
+  await nullpad.page.keyboard.type(letters)
+  await settle(nullpad.page)
+  await play(nullpad, '<Esc>')
+  expect(await nullpad.status(), 'the stay put its letters on line 1').toEqual({
+    line: 1,
+    column: letters.length,
+    lineCount: 2,
+  })
+  await play(nullpad, 'j')
+  const before = Date.now()
+  await nullpad.page.keyboard.press('.')
+  await settle(nullpad.page)
+  const took = Date.now() - before
+  expect(await nullpad.status(), 'dot put the same letters on line 2').toEqual({
+    line: 2,
+    column: letters.length,
+    lineCount: 2,
+  })
+  expect(
+    (await nullpad.text()).endsWith('abcdefghij'),
+    'the end of line 2 is on screen',
+  ).toBe(true)
+  expect(await modeOf(nullpad), 'dot ends in NORMAL').toBe('NORMAL')
+  expect(
+    took,
+    `a dot after a stay of 4,000 letters took ${took} ms to reach the screen`,
+  ).toBeLessThan(500)
+})

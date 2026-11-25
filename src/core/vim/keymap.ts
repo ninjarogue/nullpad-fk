@@ -1,5 +1,6 @@
 import { Array, Option, Schema } from 'effect'
 
+import * as History from '../history'
 import { MotionName } from './motions'
 import { OperatorName, Side } from './operators'
 import { TargetName } from './targets'
@@ -22,6 +23,7 @@ export const Command = Schema.TaggedUnion({
   Put: { side: Side },
   Insert: { at: InsertAt },
   Cancel: {},
+  Travel: { way: History.Way },
 })
 export type Command = typeof Command.Type
 
@@ -159,6 +161,8 @@ export const normal: ReadonlyArray<Binding> = [
   insert('A', 'LineEnd', 'append at line end'),
   insert('o', 'LineBelow', 'open line below'),
   insert('O', 'LineAbove', 'open line above'),
+  bind('u', Command.cases.Travel.make({ way: 'Undo' }), 'undo'),
+  bind('<C-r>', Command.cases.Travel.make({ way: 'Redo' }), 'redo'),
   bind('<Esc>', Command.cases.Cancel.make({}), 'cancel'),
   bind('<C-[>', Command.cases.Cancel.make({}), 'cancel'),
 ]

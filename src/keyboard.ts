@@ -70,8 +70,19 @@ const modifiersOf = (event: KeyboardEvent): Modifiers => ({
   shift: event.shiftKey,
 })
 
+const takesReload = (event: KeyboardEvent, chords: string): boolean =>
+  chords === 'vim' &&
+  event.key === 'r' &&
+  event.ctrlKey &&
+  !event.shiftKey &&
+  !event.altKey &&
+  !event.metaKey
+
 /** Windows reports AltGr as Ctrl+Alt, so a character typed with both arrives as text. */
-const fromKeyDown = (event: KeyboardEvent): Option.Option<Input> => {
+const fromKeyDown = (
+  event: KeyboardEvent,
+  chords: string,
+): Option.Option<Input> => {
   const { key } = event
   if (
     event.isComposing ||
@@ -90,7 +101,8 @@ const fromKeyDown = (event: KeyboardEvent): Option.Option<Input> => {
     event.getModifierState('AltGraph') || (event.ctrlKey && event.altKey)
   const isChord =
     isOneCodePoint(key) && (event.ctrlKey || event.metaKey) && !isAltGraph
-  return isChord && !browserChords.has(key.toLowerCase())
+  return isChord &&
+    (!browserChords.has(key.toLowerCase()) || takesReload(event, chords))
     ? Option.some(
         Input.cases.Chord.make({ char: key, modifiers: modifiersOf(event) }),
       )
@@ -240,10 +252,13 @@ const listen = (
             'keydown',
             event => {
               state.lastKey = Option.some(event.key)
-              Option.map(fromKeyDown(event), input => {
-                event.preventDefault()
-                offerInput(input)
-              })
+              Option.map(
+                fromKeyDown(event, port.dataset['chords'] ?? ''),
+                input => {
+                  event.preventDefault()
+                  offerInput(input)
+                },
+              )
             },
             { signal },
           )
@@ -402,9 +417,12 @@ export const KeyboardPort = Mount.defineStream('KeyboardPort', {
 
 export type Bounds = Readonly<{ control: string; selection: string }>
 
+export type Chords = 'vim' | 'plain'
+
 export const keyboardPort = (
   surrounding: Readonly<{ text: string; caret: number }>,
   discards: number,
+  chords: Chords,
   bounds: Bounds,
   keyboard: Keyboard,
   h: HtmlBuilder<Message>,
@@ -417,6 +435,7 @@ export const keyboardPort = (
     h.DataAttribute('surrounding', surrounding.text),
     h.DataAttribute('caret', String(surrounding.caret)),
     h.DataAttribute('discards', String(discards)),
+    h.DataAttribute('chords', chords),
     h.DataAttribute('control', bounds.control),
     h.DataAttribute('selection', bounds.selection),
     h.OnMount(KeyboardPort()),

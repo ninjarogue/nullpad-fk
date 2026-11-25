@@ -16,6 +16,7 @@ type Expectation = Readonly<{
   finder?: string
   mode?: string
   pending?: string
+  keydown?: string
 }>
 
 export type Step =
@@ -172,7 +173,7 @@ export const parseStep = (value: unknown, index: number): Step => {
     case 'expect': {
       if (!isRecord(body)) {
         return fail(
-          'expect takes { text?, status?, under?, top?, full?, title?, finder?, mode?, pending? }',
+          'expect takes { text?, status?, under?, top?, full?, title?, finder?, mode?, pending?, keydown? }',
         )
       }
       const fields = [
@@ -184,6 +185,7 @@ export const parseStep = (value: unknown, index: number): Step => {
         'finder',
         'mode',
         'pending',
+        'keydown',
       ] as const
       const unknown = Object.keys(body).filter(
         key => ![...fields, 'full'].includes(key),
@@ -271,11 +273,19 @@ const finderText = (page: Page): Promise<string> =>
     return [`prompt ${prompt}`, ...rows].join('\n')
   })
 
+const lastKeydowns = new WeakMap<Page, string>()
+
 const checkPage = async (
   page: Page,
   expectation: Expectation,
 ): Promise<Array<string>> => {
   const misses: Array<string> = []
+  const keydown = lastKeydowns.get(page) ?? 'none'
+  if (expectation.keydown !== undefined && keydown !== expectation.keydown) {
+    misses.push(
+      `the last keydown was ${JSON.stringify(keydown)}, expected ${JSON.stringify(expectation.keydown)}`,
+    )
+  }
   const title = await page.title()
   if (expectation.title !== undefined && title !== expectation.title) {
     misses.push(`title is "${title}", expected "${expectation.title}"`)
@@ -417,6 +427,20 @@ export const openPage = async (
 ) => {
   await context.grantPermissions(['clipboard-read', 'clipboard-write'])
   const page = await context.newPage()
+  await page.exposeFunction(
+    'nullpadDriveKeydown',
+    (key: string, cancelled: boolean) => {
+      lastKeydowns.set(page, `${key} ${cancelled ? 'cancelled' : 'passed'}`)
+    },
+  )
+  await page.addInitScript(() => {
+    addEventListener('keydown', event => {
+      const report: unknown = Reflect.get(globalThis, 'nullpadDriveKeydown')
+      if (typeof report === 'function') {
+        report(event.key, event.defaultPrevented)
+      }
+    })
+  })
   page.on('pageerror', error => pageErrors.push(error.message))
   page.on('console', message => {
     if (message.type() === 'error') {

@@ -1,0 +1,536 @@
+[
+  {
+    "type": "one two"
+  },
+  {
+    "expect": {
+      "text": "one two",
+      "status": "1:8 1L",
+      "mode": "EDIT"
+    }
+  },
+  {
+    "press": "Control+z"
+  },
+  {
+    "expect": {
+      "text": "",
+      "status": "1:1 1L",
+      "keydown": "z cancelled"
+    }
+  },
+  {
+    "press": "Control+Shift+Z"
+  },
+  {
+    "expect": {
+      "text": "one two",
+      "status": "1:8 1L",
+      "keydown": "Z cancelled"
+    }
+  },
+  {
+    "press": "Control+z"
+  },
+  {
+    "press": "Control+y"
+  },
+  {
+    "expect": {
+      "text": "one two",
+      "status": "1:8 1L",
+      "keydown": "y cancelled"
+    }
+  },
+  {
+    "press": "Control+y"
+  },
+  {
+    "expect": {
+      "text": "one two",
+      "status": "1:8 1L"
+    }
+  },
+  {
+    "press": "Enter"
+  },
+  {
+    "type": "three"
+  },
+  {
+    "expect": {
+      "text": "one two\nthree",
+      "status": "2:6 2L"
+    }
+  },
+  {
+    "press": "Control+z"
+  },
+  {
+    "expect": {
+      "text": "one two",
+      "status": "1:8 1L"
+    }
+  },
+  {
+    "press": "Control+Shift+Z"
+  },
+  {
+    "expect": {
+      "text": "one two\nthree",
+      "status": "2:6 2L"
+    }
+  },
+  {
+    "press": "Backspace",
+    "times": 2
+  },
+  {
+    "type": "ee"
+  },
+  {
+    "expect": {
+      "text": "one two\nthree",
+      "status": "2:6 2L"
+    }
+  },
+  {
+    "press": "Control+z"
+  },
+  {
+    "expect": {
+      "text": "one two\nthr",
+      "status": "2:4 2L"
+    }
+  },
+  {
+    "press": "Control+z"
+  },
+  {
+    "expect": {
+      "text": "one two\nthree",
+      "status": "2:6 2L"
+    }
+  },
+  {
+    "press": "Home"
+  },
+  {
+    "type": "X"
+  },
+  {
+    "expect": {
+      "text": "one two\nXthree",
+      "status": "2:2 2L"
+    }
+  },
+  {
+    "press": "Control+z"
+  },
+  {
+    "expect": {
+      "text": "one two\nthree",
+      "status": "2:1 2L"
+    }
+  },
+  {
+    "paste": "PP"
+  },
+  {
+    "type": "q"
+  },
+  {
+    "expect": {
+      "text": "one two\nPPqthree",
+      "status": "2:4 2L"
+    }
+  },
+  {
+    "press": "Control+z"
+  },
+  {
+    "expect": {
+      "text": "one two\nPPthree",
+      "status": "2:3 2L"
+    }
+  },
+  {
+    "press": "Control+z"
+  },
+  {
+    "expect": {
+      "text": "one two\nthree",
+      "status": "2:1 2L"
+    }
+  },
+  {
+    "compose": "に"
+  },
+  {
+    "press": "Control+z"
+  },
+  {
+    "expect": {
+      "text": "one two\nthree",
+      "status": "2:1 2L"
+    }
+  },
+  {
+    "commit": "日"
+  },
+  {
+    "expect": {
+      "text": "one two\n日three",
+      "status": "2:2 2L"
+    }
+  },
+  {
+    "press": "Control+z"
+  },
+  {
+    "expect": {
+      "text": "one two\nthree",
+      "status": "2:1 2L"
+    }
+  },
+  {
+    "press": "Control+r"
+  },
+  {
+    "expect": {
+      "keydown": "r passed",
+      "text": "one two\nthree"
+    }
+  },
+  {
+    "press": "Control+Comma"
+  },
+  {
+    "expect": {
+      "mode": "NORMAL"
+    }
+  },
+  {
+    "press": "Control+r"
+  },
+  {
+    "expect": {
+      "keydown": "r cancelled",
+      "text": "one two\n日three",
+      "status": "2:1 2L",
+      "mode": "NORMAL"
+    }
+  },
+  {
+    "type": "u"
+  },
+  {
+    "expect": {
+      "text": "one two\nthree",
+      "status": "2:1 2L"
+    }
+  },
+  {
+    "press": "Control+Shift+R"
+  },
+  {
+    "expect": {
+      "keydown": "R passed"
+    }
+  },
+  {
+    "type": "ggx"
+  },
+  {
+    "expect": {
+      "text": "ne two\nthree",
+      "status": "1:1 2L"
+    }
+  },
+  {
+    "press": "Control+Comma"
+  },
+  {
+    "expect": {
+      "mode": "EDIT"
+    }
+  },
+  {
+    "press": "Control+z"
+  },
+  {
+    "expect": {
+      "text": "one two\nthree",
+      "status": "1:1 2L"
+    }
+  },
+  {
+    "press": "Control+Comma"
+  },
+  {
+    "type": "xxx"
+  },
+  {
+    "expect": {
+      "text": " two\nthree",
+      "status": "1:1 2L"
+    }
+  },
+  {
+    "type": "2u"
+  },
+  {
+    "expect": {
+      "text": "ne two\nthree",
+      "status": "1:1 2L"
+    }
+  },
+  {
+    "press": "Control+r"
+  },
+  {
+    "expect": {
+      "text": "e two\nthree",
+      "status": "1:1 2L"
+    }
+  },
+  {
+    "type": "2u"
+  },
+  {
+    "expect": {
+      "text": "one two\nthree",
+      "status": "1:1 2L"
+    }
+  },
+  {
+    "type": "A!!"
+  },
+  {
+    "press": "Escape"
+  },
+  {
+    "expect": {
+      "text": "one two!!\nthree",
+      "status": "1:9 2L"
+    }
+  },
+  {
+    "type": "u"
+  },
+  {
+    "expect": {
+      "text": "one two\nthree",
+      "status": "1:7 2L",
+      "mode": "NORMAL"
+    }
+  },
+  {
+    "type": "o"
+  },
+  {
+    "press": "Escape"
+  },
+  {
+    "expect": {
+      "text": "one two\n\nthree",
+      "status": "2:1 3L"
+    }
+  },
+  {
+    "type": "u"
+  },
+  {
+    "expect": {
+      "text": "one two\nthree",
+      "status": "1:7 2L"
+    }
+  },
+  {
+    "type": "x"
+  },
+  {
+    "expect": {
+      "text": "one tw\nthree",
+      "status": "1:6 2L"
+    }
+  },
+  {
+    "type": "i"
+  },
+  {
+    "press": "Escape"
+  },
+  {
+    "type": "u"
+  },
+  {
+    "expect": {
+      "text": "one two\nthree",
+      "status": "1:7 2L"
+    }
+  },
+  {
+    "press": "Control+r"
+  },
+  {
+    "expect": {
+      "text": "one tw\nthree"
+    }
+  },
+  {
+    "type": "u"
+  },
+  {
+    "expect": {
+      "text": "one two\nthree"
+    }
+  },
+  {
+    "type": "ggdG"
+  },
+  {
+    "expect": {
+      "text": "",
+      "status": "1:1 1L"
+    }
+  },
+  {
+    "wait": 1500
+  },
+  {
+    "type": "u"
+  },
+  {
+    "expect": {
+      "text": "one two\nthree",
+      "status": "1:1 2L"
+    }
+  },
+  {
+    "wait": 1200
+  },
+  {
+    "reload": true
+  },
+  {
+    "expect": {
+      "text": "one two\nthree",
+      "mode": "NORMAL"
+    }
+  },
+  {
+    "type": "u"
+  },
+  {
+    "expect": {
+      "text": "one two\nthree"
+    }
+  },
+  {
+    "type": "Go- [ ] task"
+  },
+  {
+    "press": "Escape"
+  },
+  {
+    "expect": {
+      "text": "one two\nthree\n- [ ] task",
+      "status": "3:10 3L"
+    }
+  },
+  {
+    "press": "Control+e"
+  },
+  {
+    "expect": {
+      "mode": "READ"
+    }
+  },
+  {
+    "click": {
+      "x": 172,
+      "y": 93
+    }
+  },
+  {
+    "shot": "box-checked"
+  },
+  {
+    "type": "u"
+  },
+  {
+    "press": "Escape"
+  },
+  {
+    "expect": {
+      "mode": "NORMAL",
+      "text": "one two\nthree\n- [x] task",
+      "status": "3:10 3L"
+    }
+  },
+  {
+    "type": "u"
+  },
+  {
+    "expect": {
+      "text": "one two\nthree\n- [ ] task",
+      "status": "3:10 3L"
+    }
+  },
+  {
+    "press": "Control+r"
+  },
+  {
+    "expect": {
+      "text": "one two\nthree\n- [x] task"
+    }
+  },
+  {
+    "press": "Control+p"
+  },
+  {
+    "type": "second"
+  },
+  {
+    "press": "Enter"
+  },
+  {
+    "expect": {
+      "text": "second",
+      "mode": "NORMAL",
+      "title": "second"
+    }
+  },
+  {
+    "type": "u"
+  },
+  {
+    "expect": {
+      "text": "second"
+    }
+  },
+  {
+    "press": "Control+p"
+  },
+  {
+    "type": "one"
+  },
+  {
+    "press": "Enter"
+  },
+  {
+    "expect": {
+      "text": "one two\nthree\n- [x] task",
+      "title": "one two"
+    }
+  },
+  {
+    "type": "u"
+  },
+  {
+    "expect": {
+      "text": "one two\nthree\n- [x] task"
+    }
+  }
+]

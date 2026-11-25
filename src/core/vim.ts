@@ -1,6 +1,7 @@
 import { Option, Schema } from 'effect'
 
 import * as Buffer from './buffer'
+import * as History from './history'
 import { Input, type NamedKey } from './input'
 import { cellAt, cellCount, cellStart } from './vim/cells'
 import * as Keymap from './vim/keymap'
@@ -8,13 +9,14 @@ import {
   Want,
   endOf,
   firstFilled,
+  firstNonBlank,
   motionFails,
   motions,
   positionOf,
   spotOf,
 } from './vim/motions'
 import * as Operators from './vim/operators'
-import { targetFor } from './vim/targets'
+import { type Range, type TargetName, targetFor } from './vim/targets'
 
 export const Registers = Operators.Registers
 export type Registers = Operators.Registers
@@ -38,13 +40,23 @@ export const start: Vim = {
   want: 'Unset',
 }
 
-export type Fate = 'Done' | 'Plain' | 'Swallowed'
+export const Fate = Schema.TaggedUnion({
+  Done: {},
+  Plain: {},
+  Travel: { way: History.Way, count: Schema.Int },
+})
+export type Fate = typeof Fate.Type
+
+const done = Fate.cases.Done.make({})
+
+const plain = Fate.cases.Plain.make({})
 
 export type Step = Readonly<{
   vim: Vim
   buffer: Buffer.Buffer
   registers: Registers
   fate: Fate
+  began: Option.Option<Buffer.Position>
 }>
 
 const keyNames: Readonly<Record<NamedKey, string>> = {
@@ -127,7 +139,30 @@ const placeInsert = (
   return places[at]()
 }
 
-type Ran = Readonly<{ vim: Vim; buffer: Buffer.Buffer; registers: Registers }>
+const firstNonBlankOf = (
+  buffer: Buffer.Buffer,
+  line: number,
+): Buffer.Position =>
+  positionOf(buffer, { line, cell: firstNonBlank(buffer, line) })
+
+const changeBegan = (
+  buffer: Buffer.Buffer,
+  operator: Operators.OperatorName,
+  target: TargetName,
+  range: Range,
+): Buffer.Position => {
+  const from = positionOf(buffer, range.from)
+  if (range.kind === 'Charwise') {
+    return from
+  }
+  if (target === 'Lines' && range.from.line === range.to.line) {
+    const lineStart = firstNonBlankOf(buffer, range.from.line)
+    return Buffer.isBefore(buffer.caret, lineStart) ? buffer.caret : lineStart
+  }
+  return operator === 'Change' && range.to.line > range.from.line
+    ? { line: from.line + 1, column: from.column }
+    : from
+}
 
 const run = (
   vim: Vim,
@@ -135,10 +170,16 @@ const run = (
   registers: Registers,
   command: Keymap.Command,
   count: number | undefined,
-): Ran => {
+): Step => {
   const cleared = idle(vim)
   const normal: Vim = { ...cleared, want: 'Unset' }
-  const unchanged: Ran = { vim: cleared, buffer, registers }
+  const unchanged: Step = {
+    vim: cleared,
+    buffer,
+    registers,
+    fate: done,
+    began: Option.none(),
+  }
   return Keymap.Command.match(command, {
     Cancel: () => unchanged,
     Move: ({ motion }) => {
@@ -152,9 +193,9 @@ const run = (
         vim.want,
       )
       return {
+        ...unchanged,
         vim: { ...cleared, want },
         buffer: Buffer.moveTo(buffer, positionOf(buffer, spot)),
-        registers,
       }
     },
     Operate: ({ operator, target }) =>
@@ -180,6 +221,8 @@ const run = (
               vim: after,
               buffer: rest(after, applied.buffer, false),
               registers: applied.registers,
+              fate: done,
+              began: Option.some(changeBegan(buffer, operator, target, range)),
             }
           },
         },
@@ -188,19 +231,24 @@ const run = (
       Option.match(registers.unnamed, {
         onNone: () => unchanged,
         onSome: register => ({
+          ...unchanged,
           vim: normal,
           buffer: rest(
             normal,
             Operators.put(buffer, register, side, count ?? 1),
             false,
           ),
-          registers,
         }),
       }),
-    Insert: ({ at }): Ran => ({
+    Insert: ({ at }): Step => ({
+      ...unchanged,
       vim: { ...normal, mode: 'Insert' },
       buffer: placeInsert(buffer, at),
-      registers,
+    }),
+    Travel: ({ way }) => ({
+      ...unchanged,
+      vim: normal,
+      fate: Fate.cases.Travel.make({ way, count: count ?? 1 }),
     }),
   })
 }
@@ -214,26 +262,24 @@ const pressNormal = (
   registers: Registers,
   input: Input,
 ): Step => {
-  if (input._tag === 'Paste' || isPageKey(input)) {
-    return { vim: interrupted(vim), buffer, registers, fate: 'Plain' }
+  const kept: Step = {
+    vim,
+    buffer,
+    registers,
+    fate: done,
+    began: Option.none(),
   }
-  const fate: Fate =
-    input._tag === 'Key' || input._tag === 'Chord' ? 'Done' : 'Swallowed'
+  if (input._tag === 'Paste' || isPageKey(input)) {
+    return { ...kept, vim: interrupted(vim), fate: plain }
+  }
   return Option.match(keyOf(input), {
-    onNone: () => ({ vim, buffer, registers, fate }),
+    onNone: () => kept,
     onSome: key =>
       Keymap.Advance.match(Keymap.advance(Keymap.normal, vim, key), {
-        Drop: () => ({ vim: idle(vim), buffer, registers, fate }),
-        Wait: ({ pending }) => ({
-          vim: { ...vim, ...pending },
-          buffer,
-          registers,
-          fate,
-        }),
-        Run: ({ command, count }) => ({
-          ...run(vim, buffer, registers, command, count),
-          fate,
-        }),
+        Drop: () => ({ ...kept, vim: idle(vim) }),
+        Wait: ({ pending }) => ({ ...kept, vim: { ...vim, ...pending } }),
+        Run: ({ command, count }) =>
+          run(vim, buffer, registers, command, count),
       }),
   })
 }
@@ -252,7 +298,8 @@ const leaveInsert = (buffer: Buffer.Buffer, registers: Registers): Step => {
       false,
     ),
     registers,
-    fate: 'Done',
+    fate: done,
+    began: Option.none(),
   }
 }
 
@@ -266,6 +313,23 @@ export const press = (
     ? pressNormal(vim, buffer, registers, input)
     : leavesInsert(input)
       ? leaveInsert(buffer, registers)
-      : { vim, buffer, registers, fate: 'Plain' }
+      : { vim, buffer, registers, fate: plain, began: Option.none() }
+
+export const landed = (
+  buffer: Buffer.Buffer,
+  began: Buffer.Position,
+  {
+    at,
+    size,
+    changed,
+  }: Readonly<{ at: number; size: number; changed: number }>,
+): Buffer.Buffer => {
+  const near = began.line >= at - 1 && began.line <= at + size
+  const line = Math.min(near ? began.line : changed, buffer.lines.length - 1)
+  return Buffer.moveTo(
+    buffer,
+    line === began.line ? began : firstNonBlankOf(buffer, line),
+  )
+}
 
 export const pendingKeys = (vim: Vim): string => Keymap.shown(vim)

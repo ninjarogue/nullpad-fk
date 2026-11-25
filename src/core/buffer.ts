@@ -225,7 +225,35 @@ export const insertLines = (
   nextLineId: buffer.nextLineId + texts.length,
 })
 
-const isBefore = (a: Position, b: Position): boolean =>
+export type Splice = Readonly<{
+  at: number
+  length: number
+  lines: ReadonlyArray<Line>
+}>
+
+const argumentsAtOnce = 10_000
+
+const spliceInto = (
+  lines: Array<Line>,
+  { at, length, lines: into }: Splice,
+): Array<Line> => {
+  if (into.length > argumentsAtOnce) {
+    return [...lines.slice(0, at), ...into, ...lines.slice(at + length)]
+  }
+  lines.splice(at, length, ...into)
+  return lines
+}
+
+export const spliceAll = (
+  buffer: Buffer,
+  splices: ReadonlyArray<Splice>,
+): Buffer =>
+  Array.match(Array.reduce(splices, buffer.lines.slice(), spliceInto), {
+    onEmpty: () => removeLines(buffer, 0, buffer.lines.length - 1),
+    onNonEmpty: spliced => ({ ...buffer, lines: spliced }),
+  })
+
+export const isBefore = (a: Position, b: Position): boolean =>
   a.line < b.line || (a.line === b.line && a.column < b.column)
 
 /** The caret ends at the earlier position, or after the grapheme the removal joined, as Chrome's does. */

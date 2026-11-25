@@ -64,6 +64,12 @@ const Locating = Schema.Struct({
   queued: Schema.Array(Queued),
 })
 
+export const Need = Schema.TaggedUnion({
+  Locate: { ticket: Schema.Int, query: Query, revision: Schema.Int },
+  ReadClipboard: { ticket: Schema.Int },
+})
+export type Need = typeof Need.Type
+
 export const Editor = Schema.Struct({
   buffer: Buffer.Buffer,
   history: History.History,
@@ -79,6 +85,7 @@ export const Editor = Schema.Struct({
   locating: Schema.Option(Locating),
   asked: Schema.Int,
   pendingReveals: Schema.Int,
+  notice: Schema.Option(Schema.String),
 })
 export type Editor = typeof Editor.Type
 
@@ -86,10 +93,9 @@ export type Reveal = 'None' | 'Nearest' | 'Top'
 
 export type Outcome = Readonly<{
   editor: Editor
-  locate: Option.Option<
-    Readonly<{ ticket: number; query: Query; revision: number }>
-  >
+  need: Option.Option<Need>
   reveal: Reveal
+  writeClipboard: Option.Option<string>
 }>
 
 export type Part = Readonly<{ text: string; isPreedit: boolean }>
@@ -117,6 +123,7 @@ export type Frame = Readonly<{
   status: Readonly<{
     mode: Mode
     pending: string
+    notice: string
     line: number
     column: number
     lineCount: number
@@ -141,6 +148,7 @@ export const open = (text: string, vim = false): Editor => {
     locating: Option.none(),
     asked: 0,
     pendingReveals: 0,
+    notice: Option.none(),
   }
 }
 
@@ -283,29 +291,36 @@ const done = (unrested: Editor, reveal: Reveal = 'Nearest'): Outcome => {
   const editor = rested(unrested)
   return {
     editor: reveal === 'None' ? editor : withCaretDrawn(editor),
-    locate: Option.none(),
+    need: Option.none(),
     reveal,
+    writeClipboard: Option.none(),
   }
 }
 
+type Settled = Readonly<{
+  _tag: 'Done'
+  outcome: Outcome
+  began: Option.Option<Buffer.Position>
+  recordsItself: boolean
+}>
+
 type Plan =
+  | Settled
   | Readonly<{
-      _tag: 'Done'
-      outcome: Outcome
-      began: Option.Option<Buffer.Position>
-      recordsItself: boolean
-    }>
-  | Readonly<{
-      _tag: 'Ask'
+      _tag: 'Locate'
       query: Query
       land: (answer: Answer) => Outcome
+    }>
+  | Readonly<{
+      _tag: 'ReadClipboard'
+      land: (text: Option.Option<string>) => Outcome
     }>
 
 const now = (
   editor: Editor,
   reveal: Reveal = 'Nearest',
   began: Option.Option<Buffer.Position> = Option.none(),
-): Plan => ({
+): Settled => ({
   _tag: 'Done',
   outcome: done(editor, reveal),
   began,
@@ -313,7 +328,7 @@ const now = (
 })
 
 const ask = (query: Query, land: (answer: Answer) => Outcome): Plan => ({
-  _tag: 'Ask',
+  _tag: 'Locate',
   query,
   land,
 })
@@ -663,7 +678,45 @@ const plainPlan = (editor: Editor, input: Input): Plan =>
     Commit: ({ text }) => now(insertText(text)({ ...editor, preedit: '' })),
   })
 
-const vimPlan = (editor: Editor, step: Vim.Step, swallowed: number): Plan => {
+const clipboardBlockedNotice = 'clipboard blocked, use Ctrl-V'
+
+const vimDone = (
+  editor: Editor,
+  step: Vim.Step,
+  swallowed: number,
+): Settled => {
+  const moved = step.buffer !== editor.buffer
+  const settled = now(
+    changeDrawn(
+      {
+        ...editor,
+        vim: Option.some(step.vim),
+        kept: step.kept,
+        discards: editor.discards + swallowed,
+        goalX: moved ? Option.none() : editor.goalX,
+      },
+      moved ? { buffer: step.buffer, caretAtRowEnd: false } : {},
+    ),
+    moved ? 'Nearest' : 'None',
+    step.began,
+  )
+  return {
+    ...settled,
+    outcome: { ...settled.outcome, writeClipboard: step.clipboard },
+  }
+}
+
+export const clipboardBlocked = (editor: Editor): Editor => ({
+  ...editor,
+  notice: Option.some(clipboardBlockedNotice),
+})
+
+const vimPlan = (
+  editor: Editor,
+  vim: Vim.Vim,
+  step: Vim.Step,
+  swallowed: number,
+): Plan => {
   const stepped = { ...editor, vim: Option.some(step.vim), kept: step.kept }
   const counted = { ...stepped, discards: editor.discards + swallowed }
   return Vim.Fate.match(step.fate, {
@@ -678,17 +731,20 @@ const vimPlan = (editor: Editor, step: Vim.Step, swallowed: number): Plan => {
       began: Option.none(),
       recordsItself: true,
     }),
-    Done: () => {
-      const moved = step.buffer !== editor.buffer
-      return now(
-        changeDrawn(
-          { ...counted, goalX: moved ? Option.none() : editor.goalX },
-          moved ? { buffer: step.buffer, caretAtRowEnd: false } : {},
-        ),
-        moved ? 'Nearest' : 'None',
-        step.began,
-      )
-    },
+    ReadClipboard: ({ put }): Plan => ({
+      _tag: 'ReadClipboard',
+      land: text => {
+        const { outcome } = vimDone(
+          editor,
+          Vim.putClipboard(vim, editor.buffer, editor.kept, put, text),
+          swallowed,
+        )
+        return Option.isSome(text)
+          ? outcome
+          : { ...outcome, editor: clipboardBlocked(outcome.editor) }
+      },
+    }),
+    Done: () => vimDone(editor, step, swallowed),
   })
 }
 
@@ -698,6 +754,7 @@ const inputPlan = (editor: Editor, input: Input): Plan =>
     onSome: vim =>
       vimPlan(
         editor,
+        vim,
         Vim.press(vim, editor.buffer, editor.kept, input),
         input._tag === 'Key' || input._tag === 'Chord' ? 0 : 1,
       ),
@@ -707,7 +764,7 @@ const againPlan = (editor: Editor, step: Vim.Replayed): Plan =>
   Option.match(editor.vim, {
     onNone: () => now(editor, 'None'),
     onSome: vim =>
-      vimPlan(editor, Vim.again(vim, editor.buffer, editor.kept, step), 0),
+      vimPlan(editor, vim, Vim.again(vim, editor.buffer, editor.kept, step), 0),
   })
 
 const toggleVim = (editor: Editor): Editor =>
@@ -830,10 +887,15 @@ const tracked = (
 
 const planOf = (editor: Editor, queued: Queued): Plan => {
   const plan = planFor(editor, queued)
-  if (plan._tag === 'Ask') {
+  const landed = (outcome: Outcome): Outcome =>
+    tracked(editor, queued, outcome, Option.none())
+  if (plan._tag === 'Locate') {
+    return { ...plan, land: (answer: Answer) => landed(plan.land(answer)) }
+  }
+  if (plan._tag === 'ReadClipboard') {
     return {
       ...plan,
-      land: answer => tracked(editor, queued, plan.land(answer), Option.none()),
+      land: (text: Option.Option<string>) => landed(plan.land(text)),
     }
   }
   return plan.recordsItself
@@ -852,20 +914,30 @@ const run = (editor: Editor, queued: Queued): Outcome => {
     return plan.outcome
   }
   const ticket = editor.asked + 1
-  const drawn = withQueriedLineDrawn(editor, plan.query)
+  const drawn =
+    plan._tag === 'Locate' ? withQueriedLineDrawn(editor, plan.query) : editor
   return {
     editor: {
       ...drawn,
       locating: Option.some({ ticket, cause: queued, queued: [] }),
       asked: ticket,
     },
-    locate: Option.some({
-      ticket,
-      query: plan.query,
-      revision: drawn.drawnRevision,
-    }),
+    need: Option.some(
+      plan._tag === 'Locate'
+        ? Need.cases.Locate.make({
+            ticket,
+            query: plan.query,
+            revision: drawn.drawnRevision,
+          })
+        : Need.cases.ReadClipboard.make({ ticket }),
+    ),
     reveal:
-      plan.query._tag === 'Point' || drawn === editor ? 'None' : 'Nearest',
+      plan._tag === 'ReadClipboard' ||
+      plan.query._tag === 'Point' ||
+      drawn === editor
+        ? 'None'
+        : 'Nearest',
+    writeClipboard: Option.none(),
   }
 }
 
@@ -907,10 +979,12 @@ const replay = (start: Outcome, queued: ReadonlyArray<Queued>): Outcome => {
       return {
         outcome: {
           editor: result.editor,
-          locate: Option.isSome(result.locate)
-            ? result.locate
-            : reached.outcome.locate,
+          need: Option.orElse(result.need, () => reached.outcome.need),
           reveal: strongest(reached.outcome.reveal, result.reveal),
+          writeClipboard: Option.orElse(
+            result.writeClipboard,
+            () => reached.outcome.writeClipboard,
+          ),
         },
         ran: reached.ran + 1,
       }
@@ -937,21 +1011,24 @@ export const revealed = (editor: Editor): Editor => ({
   pendingReveals: Math.max(0, editor.pendingReveals - 1),
 })
 
+export const withoutNotice = (editor: Editor): Editor =>
+  Option.isNone(editor.notice) ? editor : { ...editor, notice: Option.none() }
+
+const receive = (editor: Editor, queued: Queued): Outcome =>
+  countPendingReveal(enqueue(editor, queued))
+
 export const feed = (editor: Editor, input: Input): Outcome =>
-  countPendingReveal(enqueue(editor, Queued.cases.Fed.make({ input })))
+  receive(editor, Queued.cases.Fed.make({ input }))
 
 export const click = (
   editor: Editor,
   x: number,
   line: number,
   yInLine: number,
-): Outcome =>
-  countPendingReveal(
-    enqueue(editor, Queued.cases.Clicked.make({ x, line, yInLine })),
-  )
+): Outcome => receive(editor, Queued.cases.Clicked.make({ x, line, yInLine }))
 
 export const toggledVim = (editor: Editor): Outcome =>
-  countPendingReveal(enqueue(editor, Queued.cases.ToggledVim.make({})))
+  receive(editor, Queued.cases.ToggledVim.make({}))
 
 export const togglesVim = (input: Input): boolean =>
   input._tag === 'Chord' && input.char === ',' && input.modifiers.ctrl
@@ -972,10 +1049,10 @@ export const overwrite = (
     { ...alone, began: Option.none() },
   )
 
-export const located = (
+const answered = (
   editor: Editor,
   ticket: number,
-  answer: Answer,
+  land: (plan: Plan) => Option.Option<Outcome>,
 ): Outcome =>
   Option.match(editor.locating, {
     onNone: () => done(editor, 'None'),
@@ -984,11 +1061,32 @@ export const located = (
         return done(editor, 'None')
       }
       const asked = { ...editor, locating: Option.none() }
-      const plan = planOf(asked, cause)
-      const landed = plan._tag === 'Ask' ? plan.land(answer) : plan.outcome
+      const landed = Option.getOrElse(land(planOf(asked, cause)), () =>
+        run(asked, cause),
+      )
       return countPendingReveal(replay(landed, queued))
     },
   })
+
+export const located = (
+  editor: Editor,
+  ticket: number,
+  answer: Answer,
+): Outcome =>
+  answered(editor, ticket, plan =>
+    plan._tag === 'Locate' ? Option.some(plan.land(answer)) : Option.none(),
+  )
+
+export const clipboardRead = (
+  editor: Editor,
+  ticket: number,
+  text: Option.Option<string>,
+): Outcome =>
+  answered(editor, ticket, plan =>
+    plan._tag === 'ReadClipboard'
+      ? Option.some(plan.land(text))
+      : Option.none(),
+  )
 
 const awaitedLine = (editor: Editor): Option.Option<number> =>
   Option.match(editor.locating, {
@@ -1028,8 +1126,9 @@ export const resized = (editor: Editor, rows: number): Outcome => {
       size === editor.screenRows
         ? editor
         : changeDrawn(editor, { screenRows: size }),
-    locate: Option.none(),
+    need: Option.none(),
     reveal: 'Nearest',
+    writeClipboard: Option.none(),
   })
 }
 
@@ -1142,6 +1241,7 @@ export const paint = (editor: Editor): Frame => {
         onNone: () => '',
         onSome: Vim.pendingKeys,
       }),
+      notice: Option.getOrElse(editor.notice, () => ''),
       line: caret.line + 1,
       column: caretGrapheme(lines[caret.line]?.text ?? '', caret.column) + 1,
       lineCount: lines.length,

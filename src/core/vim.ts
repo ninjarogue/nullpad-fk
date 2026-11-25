@@ -18,8 +18,6 @@ import {
 import * as Operators from './vim/operators'
 import { type Range, type TargetName, targetFor } from './vim/targets'
 
-export const Registers = Operators.Registers
-export type Registers = Operators.Registers
 export const noRegisters = Operators.noRegisters
 
 export const Recorded = Schema.TaggedUnion({
@@ -31,12 +29,13 @@ export type Recorded = typeof Recorded.Type
 export const Repeat = Schema.Struct({
   command: Keymap.Command,
   count: Schema.UndefinedOr(Schema.Int),
+  register: Operators.RegisterName,
   typed: Schema.Array(Recorded),
 })
 export type Repeat = typeof Repeat.Type
 
 export const Kept = Schema.Struct({
-  registers: Registers,
+  registers: Operators.Registers,
   dot: Schema.Option(Repeat),
 })
 export type Kept = typeof Kept.Type
@@ -55,9 +54,7 @@ const unrecordedStay = Mode.cases.Insert.make({ recording: Option.none() })
 
 export const Vim = Schema.Struct({
   mode: Mode,
-  count: Schema.String,
-  keys: Schema.Array(Schema.String),
-  innerCount: Schema.String,
+  ...Keymap.Pending.fields,
   want: Want,
 })
 export type Vim = typeof Vim.Type
@@ -69,17 +66,28 @@ export const start: Vim = {
 }
 
 export const Replayed = Schema.TaggedUnion({
-  Run: { command: Keymap.Command, count: Schema.UndefinedOr(Schema.Int) },
+  Run: {
+    command: Keymap.Command,
+    count: Schema.UndefinedOr(Schema.Int),
+    register: Operators.RegisterName,
+  },
   Typed: { input: Input },
   Leave: {},
 })
 export type Replayed = typeof Replayed.Type
+
+export const Put = Schema.Struct({
+  side: Operators.Side,
+  count: Schema.UndefinedOr(Schema.Int),
+})
+export type Put = typeof Put.Type
 
 export const Fate = Schema.TaggedUnion({
   Done: {},
   Plain: { input: Input },
   Travel: { way: History.Way, count: Schema.Int },
   Replay: { steps: Schema.Array(Replayed) },
+  ReadClipboard: { put: Put },
 })
 export type Fate = typeof Fate.Type
 
@@ -91,6 +99,7 @@ export type Step = Readonly<{
   kept: Kept
   fate: Fate
   began: Option.Option<Buffer.Position>
+  clipboard: Option.Option<string>
 }>
 
 const keyNames: Readonly<Record<NamedKey, string>> = {
@@ -309,7 +318,7 @@ const furtherCopies = (
 }
 
 const replayOf = (
-  { command, typed }: Repeat,
+  { command, register, typed }: Repeat,
   count: number | undefined,
   lineCount: number,
 ): Fate => {
@@ -317,9 +326,58 @@ const replayOf = (
   return stay.length > mostReplayed(lineCount)
     ? done
     : Fate.cases.Replay.make({
-        steps: [Replayed.cases.Run.make({ command, count }), ...stay, leave],
+        steps: [
+          Replayed.cases.Run.make({ command, count, register }),
+          ...stay,
+          leave,
+        ],
       })
 }
+
+const putStep = (
+  vim: Vim,
+  buffer: Buffer.Buffer,
+  kept: Kept,
+  { side, count }: Put,
+  name: Operators.RegisterName,
+  held: Option.Option<Operators.Register>,
+): Step => {
+  const normal: Vim = { ...idle(vim), want: 'Unset' }
+  const dot = Option.some({
+    command: Keymap.Command.cases.Put.make({ side }),
+    count,
+    register: name,
+    typed: [],
+  })
+  return {
+    vim: Option.isSome(held) ? normal : idle(vim),
+    buffer: Option.match(held, {
+      onNone: () => buffer,
+      onSome: register =>
+        rest(normal, Operators.put(buffer, register, side, count ?? 1), false),
+    }),
+    kept: { ...kept, dot },
+    fate: done,
+    began: Option.none(),
+    clipboard: Option.none(),
+  }
+}
+
+export const putClipboard = (
+  vim: Vim,
+  buffer: Buffer.Buffer,
+  kept: Kept,
+  put: Put,
+  text: Option.Option<string>,
+): Step =>
+  putStep(
+    vim,
+    buffer,
+    kept,
+    put,
+    Operators.clipboardRegister,
+    Option.map(text, Operators.fromClipboard),
+  )
 
 const run = (
   vim: Vim,
@@ -327,6 +385,7 @@ const run = (
   kept: Kept,
   command: Keymap.Command,
   count: number | undefined,
+  register: Operators.RegisterName,
 ): Step => {
   const cleared = idle(vim)
   const normal: Vim = { ...cleared, want: 'Unset' }
@@ -336,8 +395,9 @@ const run = (
     kept,
     fate: done,
     began: Option.none(),
+    clipboard: Option.none(),
   }
-  const repeat = Option.some({ command, count, typed: [] })
+  const repeat = Option.some({ command, count, register, typed: [] })
   const recordingStay: Vim = {
     ...normal,
     mode: { _tag: 'Insert', recording: repeat },
@@ -375,6 +435,7 @@ const run = (
               buffer,
               range,
               kept.registers,
+              register,
             )
             const after = applied.inserting ? recordingStay : normal
             return {
@@ -386,24 +447,21 @@ const run = (
               },
               fate: done,
               began: Option.some(changeBegan(buffer, operator, target, range)),
+              clipboard: applied.clipboard,
             }
           },
         },
       ),
-    Put: ({ side }) =>
-      Option.match(kept.registers.unnamed, {
-        onNone: () => ({ ...unchanged, kept: { ...kept, dot: repeat } }),
-        onSome: register => ({
-          ...unchanged,
-          vim: normal,
-          kept: { ...kept, dot: repeat },
-          buffer: rest(
-            normal,
-            Operators.put(buffer, register, side, count ?? 1),
-            false,
-          ),
-        }),
-      }),
+    Put: ({ side }) => {
+      const source = Operators.registerFor(kept.registers, register)
+      return source._tag === 'Clipboard'
+        ? {
+            ...unchanged,
+            vim,
+            fate: Fate.cases.ReadClipboard.make({ put: { side, count } }),
+          }
+        : putStep(vim, buffer, kept, { side, count }, register, source.register)
+    },
     Insert: ({ at }): Step => ({
       ...unchanged,
       vim: recordingStay,
@@ -440,6 +498,7 @@ const pressNormal = (
     kept,
     fate: done,
     began: Option.none(),
+    clipboard: Option.none(),
   }
   if (input._tag === 'Paste' || isPageKey(input)) {
     return {
@@ -454,7 +513,8 @@ const pressNormal = (
       Keymap.Advance.match(Keymap.advance(Keymap.normal, vim, key), {
         Drop: () => ({ ...unchanged, vim: idle(vim) }),
         Wait: ({ pending }) => ({ ...unchanged, vim: { ...vim, ...pending } }),
-        Run: ({ command, count }) => run(vim, buffer, kept, command, count),
+        Run: ({ command, count, register }) =>
+          run(vim, buffer, kept, command, count, register),
       }),
   })
 }
@@ -475,6 +535,7 @@ const leaveInsert = (buffer: Buffer.Buffer, kept: Kept): Step => {
     kept,
     fate: done,
     began: Option.none(),
+    clipboard: Option.none(),
   }
 }
 
@@ -512,6 +573,7 @@ const leaving = (
         steps: [...furtherCopies(repeat, buffer.lines.length), leave],
       }),
       began: Option.none(),
+      clipboard: Option.none(),
     }),
   })
 
@@ -603,6 +665,7 @@ const pressInsert = (
         buffer,
         fate: { _tag: 'Plain', input },
         began: Option.none(),
+        clipboard: Option.none(),
       }
 
 export const press = (
@@ -628,6 +691,7 @@ export const again = (
     kept,
     fate: done,
     began: Option.none(),
+    clipboard: Option.none(),
   }
   const inStay = (stepped: (recording: Option.Option<Repeat>) => Step): Step =>
     Mode.match(vim.mode, {
@@ -635,7 +699,8 @@ export const again = (
       Insert: ({ recording }) => stepped(recording),
     })
   return Replayed.match(step, {
-    Run: ({ command, count }) => run(vim, buffer, kept, command, count),
+    Run: ({ command, count, register }) =>
+      run(vim, buffer, kept, command, count, register),
     Typed: ({ input }) =>
       inStay(recording => pressInsert(vim, buffer, kept, recording, input)),
     Leave: () => inStay(recording => leaving(vim, buffer, kept, recording)),

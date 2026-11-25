@@ -478,7 +478,8 @@ body {
   color: var(--dim);
 }
 
-.warn {
+.warn,
+.notice {
   overflow: hidden;
   color: var(--ins);
   text-overflow: ellipsis;

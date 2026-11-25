@@ -13,6 +13,12 @@ export const Message = defineMessageUnion({
   ScrolledSurface: { top: Schema.Int },
   ResizedScreen: { rows: Schema.Int },
   CompletedLocate: { ticket: Schema.Int, answer: Answer },
+  CompletedReadClipboard: {
+    ticket: Schema.Int,
+    maybeText: Schema.Option(Schema.String),
+  },
+  SucceededWriteClipboard: {},
+  FailedWriteClipboard: {},
   CompletedRevealCaret: {},
   FocusedKeyboard: {},
   BlurredKeyboard: {},

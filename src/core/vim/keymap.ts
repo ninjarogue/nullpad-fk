@@ -24,12 +24,16 @@ export const InsertAt = Schema.Literals([
 ])
 export type InsertAt = typeof InsertAt.Type
 
+export const SelectionEdge = Schema.Literals(['Start', 'End'])
+export type SelectionEdge = typeof SelectionEdge.Type
+
 export const Command = Schema.TaggedUnion({
   Move: { motion: MotionName },
   Operate: { operator: OperatorName, target: TargetName },
   OperateAmount: { operator: OperatorName, amount: Amount },
   Put: { side: Side },
   Insert: { at: InsertAt },
+  InsertAsSelected: { at: SelectionEdge },
   Cancel: {},
   Travel: { way: History.Way },
   Repeat: {},
@@ -45,7 +49,7 @@ export const VisualCommand = Schema.TaggedUnion({
   Move: { motion: MotionName },
   Operate: { operator: OperatorName, reach: Reach },
   Replace: { side: Side },
-  Insert: { at: Schema.Literals(['Start', 'End']) },
+  Insert: { at: SelectionEdge },
   Pick: { object: ObjectName },
   Swap: {},
   Select: { kind: SelectionKind },

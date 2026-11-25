@@ -54,17 +54,25 @@ export const nothingKept: Kept = { registers: noRegisters, dot: Option.none() }
 export const Mode = Schema.TaggedUnion({
   Normal: {},
   Insert: { recording: Schema.Option(Repeat) },
-  Visual: { kind: Selection.Kind, anchor: Buffer.Position },
+  Visual: {
+    kind: Selection.Kind,
+    anchor: Buffer.Position,
+    column: Selection.Column,
+  },
 })
 export type Mode = typeof Mode.Type
 
-type Visual = Readonly<{ kind: Selection.Kind; anchor: Buffer.Position }>
+type Visual = Readonly<{
+  kind: Selection.Kind
+  anchor: Buffer.Position
+  column: Selection.Column
+}>
 
-const visualMode = (kind: Selection.Kind, anchor: Buffer.Position): Mode => ({
-  _tag: 'Visual',
-  kind,
-  anchor,
-})
+const visualMode = (
+  kind: Selection.Kind,
+  anchor: Buffer.Position,
+  column: Selection.Column,
+): Mode => ({ _tag: 'Visual', kind, anchor, column })
 
 const normalMode = Mode.cases.Normal.make({})
 
@@ -196,13 +204,19 @@ const leaveVisual = (
   if (vim.mode._tag !== 'Visual') {
     return vim
   }
-  const gone = (before.lines[before.caret.line] ?? before.lines[0]).id
   const ends = moved({ anchor: vim.mode.anchor, cursor: before.caret })
   const last: Last = {
     kind: vim.mode.kind,
-    anchor: Selection.markAt(after, ends.anchor, gone),
-    cursor: Selection.markAt(after, ends.cursor, gone),
-    want: vim.want,
+    anchor: Selection.markAt(after, ends.anchor),
+    cursor: Selection.markAt(after, ends.cursor),
+    want:
+      vim.want === 'Unset'
+        ? Selection.columnOf(
+            before,
+            Selection.endsOf(before, vim.mode.kind, vim.mode.anchor),
+            'AsInVisual',
+          )
+        : vim.want,
   }
   return { ...idle(vim), mode: normalMode, last: Option.some(last) }
 }
@@ -358,7 +372,7 @@ const furtherCopies = (
   { command, count, typed }: Repeat,
   lineCount: number,
 ): ReadonlyArray<Replayed> => {
-  if (command._tag !== 'Insert') {
+  if (command._tag !== 'Insert' && command._tag !== 'InsertAsSelected') {
     return []
   }
   const opensLine = command.at === 'LineBelow' || command.at === 'LineAbove'
@@ -484,7 +498,11 @@ const putOverStep = (
   )
   const normal: Vim = {
     ...Option.match(put, {
-      onNone: () => leaveVisual(vim, buffer),
+      onNone: () =>
+        leaveVisual(vim, buffer, deleted.buffer, () => ({
+          anchor: positionOf(buffer, range.from),
+          cursor: positionOf(buffer, range.from),
+        })),
       onSome: ({ buffer: after, first, last }) =>
         leaveVisual(vim, buffer, after, () => ({
           anchor: first,
@@ -641,6 +659,11 @@ const run = (
       vim: recordingStay,
       buffer: placeInsert(buffer, at),
     }),
+    InsertAsSelected: ({ at }): Step => ({
+      ...unchanged,
+      vim: recordingStay,
+      buffer: placeInsert(buffer, at === 'Start' ? 'Here' : 'After'),
+    }),
     Travel: ({ way }) => ({
       ...unchanged,
       vim: normal,
@@ -651,14 +674,20 @@ const run = (
         onNone: () => unchanged,
         onSome: last => ({
           ...unchanged,
-          fate: replayOf(last, count ?? last.count, buffer.lines.length),
+          fate: replayOf(
+            last,
+            last.command._tag === 'InsertAsSelected'
+              ? last.count
+              : (count ?? last.count),
+            buffer.lines.length,
+          ),
         }),
       }),
     Select: ({ kind }) => ({
       ...unchanged,
       vim: {
         ...cleared,
-        mode: visualMode(kind, buffer.caret),
+        mode: visualMode(kind, buffer.caret, 'AsInNormal'),
         want: Selection.wantBefore(buffer, vim.want),
       },
     }),
@@ -678,7 +707,7 @@ const run = (
             ...unchanged,
             vim: {
               ...cleared,
-              mode: visualMode(last.kind, anchor),
+              mode: visualMode(last.kind, anchor, 'AsInVisual'),
               want: last.want,
             },
             buffer: Buffer.moveTo(buffer, cursor),
@@ -705,6 +734,18 @@ const runVisual = (
     began: Option.none(),
     clipboard: Option.none(),
   }
+  const stays = (caret: Buffer.Position): boolean =>
+    caret.line === buffer.caret.line && caret.column === buffer.caret.column
+  const columnAfter = (caret: Buffer.Position): Selection.Column =>
+    stays(caret) ? visual.column : 'AsInVisual'
+  const wantWhere = (caret: Buffer.Position): Want =>
+    stays(caret)
+      ? Selection.columnOf(
+          buffer,
+          Selection.endsOf(buffer, visual.kind, visual.anchor),
+          visual.column,
+        )
+      : 'Unset'
   const left = (): Step => {
     const normal = leaveVisual(vim, buffer)
     return { ...unchanged, vim: normal, buffer: rest(normal, buffer, false) }
@@ -739,9 +780,13 @@ const runVisual = (
             want: 'Unset',
           }
         : { ...normal, want: 'Unset' }
+      const rested = rest(after, applied.buffer, false)
       return {
-        vim: after,
-        buffer: rest(after, applied.buffer, false),
+        vim:
+          operator === 'Yank'
+            ? { ...after, want: wantWhere(rested.caret) }
+            : after,
+        buffer: rested,
         kept: {
           registers: applied.registers,
           dot: operator === 'Delete' ? repeat : kept.dot,
@@ -754,10 +799,7 @@ const runVisual = (
     Insert: ({ at }): Step => {
       const ends = Selection.endsOf(buffer, visual.kind, visual.anchor)
       const stay: Repeat = {
-        command: {
-          _tag: 'Insert',
-          at: at === 'Start' ? 'Here' : 'After',
-        },
+        command: { _tag: 'InsertAsSelected', at },
         count,
         register: Operators.defaultRegister,
         typed: [],
@@ -791,14 +833,18 @@ const runVisual = (
             kept,
             visual,
             { side, count },
-            source.register,
+            visual.kind === 'Lines' && register._tag === 'BlackHole'
+              ? Option.some({ text: '\n', kind: 'Linewise' })
+              : source.register,
           )
     },
     Move: ({ motion }) => {
       const ends = Selection.endsOf(buffer, visual.kind, visual.anchor)
       const from = ends.cursor
       if (motionFails(motion, buffer, from, count)) {
-        return unchanged
+        return motion === 'LineEnd'
+          ? { ...unchanged, vim: toLineEnd(cleared) }
+          : unchanged
       }
       const { spot, want } = motionsOn('LineBreak')[motion](
         buffer,
@@ -806,10 +852,15 @@ const runVisual = (
         count,
         Selection.wantOf(buffer, ends, vim.want),
       )
+      const caret = positionOf(buffer, spot)
       return {
         ...unchanged,
-        vim: { ...cleared, want },
-        buffer: Buffer.moveTo(buffer, positionOf(buffer, spot)),
+        vim: {
+          ...cleared,
+          mode: visualMode(visual.kind, visual.anchor, columnAfter(caret)),
+          want,
+        },
+        buffer: Buffer.moveTo(buffer, caret),
       }
     },
     Pick: ({ object }): Step => {
@@ -818,6 +869,7 @@ const runVisual = (
         Selection.endsOf(buffer, visual.kind, visual.anchor),
         count ?? 1,
       )
+      const caret = positionOf(buffer, picked.cursor)
       return {
         ...unchanged,
         vim: {
@@ -825,22 +877,19 @@ const runVisual = (
           mode: visualMode(
             picked.kind === 'Kept' ? visual.kind : picked.kind,
             positionOf(buffer, picked.anchor),
+            columnAfter(caret),
           ),
-          want: 'Unset',
+          want: wantWhere(caret),
         },
-        buffer: Buffer.moveTo(buffer, positionOf(buffer, picked.cursor)),
+        buffer: Buffer.moveTo(buffer, caret),
       }
     },
     Swap: (): Step => ({
       ...unchanged,
       vim: {
         ...cleared,
-        mode: visualMode(visual.kind, buffer.caret),
-        want:
-          visual.anchor.line === buffer.caret.line &&
-          visual.anchor.column === buffer.caret.column
-            ? vim.want
-            : 'Unset',
+        mode: visualMode(visual.kind, buffer.caret, columnAfter(visual.anchor)),
+        want: wantWhere(visual.anchor),
       },
       buffer: Buffer.moveTo(buffer, visual.anchor),
     }),
@@ -849,9 +898,18 @@ const runVisual = (
         ? left()
         : {
             ...unchanged,
-            vim: { ...cleared, mode: visualMode(kind, visual.anchor) },
+            vim: {
+              ...cleared,
+              mode: visualMode(kind, visual.anchor, visual.column),
+            },
           },
-    Leave: left,
+    Leave: (): Step => {
+      const { vim: normal, ...step } = left()
+      return {
+        ...step,
+        vim: { ...normal, want: wantWhere(step.buffer.caret) },
+      }
+    },
     Ignore: () => unchanged,
   })
 }

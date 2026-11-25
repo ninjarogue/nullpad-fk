@@ -65,6 +65,20 @@ export const wantOf = (
     ? screenColumnOf(textOf(buffer, cursor.line), cursor.cell)
     : want
 
+export const Column = Schema.Literals(['AsInNormal', 'AsInVisual'])
+export type Column = typeof Column.Type
+
+export const columnOf = (
+  buffer: Buffer.Buffer,
+  { anchor, cursor }: Ends,
+  column: Column,
+): number => {
+  const text = textOf(buffer, cursor.line)
+  return column === 'AsInNormal' || isBefore(anchor, cursor)
+    ? caretColumnOf(text, cursor.cell)
+    : screenColumnOf(text, cursor.cell)
+}
+
 export const isOnLineBreak = (buffer: Buffer.Buffer, spot: Spot): boolean =>
   spot.cell >= cellsIn(buffer, spot.line)
 
@@ -139,13 +153,17 @@ export const Mark = Schema.Struct({
 })
 export type Mark = typeof Mark.Type
 
+const noLine = Buffer.LineId.make(-1)
+
 export const markAt = (
   buffer: Buffer.Buffer,
   { line, column }: Buffer.Position,
-  gone: Buffer.LineId,
-): Mark => ({ id: buffer.lines[line]?.id ?? gone, line, column })
+): Mark => ({ id: buffer.lines[line]?.id ?? noLine, line, column })
 
 const lineOf = ({ lines }: Buffer.Buffer, mark: Mark): number => {
+  if (mark.id === noLine) {
+    return Number.POSITIVE_INFINITY
+  }
   if (lines[mark.line]?.id === mark.id) {
     return mark.line
   }
@@ -242,15 +260,18 @@ export const rangeFrom = (
       cell: cellsIn(buffer, reached(lines)),
     }),
   })
-  return rangeOf(
-    buffer,
-    {
-      kind: amount._tag === 'Lines' ? 'Lines' : 'Letters',
-      anchor: cursor,
-      cursor: end,
-    },
-    'AsSelected',
-  )
+  return amount._tag === 'Lines'
+    ? {
+        from: cursor,
+        to: { line: end.line, cell: 0 },
+        kind: 'Linewise',
+        inclusive: true,
+      }
+    : rangeOf(
+        buffer,
+        { kind: 'Letters', anchor: cursor, cursor: end },
+        'AsSelected',
+      )
 }
 
 export const insertAt = (buffer: Buffer.Buffer, ends: Ends): Buffer.Position =>

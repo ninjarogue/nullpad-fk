@@ -195,6 +195,36 @@ const wrapsAt = (line: HTMLElement, column: number): boolean => {
   )
 }
 
+const cellWidth = (surface: HTMLElement): number =>
+  pixels(getComputedStyle(surface).fontSize) * jetBrainsMonoAdvanceEm
+
+const viewRight = (surface: HTMLElement): number =>
+  surface.getBoundingClientRect().left + surface.clientWidth
+
+const lineBreakBox = (
+  line: HTMLElement,
+  text: string,
+  origin: Readonly<{ left: number; top: number }>,
+  row: number,
+  cell: number,
+  mostRight: number,
+): Box =>
+  Option.match(
+    text.length === 0
+      ? Option.none()
+      : rangeRect(line, graphemeBefore(text, text.length), text.length),
+    {
+      onNone: () => ({ ...origin, width: cell }),
+      onSome: rect => ({
+        left: Math.min(rect.right, mostRight - cell),
+        top:
+          origin.top +
+          Math.floor((rect.top - origin.top + row / 2) / row) * row,
+        width: cell,
+      }),
+    },
+  )
+
 const caretBox = (
   line: HTMLElement,
   column: number,
@@ -681,11 +711,19 @@ const drawCaret = (surface: HTMLElement): void => {
       caret.style.display = 'none'
     },
     onSome: element => {
-      const box = caretBox(
-        element,
-        Number(surface.dataset['caretColumn']),
-        surface.dataset['caretEnd'] === 'true',
-      )
+      const column = Number(surface.dataset['caretColumn'])
+      const text = lineText(element)
+      const box =
+        surface.dataset['selected'] !== '' && column >= text.length
+          ? lineBreakBox(
+              element,
+              text,
+              textEdges(element),
+              sheetOf(surface).rowHeight,
+              cellWidth(surface),
+              viewRight(surface),
+            )
+          : caretBox(element, column, surface.dataset['caretEnd'] === 'true')
       const frame = surface.getBoundingClientRect()
       caret.style.display = ''
       caret.style.left = `${box.left - frame.left + surface.scrollLeft}px`
@@ -769,8 +807,8 @@ const selectionBoxes = (
   const bandTop = sheet.viewTop - screen
   const bandBottom = sheet.viewBottom + screen
   const row = sheet.rowHeight
-  const cell =
-    pixels(getComputedStyle(surface).fontSize) * jetBrainsMonoAdvanceEm
+  const cell = cellWidth(surface)
+  const mostRight = viewRight(surface)
   const range = document.createRange()
   const boxes: Array<SelectionBox> = []
   const lines = surface.querySelectorAll<HTMLElement>('.line')
@@ -819,19 +857,16 @@ const selectionBoxes = (
       }
     }
     if (index < selected.lastLine || selected.lineBreak) {
-      const lastLetter =
-        text.length === 0
-          ? Option.none()
-          : rangeRect(line, graphemeBefore(text, text.length), text.length)
-      const end = Option.match(lastLetter, {
-        onNone: () => ({ left: box.left + textLeft, top: box.top }),
-        onSome: rect => ({
-          left: Math.min(rect.right, box.right),
-          top: rowTop(rect.top),
-        }),
-      })
+      const end = lineBreakBox(
+        line,
+        text,
+        { left: box.left + textLeft, top: box.top },
+        row,
+        cell,
+        mostRight,
+      )
       if (end.top + row >= bandTop && end.top <= bandBottom) {
-        boxes.push({ ...end, width: cell, isLineBreak: true })
+        boxes.push({ ...end, isLineBreak: true })
       }
     }
   }

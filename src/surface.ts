@@ -1380,7 +1380,14 @@ export const surface = (
           spacer(frame.undrawnBelow, h),
         ],
       ),
-      h.div([h.Id('caret'), h.Class('cur'), h.AriaHidden(true)]),
+      h.div(
+        [h.Id('caret'), h.Class('cur'), h.AriaHidden(true)],
+        [
+          h.span([h.Class('cur-flip')]),
+          h.span([h.Class('cur-lift')]),
+          h.span([h.Class('cur-cap')]),
+        ],
+      ),
     ],
   )
 

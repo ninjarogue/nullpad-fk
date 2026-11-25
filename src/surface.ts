@@ -825,8 +825,30 @@ const observe = (surface: HTMLElement): Stream.Stream<SurfaceMessage> =>
           }
           const report = (top: number, atEnd: boolean) =>
             Queue.offerUnsafe(queue, Message.ScrolledSurface({ top, atEnd }))
-          const reportTop = () =>
+          const thumb = { isHeld: false, isAtEnd: false }
+          const reportTop = () => {
+            thumb.isAtEnd = thumb.isHeld && isAtEnd(surface)
             report(topLine(surface, sheetOf(surface)), isAtEnd(surface))
+          }
+          const holdThumb = () => {
+            thumb.isHeld = true
+            thumb.isAtEnd = isAtEnd(surface)
+            document.documentElement.style.setProperty(
+              '--held-sheet-height',
+              `${surface.querySelector('.sheet')?.getBoundingClientRect().height ?? 0}px`,
+            )
+          }
+          const releaseThumb = () => {
+            document.documentElement.style.removeProperty('--held-sheet-height')
+            if (thumb.isHeld && thumb.isAtEnd) {
+              scrollApp(surface, () => {
+                surface.scrollTop = surface.scrollHeight
+              })
+            }
+            thumb.isHeld = false
+          }
+          window.addEventListener('pointerup', releaseThumb, { signal })
+          window.addEventListener('pointercancel', releaseThumb, { signal })
           /**
            * Chrome scrolls a wheel turn on its compositor, ahead of the drawn lines, and paints blank screen until they arrive;
            * scrolled here, every painted frame shows drawn lines. Chrome hands over a wheel turn at the next frame, after keys
@@ -903,7 +925,11 @@ const observe = (surface: HTMLElement): Stream.Stream<SurfaceMessage> =>
           surface.addEventListener(
             'pointerdown',
             event => {
-              if (event.button !== 0 || isOnScrollbar(event)) {
+              if (isOnScrollbar(event)) {
+                holdThumb()
+                return
+              }
+              if (event.button !== 0) {
                 return
               }
               event.preventDefault()

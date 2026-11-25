@@ -805,3 +805,40 @@ test('dragging the scrollbar thumb to the bottom of a long wrapped note shows it
     'the cursor is on the line and column it had before the drag',
   ).toEqual(before)
 })
+
+test('dragging the scrollbar thumb past the bottom of the bar on a note of short and wrapped lines shows the last line and leaves the cursor where it was', async ({
+  nullpad,
+}) => {
+  await nullpad.page.setViewportSize({ width: 1280, height: 720 })
+  const note = Array.from(
+    { length: 450 },
+    (_, i) =>
+      `line ${i + 1} ${i % 4 === 0 ? 'lorem ipsum dolor sit amet '.repeat(12) : 'short'}`,
+  ).join('\n')
+  await nullpad.paste(note)
+  await nullpad.press('Control+Home')
+  const before = await nullpad.status()
+  const bar = await scrollbarOf(nullpad)
+  expect(
+    bar.width,
+    'the surface has a scrollbar taking layout width',
+  ).toBeGreaterThan(0)
+  const grab = { x: bar.x, y: bar.top + bar.width + 5 }
+  await nullpad.page.mouse.move(grab.x, grab.y)
+  await nullpad.page.mouse.down()
+  for (let i = 1; i <= 30; i++) {
+    await nullpad.page.mouse.move(grab.x, grab.y + ((719 - grab.y) * i) / 30)
+    await nullpad.page.waitForTimeout(30)
+  }
+  await nullpad.page.waitForTimeout(500)
+  await nullpad.page.mouse.up()
+  const after = await settleScroll(nullpad)
+  expect(
+    linesOf(after).at(-1)?.startsWith('line 450 '),
+    `the last line on screen after dragging the thumb past the bottom of the bar (rows ${after.rows[0]?.number}-${after.rows.at(-1)?.number})`,
+  ).toBe(true)
+  expect(
+    await nullpad.status(),
+    'the cursor is on the line and column it had before the drag',
+  ).toEqual(before)
+})

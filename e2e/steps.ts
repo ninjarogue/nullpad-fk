@@ -2,7 +2,13 @@ import { join } from 'node:path'
 
 import { type BrowserContext } from '@playwright/test'
 
-import { type Nullpad, type Screen, driver, linesOf } from './nullpad.ts'
+import {
+  type ClipboardKind,
+  type Nullpad,
+  type Screen,
+  driver,
+  linesOf,
+} from './nullpad.ts'
 
 type Point = Readonly<{ x: number; y: number }>
 type Spot = Readonly<{ row: number; cell: number }>
@@ -17,12 +23,20 @@ type Expectation = Readonly<{
   mode?: string
   pending?: string
   keydown?: string
+  notice?: string
+  clipboard?: string
 }>
+
+type ClipboardStep =
+  | Readonly<{ allow: ReadonlyArray<ClipboardKind> }>
+  | Readonly<{ copy: string }>
+  | Readonly<{ hold: boolean }>
 
 export type Step =
   | Readonly<{ type: string }>
   | Readonly<{ press: string; times?: number }>
   | Readonly<{ paste: string }>
+  | Readonly<{ clipboard: ClipboardStep }>
   | Readonly<{
       compose: string
       replacing?: Readonly<{ start: number; end: number }>
@@ -41,6 +55,7 @@ const stepKeys = [
   'type',
   'press',
   'paste',
+  'clipboard',
   'compose',
   'commit',
   'click',
@@ -136,6 +151,24 @@ export const parseStep = (value: unknown, index: number): Step => {
           }
         : fail('replacing takes { start, end }')
     }
+    case 'clipboard': {
+      const shape =
+        'clipboard takes { allow: ["read", "write"] }, { copy: "text" } or { hold: true }'
+      if (!isRecord(body) || Object.keys(body).length !== 1) {
+        return fail(shape)
+      }
+      const { allow, copy, hold } = body
+      if (
+        Array.isArray(allow) &&
+        allow.every(kind => kind === 'read' || kind === 'write')
+      ) {
+        return { clipboard: { allow } }
+      }
+      if (typeof copy === 'string') {
+        return { clipboard: { copy } }
+      }
+      return typeof hold === 'boolean' ? { clipboard: { hold } } : fail(shape)
+    }
     case 'click':
       if (isRecord(body)) {
         only(body, 'row' in body ? ['row', 'cell'] : ['x', 'y'])
@@ -193,7 +226,7 @@ export const parseStep = (value: unknown, index: number): Step => {
     case 'expect': {
       if (!isRecord(body)) {
         return fail(
-          'expect takes { text?, status?, under?, top?, full?, title?, finder?, mode?, pending?, keydown? }',
+          'expect takes { text?, status?, under?, top?, full?, title?, finder?, mode?, pending?, keydown?, notice?, clipboard? }',
         )
       }
       const fields = [
@@ -206,6 +239,8 @@ export const parseStep = (value: unknown, index: number): Step => {
         'mode',
         'pending',
         'keydown',
+        'notice',
+        'clipboard',
       ] as const
       const unknown = Object.keys(body).filter(
         key => ![...fields, 'full'].includes(key),
@@ -294,6 +329,55 @@ const finderText = (page: Page): Promise<string> =>
   })
 
 const lastKeydowns = new WeakMap<Page, string>()
+
+type AnotherApp = Awaited<ReturnType<Nullpad['outside']>>
+
+const otherApps = new WeakMap<Page, Promise<AnotherApp>>()
+
+const otherApp = (nullpad: Nullpad): Promise<AnotherApp> => {
+  const open = otherApps.get(nullpad.page) ?? nullpad.outside()
+  otherApps.set(nullpad.page, open)
+  return open
+}
+
+const playClipboard = async (
+  nullpad: Nullpad,
+  step: ClipboardStep,
+): Promise<void> => {
+  if ('allow' in step) {
+    await nullpad.allowClipboard(step.allow)
+  } else if ('copy' in step) {
+    await (await otherApp(nullpad)).copy(step.copy)
+  } else if (step.hold) {
+    await nullpad.holdClipboardReads()
+  } else {
+    await nullpad.releaseClipboardReads()
+  }
+}
+
+const checkClipboard = async (
+  nullpad: Nullpad,
+  expectation: Expectation,
+): Promise<Array<string>> => {
+  const misses: Array<string> = []
+  if (expectation.notice !== undefined) {
+    const notice = await nullpad.notice()
+    if (notice !== expectation.notice) {
+      misses.push(
+        `notice shows ${JSON.stringify(notice)}, expected ${JSON.stringify(expectation.notice)}`,
+      )
+    }
+  }
+  if (expectation.clipboard !== undefined) {
+    const copied = await (await otherApp(nullpad)).copied()
+    if (copied !== expectation.clipboard) {
+      misses.push(
+        `another app would paste ${JSON.stringify(copied)}, expected ${JSON.stringify(expectation.clipboard)}`,
+      )
+    }
+  }
+  return misses
+}
 
 const checkPage = async (
   page: Page,
@@ -404,6 +488,8 @@ export const play = async (
     await nullpad.press(step.press, step.times)
   } else if ('paste' in step) {
     await nullpad.paste(step.paste)
+  } else if ('clipboard' in step) {
+    await playClipboard(nullpad, step.clipboard)
   } else if ('compose' in step) {
     await nullpad.compose(step.compose, step.replacing)
   } else if ('commit' in step) {
@@ -434,6 +520,7 @@ export const play = async (
     return [
       ...check(await nullpad.screen(), step.expect),
       ...(await checkPage(nullpad.page, step.expect)),
+      ...(await checkClipboard(nullpad, step.expect)),
     ]
   }
   return []

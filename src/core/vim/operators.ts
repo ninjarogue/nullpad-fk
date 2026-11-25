@@ -14,22 +14,133 @@ export type Register = typeof Register.Type
 export const Registers = Schema.Struct({
   unnamed: Schema.Option(Register),
   yank: Schema.Option(Register),
+  named: Schema.Record(Schema.String, Register),
 })
 export type Registers = typeof Registers.Type
 
 export const noRegisters: Registers = {
   unnamed: Option.none(),
   yank: Option.none(),
+  named: {},
+}
+
+export const RegisterName = Schema.TaggedUnion({
+  Default: {},
+  Unnamed: {},
+  Yank: {},
+  Letter: { letter: Schema.String, appends: Schema.Boolean },
+  BlackHole: {},
+  Clipboard: {},
+})
+export type RegisterName = typeof RegisterName.Type
+
+export const defaultRegister = RegisterName.cases.Default.make({})
+
+export const clipboardRegister = RegisterName.cases.Clipboard.make({})
+
+const registersBySign: Readonly<Record<string, RegisterName>> = {
+  '"': RegisterName.cases.Unnamed.make({}),
+  '0': RegisterName.cases.Yank.make({}),
+  _: RegisterName.cases.BlackHole.make({}),
+  '+': clipboardRegister,
+  '*': clipboardRegister,
+}
+
+export const registerNamed = (key: string): Option.Option<RegisterName> => {
+  if (/^[a-zA-Z]$/u.test(key)) {
+    const letter = key.toLowerCase()
+    return Option.some(
+      RegisterName.cases.Letter.make({ letter, appends: key !== letter }),
+    )
+  }
+  return Option.fromUndefinedOr(registersBySign[key])
+}
+
+export type Source =
+  | Readonly<{ _tag: 'Held'; register: Option.Option<Register> }>
+  | Readonly<{ _tag: 'Clipboard' }>
+
+const held = (register: Option.Option<Register>): Source => ({
+  _tag: 'Held',
+  register,
+})
+
+export const registerFor = (registers: Registers, name: RegisterName): Source =>
+  RegisterName.match(name, {
+    Default: () => held(registers.unnamed),
+    Unnamed: () => held(registers.unnamed),
+    Yank: () => held(registers.yank),
+    Letter: ({ letter }) =>
+      held(Option.fromUndefinedOr(registers.named[letter])),
+    BlackHole: () => held(Option.none()),
+    Clipboard: (): Source => ({ _tag: 'Clipboard' }),
+  })
+
+export const fromClipboard = (text: string): Register => {
+  const unixText = text.replace(/\r\n?/gu, '\n')
+  return {
+    text: unixText,
+    kind: unixText.endsWith('\n') ? 'Linewise' : 'Charwise',
+  }
+}
+
+const appended = (old: Register, added: Register): Register => {
+  if (old.kind === 'Charwise' && added.kind === 'Charwise') {
+    return { text: old.text + added.text, kind: 'Charwise' }
+  }
+  return {
+    text:
+      old.kind === 'Charwise'
+        ? `${old.text}\n${added.text}`
+        : added.kind === 'Charwise'
+          ? `${old.text}${added.text}\n`
+          : old.text + added.text,
+    kind: 'Linewise',
+  }
+}
+
+export type Remembered = Readonly<{
+  registers: Registers
+  clipboard: Option.Option<string>
+}>
+
+const remembered = (
+  registers: Registers,
+  name: RegisterName,
+  register: Register,
+  isYank: boolean,
+): Remembered => {
+  const kept = (changed: Partial<Registers>): Remembered => ({
+    registers: { ...registers, ...changed },
+    clipboard: Option.none(),
+  })
+  const both = { unnamed: Option.some(register), yank: Option.some(register) }
+  return RegisterName.match(name, {
+    Default: () => kept(isYank ? both : { unnamed: Option.some(register) }),
+    Unnamed: () => kept(both),
+    Yank: () => kept(both),
+    Letter: ({ letter, appends }) => {
+      const old = registers.named[letter]
+      const whole =
+        appends && old !== undefined ? appended(old, register) : register
+      return kept({
+        unnamed: Option.some(whole),
+        named: { ...registers.named, [letter]: whole },
+      })
+    },
+    BlackHole: () => kept({}),
+    Clipboard: () => ({
+      ...kept({ unnamed: Option.some(register) }),
+      clipboard: Option.some(register.text),
+    }),
+  })
 }
 
 export const Side = Schema.Literals(['Before', 'After'])
 export type Side = typeof Side.Type
 
-export type Applied = Readonly<{
-  buffer: Buffer.Buffer
-  inserting: boolean
-  registers: Registers
-}>
+export type Applied = Remembered &
+  Readonly<{ buffer: Buffer.Buffer; inserting: boolean }>
 
 const lineText = (buffer: Buffer.Buffer, line: number): string =>
   (buffer.lines[line] ?? buffer.lines[0]).text
@@ -63,14 +174,16 @@ const registerOf = (buffer: Buffer.Buffer, range: Range): Register => {
   }
 }
 
-const isEmpty = (buffer: Buffer.Buffer, range: Range): boolean => {
+const isOneEmptyLine = (buffer: Buffer.Buffer): boolean =>
+  buffer.lines.length === 1 && buffer.lines[0].text === ''
+
+const coversNothing = (buffer: Buffer.Buffer, range: Range): boolean => {
   const from = positionOf(buffer, range.from)
   const to = positionOf(buffer, range.to)
   return (
-    (buffer.lines.length === 1 && buffer.lines[0].text === '') ||
-    (range.kind === 'Charwise' &&
-      from.line === to.line &&
-      from.column === to.column)
+    range.kind === 'Charwise' &&
+    from.line === to.line &&
+    from.column === to.column
   )
 }
 
@@ -118,49 +231,59 @@ const emptyLine = (buffer: Buffer.Buffer, range: Range): Buffer.Buffer => {
   )
 }
 
-const remembered = (
-  registers: Registers,
-  register: Register,
-  isYank: boolean,
-): Registers => ({
-  unnamed: Option.some(register),
-  yank: isYank ? Option.some(register) : registers.yank,
-})
-
 const toStart = (buffer: Buffer.Buffer, range: Range): Buffer.Buffer =>
   Buffer.moveTo(buffer, positionOf(buffer, range.from))
 
 export const operators: Readonly<
   Record<
     OperatorName,
-    (buffer: Buffer.Buffer, range: Range, registers: Registers) => Applied
+    (
+      buffer: Buffer.Buffer,
+      range: Range,
+      registers: Registers,
+      name: RegisterName,
+    ) => Applied
   >
 > = {
-  Delete: (buffer, picked, registers) => {
+  Delete: (buffer, picked, registers, name) => {
     const range = linewiseWhenBlankAround(buffer, picked)
-    return isEmpty(buffer, range)
-      ? { buffer: toStart(buffer, range), inserting: false, registers }
+    return isOneEmptyLine(buffer) || coversNothing(buffer, range)
+      ? {
+          buffer: toStart(buffer, range),
+          inserting: false,
+          registers,
+          clipboard: Option.none(),
+        }
       : {
           buffer: remove(buffer, range),
           inserting: false,
-          registers: remembered(registers, registerOf(buffer, range), false),
+          ...remembered(registers, name, registerOf(buffer, range), false),
         }
   },
-  Change: (buffer, range, registers) =>
-    isEmpty(buffer, range)
-      ? { buffer: toStart(buffer, range), inserting: true, registers }
-      : {
-          buffer:
-            range.kind === 'Linewise'
-              ? emptyLine(buffer, range)
-              : remove(buffer, range),
-          inserting: true,
-          registers: remembered(registers, registerOf(buffer, range), false),
-        },
-  Yank: (buffer, range, registers) => ({
+  Change: (buffer, range, registers, name) => {
+    const isNothing = coversNothing(buffer, range)
+    if (isOneEmptyLine(buffer) || (isNothing && !range.inclusive)) {
+      return {
+        buffer: toStart(buffer, range),
+        inserting: true,
+        registers,
+        clipboard: Option.none(),
+      }
+    }
+    return {
+      buffer: isNothing
+        ? toStart(buffer, range)
+        : range.kind === 'Linewise'
+          ? emptyLine(buffer, range)
+          : remove(buffer, range),
+      inserting: true,
+      ...remembered(registers, name, registerOf(buffer, range), false),
+    }
+  },
+  Yank: (buffer, range, registers, name) => ({
     buffer: toStart(buffer, range),
     inserting: false,
-    registers: remembered(registers, registerOf(buffer, range), true),
+    ...remembered(registers, name, registerOf(buffer, range), true),
   }),
 }
 

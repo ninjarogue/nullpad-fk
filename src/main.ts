@@ -15,6 +15,7 @@ import { modifyFields } from 'foldkit/struct'
 
 import { BrowserCrypto } from '@effect/platform-browser'
 
+import * as Clipboard from './clipboard'
 import * as Editor from './core/editor'
 import * as Finder from './core/finder'
 import { Input } from './core/input'
@@ -144,13 +145,44 @@ const show = (
   })
 
 const Locate = Command.define('Locate', {
-  args: { query: Editor.Query, revision: Schema.Int },
+  args: { ticket: Schema.Int, query: Editor.Query, revision: Schema.Int },
   messages: [Message.CompletedLocate],
-  execute: ({ query, revision }) =>
+  execute: ({ ticket, query, revision }) =>
     locate(query, revision).pipe(
-      Effect.map(answer => Message.CompletedLocate({ answer })),
+      Effect.map(answer => Message.CompletedLocate({ ticket, answer })),
     ),
 })
+
+const ReadClipboard = Command.define('ReadClipboard', {
+  args: { ticket: Schema.Int },
+  messages: [Message.CompletedReadClipboard],
+  execute: ({ ticket }) =>
+    Clipboard.readText.pipe(
+      Effect.map(maybeText =>
+        Message.CompletedReadClipboard({ ticket, maybeText }),
+      ),
+    ),
+})
+
+const WriteClipboard = Command.define('WriteClipboard', {
+  args: { text: Schema.String },
+  messages: [Message.SucceededWriteClipboard, Message.FailedWriteClipboard],
+  execute: ({ text }) =>
+    Clipboard.writeText(text).pipe(
+      Effect.map(isWritten =>
+        isWritten
+          ? Message.SucceededWriteClipboard()
+          : Message.FailedWriteClipboard(),
+      ),
+    ),
+})
+
+const ask = (need: Editor.Need) =>
+  Editor.Need.match(need, {
+    Locate: ({ ticket, query, revision }) =>
+      Locate({ ticket, query, revision }),
+    ReadClipboard: ({ ticket }) => ReadClipboard({ ticket }),
+  })
 
 const RevealCaret = Command.define('RevealCaret', {
   args: { align: Schema.Literals(['Nearest', 'Top']) },
@@ -473,9 +505,13 @@ const respond = (model: Model, outcome: Editor.Outcome): UpdateReturn => {
       edits: () => edits,
     }),
     commands: [
-      ...Option.match(outcome.locate, {
+      ...Option.match(outcome.writeClipboard, {
         onNone: () => [],
-        onSome: ({ query, revision }) => [Locate({ query, revision })],
+        onSome: text => [WriteClipboard({ text })],
+      }),
+      ...Option.match(outcome.need, {
+        onNone: () => [],
+        onSome: need => [ask(need)],
       }),
       ...(outcome.reveal === 'None'
         ? []
@@ -886,17 +922,31 @@ export const init: Runtime.ApplicationInit<
   )
 }
 
+const actsOfThePerson: ReadonlyArray<Message['_tag']> = [
+  'ReceivedInput',
+  'ClickedText',
+  'ClickedReadToggle',
+  'ClickedVimToggle',
+]
+
+const withoutNotice = (model: Model, message: Message): Model =>
+  actsOfThePerson.includes(message._tag) && Option.isSome(model.editor.notice)
+    ? modifyFields(model, { editor: Editor.withoutNotice })
+    : model
+
 const handle = (model: Model, message: Message) =>
   Message.match<UpdateReturn>(message, {
     ReceivedInput: ({ input }) => receiveInput(model, input),
     ClickedText: ({ x, line, yInLine }) =>
       respond(model, Editor.click(model.editor, x, line, yInLine)),
-    CompletedLocate: ({ answer }) =>
-      Update.combine(model, [
-        stepModel =>
-          respond(stepModel, Editor.located(stepModel.editor, answer)),
-        finishOpening,
-      ]),
+    CompletedLocate: ({ ticket, answer }) =>
+      respond(model, Editor.located(model.editor, ticket, answer)),
+    CompletedReadClipboard: ({ ticket, maybeText }) =>
+      respond(model, Editor.clipboardRead(model.editor, ticket, maybeText)),
+    SucceededWriteClipboard: () => ({ model }),
+    FailedWriteClipboard: () => ({
+      model: modifyFields(model, { editor: Editor.clipboardBlocked }),
+    }),
     ScrolledSurface: ({ top }) => ({
       model: modifyFields(model, {
         editor: editor => Editor.scrolled(editor, top),
@@ -1016,7 +1066,10 @@ const handle = (model: Model, message: Message) =>
   })
 
 export const update = (model: Model, message: Message): UpdateReturn => {
-  const next = handle(model, message)
+  const next = Update.combine(withoutNotice(model, message), [
+    stepModel => handle(stepModel, message),
+    finishOpening,
+  ])
   const isOn = Editor.isVimOn(next.model.editor)
   return Editor.isVimOn(model.editor) === isOn
     ? next

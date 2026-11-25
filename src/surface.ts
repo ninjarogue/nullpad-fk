@@ -1014,6 +1014,9 @@ export const statusLine = (
       ),
       h.span([h.Class('pending')], [status.pending]),
       h.span([h.Class('file')], [path]),
+      ...(status.notice === ''
+        ? []
+        : [h.span([h.Class('notice')], [status.notice])]),
       ...Option.match(maybeWarning, {
         onNone: () => [],
         onSome: warning => [h.span([h.Class('warn')], [warning])],

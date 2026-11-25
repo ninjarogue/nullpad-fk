@@ -2,7 +2,13 @@ import { Array, Option, Schema } from 'effect'
 
 import * as History from '../history'
 import { MotionName } from './motions'
-import { OperatorName, Side } from './operators'
+import {
+  OperatorName,
+  RegisterName,
+  Side,
+  defaultRegister,
+  registerNamed,
+} from './operators'
 import { TargetName } from './targets'
 
 export type Key = string
@@ -170,22 +176,36 @@ export const normal: ReadonlyArray<Binding> = [
 ]
 
 export const Pending = Schema.Struct({
+  outerCount: Schema.String,
+  register: Schema.String,
   count: Schema.String,
   keys: Schema.Array(Schema.String),
   innerCount: Schema.String,
 })
 export type Pending = typeof Pending.Type
 
-export const idle: Pending = { count: '', keys: [], innerCount: '' }
+export const idle: Pending = {
+  outerCount: '',
+  register: '',
+  count: '',
+  keys: [],
+  innerCount: '',
+}
 
 export const Advance = Schema.TaggedUnion({
-  Run: { command: Command, count: Schema.UndefinedOr(Schema.Int) },
+  Run: {
+    command: Command,
+    count: Schema.UndefinedOr(Schema.Int),
+    register: RegisterName,
+  },
   Wait: { pending: Pending },
   Drop: {},
 })
 export type Advance = typeof Advance.Type
 
 const maxCountDigits = 7
+
+const registerPrefix = '"'
 
 const startsWith = (
   keys: ReadonlyArray<Key>,
@@ -218,12 +238,53 @@ const countSlot = (
     : Option.none()
 }
 
-const countOf = (pending: Pending): number | undefined =>
-  pending.count === '' && pending.innerCount === ''
-    ? undefined
-    : Number(pending.count || '1') * Number(pending.innerCount || '1')
+const product = (counts: ReadonlyArray<string>): string => {
+  const typed = Array.filter(counts, count => count !== '')
+  return Array.isArrayEmpty(typed)
+    ? ''
+    : String(
+        Math.min(
+          Number.MAX_SAFE_INTEGER,
+          Array.reduce(typed, 1, (sum, count) => sum * Number(count)),
+        ),
+      )
+}
 
-export const advance = (
+const countOf = ({
+  outerCount,
+  count,
+  innerCount,
+}: Pending): number | undefined => {
+  const all = product([outerCount, count, innerCount])
+  return all === '' ? undefined : Number(all)
+}
+
+const registerOf = ({ register }: Pending): RegisterName =>
+  Option.getOrElse(registerNamed(register.slice(1)), () => defaultRegister)
+
+const awaitsRegisterName = (pending: Pending): boolean =>
+  pending.register === registerPrefix
+
+const namesRegister = (pending: Pending, key: Key): Advance =>
+  Option.match(registerNamed(key), {
+    onNone: () => Advance.cases.Drop.make({}),
+    onSome: () =>
+      Advance.cases.Wait.make({
+        pending: { ...pending, register: registerPrefix + key },
+      }),
+  })
+
+const startsRegister = (pending: Pending): Advance =>
+  Advance.cases.Wait.make({
+    pending: {
+      ...pending,
+      outerCount: product([pending.outerCount, pending.count]),
+      register: registerPrefix,
+      count: '',
+    },
+  })
+
+const advanceKeys = (
   bindings: ReadonlyArray<Binding>,
   pending: Pending,
   key: Key,
@@ -246,7 +307,11 @@ export const advance = (
         ),
         {
           onSome: ({ command }) =>
-            Advance.cases.Run.make({ command, count: countOf(pending) }),
+            Advance.cases.Run.make({
+              command,
+              count: countOf(pending),
+              register: registerOf(pending),
+            }),
           onNone: () =>
             candidates.length > 0
               ? Advance.cases.Wait.make({ pending: { ...pending, keys } })
@@ -255,6 +320,19 @@ export const advance = (
       )
     },
   })
+
+export const advance = (
+  bindings: ReadonlyArray<Binding>,
+  pending: Pending,
+  key: Key,
+): Advance => {
+  if (awaitsRegisterName(pending)) {
+    return namesRegister(pending, key)
+  }
+  return key === registerPrefix && pending.keys.length === 0
+    ? startsRegister(pending)
+    : advanceKeys(bindings, pending, key)
+}
 
 export const next = (
   bindings: ReadonlyArray<Binding>,
@@ -265,7 +343,15 @@ export const next = (
     about: binding.about,
   }))
 
-export const shown = ({ count, keys, innerCount }: Pending): string =>
+export const shown = ({
+  outerCount,
+  register,
+  count,
+  keys,
+  innerCount,
+}: Pending): string =>
+  outerCount +
+  register +
   count +
   Array.join(keys.slice(0, 1), '') +
   innerCount +

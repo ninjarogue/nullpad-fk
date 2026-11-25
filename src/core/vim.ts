@@ -1224,7 +1224,7 @@ const runVisual = (
               mode: visualMode(
                 visual.kind,
                 positionOf(buffer, other.anchor),
-                columnAfter(caret),
+                'AsInVisual',
               ),
               want: other.want,
             },

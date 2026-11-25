@@ -393,10 +393,8 @@ const anotherApp = async (page: Page) => {
   }
 }
 
-const vimTakesControlV = async (page: Page): Promise<boolean> =>
-  ['NORMAL', 'VISUAL', 'V-LINE', 'V-BLOCK'].includes(
-    await page.locator('.status .mode').innerText(),
-  )
+const isVimOff = async (page: Page): Promise<boolean> =>
+  (await page.locator('.status .mode').innerText()) === 'EDIT'
 
 export const driver = (page: Page, cdp: CDPSession) => {
   const screen = () => screenOf(page)
@@ -434,9 +432,9 @@ export const driver = (page: Page, cdp: CDPSession) => {
     },
     paste: async (text: string) => {
       await page.evaluate(value => navigator.clipboard.writeText(value), text)
-      const key = (await vimTakesControlV(page))
-        ? { key: 'V', code: 'KeyV', windowsVirtualKeyCode: 86, modifiers: 10 }
-        : { key: 'v', code: 'KeyV', windowsVirtualKeyCode: 86, modifiers: 2 }
+      const key = (await isVimOff(page))
+        ? { key: 'v', code: 'KeyV', windowsVirtualKeyCode: 86, modifiers: 2 }
+        : { key: 'V', code: 'KeyV', windowsVirtualKeyCode: 86, modifiers: 10 }
       await cdp.send('Input.dispatchKeyEvent', {
         type: 'rawKeyDown',
         ...key,

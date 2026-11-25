@@ -949,21 +949,21 @@ const miscRows: ReadonlyArray<Row> = [
 
 const statedRows: ReadonlyArray<Row> = [
   {
-    name: 'a count on i is accepted and does not repeat the text',
+    name: 'a count on i repeats the typed text',
     text: 'abc',
     at: [1, 2],
     keys: '3iX<Esc>',
-    after: 'aXbc',
+    after: 'aXXXbc',
     line: 1,
-    column: 2,
+    column: 4,
   },
   {
-    name: 'a count on o is accepted and opens one line',
+    name: 'a count on o opens that many lines',
     text: 'abc',
     at: [1, 1],
     keys: '2oX<Esc>',
-    after: 'abc\nX',
-    line: 2,
+    after: 'abc\nX\nX',
+    line: 3,
     column: 1,
   },
   {

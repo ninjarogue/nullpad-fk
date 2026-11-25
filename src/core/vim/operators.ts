@@ -3,10 +3,20 @@ import { Array, Option, Schema } from 'effect'
 import * as Buffer from '../buffer'
 import { cellAt, cellStart } from './cells'
 import { cellsIn, endOf, firstNonBlank, positionOf, spotOf } from './motions'
-import { Kind, type OperatorName, type Range } from './targets'
+import { type OperatorName, type Range, byKind } from './targets'
 
-export const Register = Schema.Struct({ text: Schema.String, kind: Kind })
+export const Register = Schema.TaggedUnion({
+  Charwise: { text: Schema.String },
+  Linewise: { text: Schema.String },
+})
 export type Register = typeof Register.Type
+
+export const letters = (text: string): Register => ({ _tag: 'Charwise', text })
+
+export const wholeLines = (text: string): Register => ({
+  _tag: 'Linewise',
+  text,
+})
 
 export const Registers = Schema.Struct({
   unnamed: Schema.Option(Register),
@@ -75,26 +85,22 @@ export const registerFor = (registers: Registers, name: RegisterName): Source =>
 
 export const fromClipboard = (text: string): Register => {
   const unixText = text.replace(/\r\n?/gu, '\n')
-  return {
-    text: unixText,
-    kind: unixText.endsWith('\n') ? 'Linewise' : 'Charwise',
-  }
+  return unixText.endsWith('\n') ? wholeLines(unixText) : letters(unixText)
 }
 
-const appended = (old: Register, added: Register): Register => {
-  if (old.kind === 'Charwise' && added.kind === 'Charwise') {
-    return { text: old.text + added.text, kind: 'Charwise' }
-  }
-  return {
-    text:
-      old.kind === 'Charwise'
-        ? `${old.text}\n${added.text}`
-        : added.kind === 'Charwise'
-          ? `${old.text}${added.text}\n`
-          : old.text + added.text,
-    kind: 'Linewise',
-  }
-}
+const appended = (old: Register, added: Register): Register =>
+  Register.match(old, {
+    Charwise: () =>
+      Register.match(added, {
+        Charwise: () => letters(old.text + added.text),
+        Linewise: () => wholeLines(`${old.text}\n${added.text}`),
+      }),
+    Linewise: () =>
+      Register.match(added, {
+        Charwise: () => wholeLines(`${old.text}${added.text}\n`),
+        Linewise: () => wholeLines(old.text + added.text),
+      }),
+  })
 
 export type Remembered = Readonly<{
   registers: Registers
@@ -149,40 +155,39 @@ const textsBetween = (
 ): ReadonlyArray<string> =>
   Array.map(buffer.lines.slice(first, last + 1), line => line.text)
 
-const registerOf = (buffer: Buffer.Buffer, range: Range): Register => {
-  if (range.kind === 'Linewise') {
-    return {
-      text: `${textsBetween(buffer, range.from.line, range.to.line).join('\n')}\n`,
-      kind: 'Linewise',
-    }
-  }
-  const from = positionOf(buffer, range.from)
-  const to = positionOf(buffer, range.to)
-  return {
-    text:
-      from.line === to.line
-        ? lineText(buffer, from.line).slice(from.column, to.column)
-        : [
-            lineText(buffer, from.line).slice(from.column),
-            ...textsBetween(buffer, from.line + 1, to.line - 1),
-            lineText(buffer, to.line).slice(0, to.column),
-          ].join('\n'),
-    kind: 'Charwise',
-  }
-}
+const registerOf = (buffer: Buffer.Buffer, range: Range): Register =>
+  byKind(range, {
+    Linewise: () =>
+      wholeLines(
+        `${textsBetween(buffer, range.from.line, range.to.line).join('\n')}\n`,
+      ),
+    Charwise: () => {
+      const from = positionOf(buffer, range.from)
+      const to = positionOf(buffer, range.to)
+      return letters(
+        from.line === to.line
+          ? lineText(buffer, from.line).slice(from.column, to.column)
+          : [
+              lineText(buffer, from.line).slice(from.column),
+              ...textsBetween(buffer, from.line + 1, to.line - 1),
+              lineText(buffer, to.line).slice(0, to.column),
+            ].join('\n'),
+      )
+    },
+  })
 
 const isOneEmptyLine = (buffer: Buffer.Buffer): boolean =>
   buffer.lines.length === 1 && buffer.lines[0].text === ''
 
-const coversNothing = (buffer: Buffer.Buffer, range: Range): boolean => {
-  const from = positionOf(buffer, range.from)
-  const to = positionOf(buffer, range.to)
-  return (
-    range.kind === 'Charwise' &&
-    from.line === to.line &&
-    from.column === to.column
-  )
-}
+const coversNothing = (buffer: Buffer.Buffer, range: Range): boolean =>
+  byKind(range, {
+    Charwise: () => {
+      const from = positionOf(buffer, range.from)
+      const to = positionOf(buffer, range.to)
+      return from.line === to.line && from.column === to.column
+    },
+    Linewise: () => false,
+  })
 
 const atFirstNonBlank = (buffer: Buffer.Buffer, line: number): Buffer.Buffer =>
   Buffer.moveTo(
@@ -190,17 +195,19 @@ const atFirstNonBlank = (buffer: Buffer.Buffer, line: number): Buffer.Buffer =>
     positionOf(buffer, { line, cell: firstNonBlank(buffer, line) }),
   )
 
-const remove = (buffer: Buffer.Buffer, range: Range): Buffer.Buffer => {
-  if (range.kind === 'Charwise') {
-    return Buffer.erase(
-      buffer,
-      positionOf(buffer, range.from),
-      positionOf(buffer, range.to),
-    )
-  }
-  const removed = Buffer.removeLines(buffer, range.from.line, range.to.line)
-  return atFirstNonBlank(removed, removed.caret.line)
-}
+const remove = (buffer: Buffer.Buffer, range: Range): Buffer.Buffer =>
+  byKind(range, {
+    Charwise: () =>
+      Buffer.erase(
+        buffer,
+        positionOf(buffer, range.from),
+        positionOf(buffer, range.to),
+      ),
+    Linewise: () => {
+      const removed = Buffer.removeLines(buffer, range.from.line, range.to.line)
+      return atFirstNonBlank(removed, removed.caret.line)
+    },
+  })
 
 const emptyLine = (buffer: Buffer.Buffer, range: Range): Buffer.Buffer => {
   const { line } = range.from
@@ -255,9 +262,10 @@ export const operators: Readonly<
     return {
       buffer: isNothing
         ? toStart(buffer, range)
-        : range.kind === 'Linewise'
-          ? emptyLine(buffer, range)
-          : remove(buffer, range),
+        : byKind(range, {
+            Linewise: () => emptyLine(buffer, range),
+            Charwise: () => remove(buffer, range),
+          }),
       inserting: true,
       ...remembered(registers, name, registerOf(buffer, range), false),
     }
@@ -288,10 +296,10 @@ const maxPutLines = 200_000
 
 export const boundedCount = (register: Register, count: number): number => {
   const lines = register.text.split('\n').length - 1
-  const units =
-    register.kind === 'Charwise' && lines === 0
-      ? maxPutUnitsOnOneLine
-      : maxPutUnits
+  const units = Register.match(register, {
+    Charwise: () => (lines === 0 ? maxPutUnitsOnOneLine : maxPutUnits),
+    Linewise: () => maxPutUnits,
+  })
   return Math.max(
     1,
     Math.min(
@@ -309,27 +317,34 @@ export const put = (
   count: number,
 ): Buffer.Buffer => {
   const times = boundedCount(register, count)
-  if (register.kind === 'Linewise') {
-    const at = buffer.caret.line + (side === 'After' ? 1 : 0)
-    const once = linesOf(register.text.slice(0, -1))
-    const added = Buffer.insertLines(
-      buffer,
-      at,
-      Array.flatten(Array.replicate(once, times)),
-    )
-    return atFirstNonBlank(added, at)
-  }
-  if (register.text === '') {
-    return buffer
-  }
-  const spot = spotOf(buffer)
-  const at =
-    side === 'After' && cellsIn(buffer, spot.line) > 0
-      ? endOf(buffer, spot)
-      : positionOf(buffer, spot)
-  const text = register.text.repeat(times)
-  const added = Buffer.insert(Buffer.moveTo(buffer, at), text)
-  return Buffer.moveTo(added, text.includes('\n') ? at : lastCellBefore(added))
+  return Register.match(register, {
+    Linewise: ({ text }) => {
+      const at = buffer.caret.line + (side === 'After' ? 1 : 0)
+      const once = linesOf(text.slice(0, -1))
+      const added = Buffer.insertLines(
+        buffer,
+        at,
+        Array.flatten(Array.replicate(once, times)),
+      )
+      return atFirstNonBlank(added, at)
+    },
+    Charwise: ({ text: once }) => {
+      if (once === '') {
+        return buffer
+      }
+      const spot = spotOf(buffer)
+      const at =
+        side === 'After' && cellsIn(buffer, spot.line) > 0
+          ? endOf(buffer, spot)
+          : positionOf(buffer, spot)
+      const text = once.repeat(times)
+      const added = Buffer.insert(Buffer.moveTo(buffer, at), text)
+      return Buffer.moveTo(
+        added,
+        text.includes('\n') ? at : lastCellBefore(added),
+      )
+    },
+  })
 }
 
 export type PutOver = Readonly<{
@@ -349,20 +364,26 @@ export const putOver = (
   count: number,
 ): PutOver => {
   const times = boundedCount(register, count)
-  const isLines = register.kind === 'Linewise'
   const at = positionOf(before, range.from)
-  if (range.kind === 'Linewise' || isLines) {
-    const once = linesOf(isLines ? register.text.slice(0, -1) : register.text)
+  const onLinesOfTheirOwn = (
+    once: Array.NonEmptyReadonlyArray<string>,
+  ): PutOver => {
     const lines = Array.flatten(Array.replicate(once, times))
-    const first = range.kind === 'Linewise' ? at.line : at.line + 1
-    const added =
-      range.kind === 'Linewise'
-        ? Buffer.insertLines(after, first, lines)
-        : Buffer.insert(Buffer.moveTo(after, at), `\n${lines.join('\n')}\n`)
+    const first = byKind(range, {
+      Linewise: () => at.line,
+      Charwise: () => at.line + 1,
+    })
+    const added = byKind(range, {
+      Linewise: () => Buffer.insertLines(after, first, lines),
+      Charwise: () =>
+        Buffer.insert(Buffer.moveTo(after, at), `\n${lines.join('\n')}\n`),
+    })
     const leftover = added.lines.length - 1
-    const removedAll =
-      range.kind === 'Linewise' &&
-      range.to.line - range.from.line + 1 === before.lines.length
+    const removedAll = byKind(range, {
+      Linewise: () =>
+        range.to.line - range.from.line + 1 === before.lines.length,
+      Charwise: () => false,
+    })
     return {
       buffer: atFirstNonBlank(
         removedAll ? Buffer.removeLines(added, leftover, leftover) : added,
@@ -372,17 +393,27 @@ export const putOver = (
       last: lastLetterOf(added, first + lines.length - 1),
     }
   }
-  if (register.text === '') {
-    return { buffer: after, first: at, last: at }
+  const inPlace = (once: string): PutOver => {
+    if (once === '') {
+      return { buffer: after, first: at, last: at }
+    }
+    const text = once.repeat(times)
+    const added = Buffer.insert(Buffer.moveTo(after, at), text)
+    const last = lastCellBefore(added)
+    return {
+      buffer: Buffer.moveTo(added, text.includes('\n') ? at : last),
+      first: at,
+      last,
+    }
   }
-  const text = register.text.repeat(times)
-  const added = Buffer.insert(Buffer.moveTo(after, at), text)
-  const last = lastCellBefore(added)
-  return {
-    buffer: Buffer.moveTo(added, text.includes('\n') ? at : last),
-    first: at,
-    last,
-  }
+  return Register.match(register, {
+    Linewise: ({ text }) => onLinesOfTheirOwn(linesOf(text.slice(0, -1))),
+    Charwise: ({ text }) =>
+      byKind(range, {
+        Linewise: () => onLinesOfTheirOwn(linesOf(text)),
+        Charwise: () => inPlace(text),
+      }),
+  })
 }
 
 export const blackHole = RegisterName.cases.BlackHole.make({})

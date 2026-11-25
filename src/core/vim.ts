@@ -23,6 +23,7 @@ import {
   type OperatorName,
   type Range,
   type TargetName,
+  byKind,
   isObject,
   targetFor,
 } from './vim/targets'
@@ -297,16 +298,20 @@ const changeBegan = (
   range: Range,
 ): Buffer.Position => {
   const from = positionOf(buffer, range.from)
-  if (range.kind === 'Charwise') {
-    return from
-  }
-  if (target === 'Lines' && range.from.line === range.to.line) {
-    const lineStart = firstNonBlankOf(buffer, range.from.line)
-    return Buffer.isBefore(buffer.caret, lineStart) ? buffer.caret : lineStart
-  }
-  return operator === 'Change' && range.to.line > range.from.line
-    ? { line: from.line + 1, column: from.column }
-    : from
+  return byKind(range, {
+    Charwise: () => from,
+    Linewise: () => {
+      if (target === 'Lines' && range.from.line === range.to.line) {
+        const lineStart = firstNonBlankOf(buffer, range.from.line)
+        return Buffer.isBefore(buffer.caret, lineStart)
+          ? buffer.caret
+          : lineStart
+      }
+      return operator === 'Change' && range.to.line > range.from.line
+        ? { line: from.line + 1, column: from.column }
+        : from
+    },
+  })
 }
 
 const maxReplayedInputs = 20_000
@@ -391,7 +396,7 @@ const furtherCopies = (
     1,
     Math.min(
       Operators.boundedCount(
-        { text: (opensLine ? '\n' : '') + text, kind: 'Charwise' },
+        Operators.letters((opensLine ? '\n' : '') + text),
         count ?? 1,
       ),
       Math.floor(most / Math.max(1, inputs)),
@@ -834,8 +839,8 @@ const runVisual = (
             kept,
             visual,
             { side, count },
-            visual.kind === 'Lines' && register._tag === 'BlackHole'
-              ? Option.some({ text: '\n', kind: 'Linewise' })
+            emptyLineFrom[visual.kind] && register._tag === 'BlackHole'
+              ? Option.some(Operators.wholeLines('\n'))
               : source.register,
           )
     },
@@ -913,6 +918,11 @@ const runVisual = (
     },
     Ignore: () => unchanged,
   })
+}
+
+const emptyLineFrom: Readonly<Record<Selection.Kind, boolean>> = {
+  Letters: false,
+  Lines: true,
 }
 
 const isPageKey = (input: Input): boolean =>
@@ -1236,10 +1246,14 @@ export const pendingKeys = (vim: Vim): string => Keymap.shown(vim)
 
 export type ModeName = 'Normal' | 'Insert' | 'Visual' | 'VisualLine'
 
+const visualModeNames: Readonly<Record<Selection.Kind, ModeName>> = {
+  Letters: 'Visual',
+  Lines: 'VisualLine',
+}
+
 export const modeName = (vim: Vim): ModeName =>
   Mode.match(vim.mode, {
     Normal: (): ModeName => 'Normal',
     Insert: (): ModeName => 'Insert',
-    Visual: ({ kind }): ModeName =>
-      kind === 'Lines' ? 'VisualLine' : 'Visual',
+    Visual: ({ kind }): ModeName => visualModeNames[kind],
   })

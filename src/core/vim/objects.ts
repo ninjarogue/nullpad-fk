@@ -624,6 +624,11 @@ const wordObject = (include: boolean, big: boolean): Object => {
   }
 }
 
+const isWholeLines: Readonly<Record<Selected['kind'], boolean>> = {
+  Letters: false,
+  Lines: true,
+}
+
 const paragraphObject = (include: boolean): Object => {
   const find = paragraph(include)
   return {
@@ -639,7 +644,7 @@ const paragraphObject = (include: boolean): Object => {
         ? Option.match(find(buffer, cursor, count), {
             onNone: () => kept(selected),
             onSome: ({ start, end }) =>
-              kind === 'Lines' && start.line === anchor.line
+              isWholeLines[kind] && start.line === anchor.line
                 ? more()
                 : {
                     anchor: start.line === anchor.line ? anchor : start,

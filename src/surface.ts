@@ -9,6 +9,7 @@ import {
   type Mode,
   type PaintedLine,
   Query,
+  type Selection,
   graphemeReach,
 } from './core/editor'
 import type { Keyboard } from './keyboard'
@@ -1299,6 +1300,11 @@ export const SurfacePort = Mount.defineStream('SurfacePort', {
       : Stream.never,
 })
 
+const selectionKinds: Readonly<Record<Selection['kind'], string>> = {
+  Letters: 'letters',
+  Lines: 'lines',
+}
+
 const lineView = (
   id: PaintedLine['id'],
   index: number,
@@ -1358,7 +1364,7 @@ export const surface = (
         onSome: ({ kind }) => [
           h.keyed('div')('selection', [
             h.Id('selection'),
-            h.DataAttribute('kind', kind === 'Lines' ? 'lines' : 'letters'),
+            h.DataAttribute('kind', selectionKinds[kind]),
             h.AriaHidden(true),
           ]),
         ],

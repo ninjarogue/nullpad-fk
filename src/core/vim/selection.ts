@@ -16,7 +16,7 @@ import {
   positionOf,
   spotAt,
 } from './motions'
-import type { OperatorName, Range } from './targets'
+import { type OperatorName, type Range, byKind } from './targets'
 
 export const Kind = Schema.Literals(['Letters', 'Lines'])
 export type Kind = typeof Kind.Type
@@ -82,6 +82,8 @@ export const columnOf = (
 export const isOnLineBreak = (buffer: Buffer.Buffer, spot: Spot): boolean =>
   spot.cell >= cellsIn(buffer, spot.line)
 
+export type Reach = 'AsSelected' | 'WholeLines'
+
 export type Shown = Readonly<{
   kind: Kind
   from: Buffer.Position
@@ -89,9 +91,16 @@ export type Shown = Readonly<{
   lineBreak: boolean
 }>
 
+const coversWholeLines: Readonly<
+  Record<Kind, Readonly<Record<Reach, boolean>>>
+> = {
+  Letters: { AsSelected: false, WholeLines: true },
+  Lines: { AsSelected: true, WholeLines: true },
+}
+
 export const shown = (buffer: Buffer.Buffer, ends: Ends): Shown => {
   const { first, last } = sorted(ends)
-  if (ends.kind === 'Lines') {
+  if (coversWholeLines[ends.kind].AsSelected) {
     return {
       kind: 'Lines',
       from: { line: first.line, column: 0 },
@@ -124,10 +133,10 @@ const linesOf = ({ anchor, cursor }: Ends, last: Spot): Range => {
 export const rangeOf = (
   buffer: Buffer.Buffer,
   ends: Ends,
-  reach: 'AsSelected' | 'WholeLines',
+  reach: Reach,
 ): Range => {
   const { first, last } = sorted(ends)
-  if (ends.kind === 'Lines' || reach === 'WholeLines') {
+  if (coversWholeLines[ends.kind][reach]) {
     return linesOf(ends, last)
   }
   if (!isOnLineBreak(buffer, last)) {
@@ -235,10 +244,13 @@ export const movedBy = (
   if (operator === 'Yank' || mark.line <= from.line) {
     return mark
   }
-  if (range.kind === 'Charwise') {
-    return { line: from.line, column: from.column + mark.column }
-  }
-  return { ...mark, line: operator === 'Delete' ? from.line : from.line + 1 }
+  return byKind(range, {
+    Charwise: () => ({ line: from.line, column: from.column + mark.column }),
+    Linewise: () => ({
+      ...mark,
+      line: operator === 'Delete' ? from.line : from.line + 1,
+    }),
+  })
 }
 
 export const Amount = Schema.TaggedUnion({
@@ -252,12 +264,12 @@ export type Amount = typeof Amount.Type
 export const amountOf = (
   buffer: Buffer.Buffer,
   ends: Ends,
-  reach: 'AsSelected' | 'WholeLines',
+  reach: Reach,
   want: Want,
 ): Amount => {
   const { first, last } = sorted(ends)
   const lines = last.line - first.line + 1
-  if (ends.kind === 'Lines' || reach === 'WholeLines') {
+  if (coversWholeLines[ends.kind][reach]) {
     return { _tag: 'Lines', lines }
   }
   if (want === 'End') {
@@ -301,18 +313,23 @@ export const rangeFrom = (
       cell: cellsIn(buffer, reached(lines)),
     }),
   })
-  return amount._tag === 'Lines'
-    ? {
-        from: cursor,
-        to: { line: end.line, cell: 0 },
-        kind: 'Linewise',
-        inclusive: true,
-      }
-    : rangeOf(
-        buffer,
-        { kind: 'Letters', anchor: cursor, cursor: end },
-        'AsSelected',
-      )
+  const letters = (): Range =>
+    rangeOf(
+      buffer,
+      { kind: 'Letters', anchor: cursor, cursor: end },
+      'AsSelected',
+    )
+  return Amount.match(amount, {
+    Lines: (): Range => ({
+      from: cursor,
+      to: { line: end.line, cell: 0 },
+      kind: 'Linewise',
+      inclusive: true,
+    }),
+    Width: letters,
+    Through: letters,
+    ToLineEnd: letters,
+  })
 }
 
 export const insertAt = (buffer: Buffer.Buffer, ends: Ends): Buffer.Position =>

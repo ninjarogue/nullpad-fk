@@ -233,7 +233,7 @@ const changeDrawn = (editor: Editor, change: DrawnChange): Editor => {
     : { ...next, drawnRevision: editor.drawnRevision + 1 }
 }
 
-const minLinesDrawnPastScreen = 125
+const minLinesDrawnPastScreen = 60
 
 const linesDrawnPastScreen = (editor: Editor): number =>
   Math.max(editor.screenRows, minLinesDrawnPastScreen)

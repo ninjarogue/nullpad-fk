@@ -456,6 +456,42 @@ const verticalRows: ReadonlyArray<Row> = [
     line: 2,
     column: 2,
   },
+  {
+    name: 'l that cannot move keeps the column j keeps',
+    text: 'abcdef\nab\nabcdef',
+    at: [1, 6],
+    keys: 'jlj',
+    after: 'abcdef\nab\nabcdef',
+    line: 3,
+    column: 6,
+  },
+  {
+    name: 'h that cannot move keeps the column j keeps',
+    text: 'abcdef\na\nabcdef',
+    at: [1, 6],
+    keys: 'jhj',
+    after: 'abcdef\na\nabcdef',
+    line: 3,
+    column: 6,
+  },
+  {
+    name: 'a counted $ that fails on the last line still sends k to the line end',
+    text: 'abcdef\nab',
+    at: [2, 1],
+    keys: '2$k',
+    after: 'abcdef\nab',
+    line: 1,
+    column: 6,
+  },
+  {
+    name: 'an operator whose text object is not there drops the column j kept',
+    text: 'abcdef\nab\nabcdef',
+    at: [1, 6],
+    keys: 'jdi(j',
+    after: 'abcdef\nab\nabcdef',
+    line: 3,
+    column: 2,
+  },
 ]
 
 const linesRows: ReadonlyArray<Row> = [
@@ -1811,6 +1847,15 @@ const objectsRows: ReadonlyArray<Row> = [
     after: 'abc def',
     line: 1,
     column: 2,
+  },
+  {
+    name: 'diw on an empty last line takes the letter above and its line break',
+    text: 'ab\n',
+    at: [2, 1],
+    keys: 'diw',
+    after: 'a',
+    line: 1,
+    column: 1,
   },
 ]
 

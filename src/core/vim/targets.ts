@@ -200,7 +200,7 @@ const ofObject =
       rangeOf(buffer, span),
     )
 
-const isObject = Schema.is(ObjectName)
+export const isObject = Schema.is(ObjectName)
 
 const targets: Readonly<Record<Exclude<TargetName, ObjectName>, Target>> = {
   Left: ofMotion('Left'),

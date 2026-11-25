@@ -23,6 +23,7 @@ import {
   type OperatorName,
   type Range,
   type TargetName,
+  isObject,
   targetFor,
 } from './vim/targets'
 
@@ -205,6 +206,8 @@ const leaveVisual = (
   }
   return { ...idle(vim), mode: normalMode, last: Option.some(last) }
 }
+
+const toLineEnd = (vim: Vim): Vim => ({ ...vim, want: 'End' })
 
 const interrupted = (vim: Vim): Vim => ({ ...idle(vim), want: 'Unset' })
 
@@ -590,7 +593,9 @@ const run = (
     Cancel: () => unchanged,
     Move: ({ motion }) => {
       if (motionFails(motion, buffer, spotOf(buffer), count)) {
-        return unchanged
+        return motion === 'LineEnd'
+          ? { ...unchanged, vim: toLineEnd(cleared) }
+          : unchanged
       }
       const { spot, want } = motions[motion](
         buffer,
@@ -608,7 +613,10 @@ const run = (
       Option.match(
         targetFor(operator, target)(buffer, spotOf(buffer), count, vim.want),
         {
-          onNone: () => unchanged,
+          onNone: () =>
+            isObject(target)
+              ? { ...unchanged, vim: interrupted(vim) }
+              : unchanged,
           onSome: range => operated(operator, target, range),
         },
       ),

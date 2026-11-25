@@ -126,8 +126,11 @@ const vertical =
   }
 
 const repeated =
-  (once: (buffer: Buffer.Buffer, from: Spot) => Spot): Motion =>
-  (buffer, from, count = 1) => {
+  (
+    once: (buffer: Buffer.Buffer, from: Spot) => Spot,
+    stuck: 'KeepsWant' | 'DropsWant',
+  ): Motion =>
+  (buffer, from, count = 1, want) => {
     let spot = from
     for (let left = count; left > 0; left -= 1) {
       const next = once(buffer, spot)
@@ -136,7 +139,7 @@ const repeated =
       }
       spot = next
     }
-    return free(spot)
+    return stuck === 'KeepsWant' && spot === from ? { spot, want } : free(spot)
   }
 
 const wordForward =
@@ -281,20 +284,23 @@ export type MotionName = typeof MotionName.Type
 const motionsFor = (
   lineEnd: LineEnd,
 ): Readonly<Record<MotionName, Motion>> => ({
-  Left: (_buffer, from, count = 1) =>
-    free({ ...from, cell: Math.max(0, from.cell - count) }),
-  Right: (buffer, from, count = 1) =>
-    free({
-      ...from,
-      cell: Math.min(endCell(buffer, from.line, lineEnd), from.cell + count),
-    }),
-  LeftAcrossLines: repeated(backwardAcrossLines(lineEnd)),
-  RightAcrossLines: repeated(forwardAcrossLines(lineEnd)),
+  Left: (_buffer, from, count = 1, want) =>
+    from.cell === 0
+      ? { spot: from, want }
+      : free({ ...from, cell: from.cell - Math.min(count, from.cell) }),
+  Right: (buffer, from, count = 1, want) => {
+    const end = endCell(buffer, from.line, lineEnd)
+    return from.cell >= end
+      ? { spot: from, want }
+      : free({ ...from, cell: Math.min(end, from.cell + count) })
+  },
+  LeftAcrossLines: repeated(backwardAcrossLines(lineEnd), 'KeepsWant'),
+  RightAcrossLines: repeated(forwardAcrossLines(lineEnd), 'KeepsWant'),
   Down: vertical(1, lineEnd),
   Up: vertical(-1, lineEnd),
-  WordForward: repeated(wordForward(lineEnd)),
-  WordBackward: repeated(wordBackward),
-  WordEnd: repeated(wordEnd(lineEnd)),
+  WordForward: repeated(wordForward(lineEnd), 'DropsWant'),
+  WordBackward: repeated(wordBackward, 'DropsWant'),
+  WordEnd: repeated(wordEnd(lineEnd), 'DropsWant'),
   LineStart: (_buffer, from) => free({ ...from, cell: 0 }),
   FirstNonBlank: (buffer, from) =>
     free({ ...from, cell: firstNonBlank(buffer, from.line) }),

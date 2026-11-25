@@ -602,11 +602,15 @@ const wordObject = (include: boolean, big: boolean): Object => {
       )
       return failed
         ? Option.none()
-        : Option.some({
-            start: anchor,
-            end: cursor,
-            reach: inclusive ? 'Inclusive' : 'Exclusive',
-          })
+        : Option.some(
+            isBefore(cursor, anchor)
+              ? { start: cursor, end: anchor, reach: 'Inclusive' }
+              : {
+                  start: anchor,
+                  end: cursor,
+                  reach: inclusive ? 'Inclusive' : 'Exclusive',
+                },
+          )
     },
     pick: (buffer, ends, count) => {
       const { anchor, cursor, failed } = walk(

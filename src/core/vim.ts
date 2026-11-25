@@ -22,10 +22,16 @@ export const Registers = Operators.Registers
 export type Registers = Operators.Registers
 export const noRegisters = Operators.noRegisters
 
+export const Recorded = Schema.TaggedUnion({
+  Keys: { text: Schema.String },
+  Other: { input: Input },
+})
+export type Recorded = typeof Recorded.Type
+
 export const Repeat = Schema.Struct({
   command: Keymap.Command,
   count: Schema.UndefinedOr(Schema.Int),
-  typed: Schema.Array(Input),
+  typed: Schema.Array(Recorded),
 })
 export type Repeat = typeof Repeat.Type
 
@@ -198,22 +204,30 @@ const maxReplayedLineCopies = 100_000_000
 
 const maxReplayedDeletes = 120
 
-const typedText = (input: Input): string =>
-  Input.match(input, {
-    Key: ({ key }) => (key === 'Enter' ? '\n' : ''),
-    Chord: () => '',
-    Text: ({ text }) => text,
-    Erase: () => '',
-    Paste: ({ text }) => text,
-    Preedit: () => '',
-    Commit: ({ text }) => text,
+const typedText = (recorded: Recorded): string =>
+  Recorded.match(recorded, {
+    Keys: ({ text }) => text,
+    Other: ({ input }) =>
+      Input.match(input, {
+        Key: ({ key }) => (key === 'Enter' ? '\n' : ''),
+        Chord: () => '',
+        Text: ({ text }) => text,
+        Erase: () => '',
+        Paste: ({ text }) => text,
+        Preedit: () => '',
+        Commit: ({ text }) => text,
+      }),
   })
 
-const isDeleteKey = (input: Input): boolean =>
-  input._tag === 'Key' && input.key === 'Delete'
+const inputCount = (recorded: Recorded): number =>
+  recorded._tag === 'Keys' ? recorded.text.length : 1
 
-const isTypedAscii = (input: Input): boolean =>
-  input._tag === 'Text' && input.byKey && /^[\x20-\x7e]*$/u.test(input.text)
+const isDeleteKey = (recorded: Recorded): boolean =>
+  recorded._tag === 'Other' &&
+  recorded.input._tag === 'Key' &&
+  recorded.input.key === 'Delete'
+
+const isKeys = (recorded: Recorded): boolean => recorded._tag === 'Keys'
 
 const typedStep = (input: Input): Replayed =>
   Replayed.cases.Typed.make({ input })
@@ -224,6 +238,21 @@ const enter = typedStep(
 
 const leave = Replayed.cases.Leave.make({})
 
+const runInserts =
+  /^(?<lineFeeds>\n*)(?<firstKey>[^\n]?)(?<throughFirstBreak>[^\n]*\n*)(?<keyAfterBreak>[^\n]?)(?<rest>[^]*)$/u
+
+const keySteps = (text: string): ReadonlyArray<Replayed> =>
+  Array.map(
+    Array.filter((runInserts.exec(text) ?? []).slice(1), part => part !== ''),
+    part => typedStep(Input.cases.Text.make({ text: part, byKey: true })),
+  )
+
+const stepsOf = (recorded: Recorded): ReadonlyArray<Replayed> =>
+  Recorded.match(recorded, {
+    Keys: ({ text }) => keySteps(text),
+    Other: ({ input }) => [typedStep(input)],
+  })
+
 const furtherCopies = (
   { command, count, typed }: Repeat,
   lineCount: number,
@@ -233,11 +262,15 @@ const furtherCopies = (
   }
   const opensLine = command.at === 'LineBelow' || command.at === 'LineAbove'
   const opening = opensLine ? [enter] : []
-  const copy = [...opening, ...Array.map(typed, typedStep)]
   const text = Array.join(Array.map(typed, typedText), '')
-  const isOneInsert = Array.every(typed, isTypedAscii)
+  const isOneRun = Array.every(typed, isKeys)
   const deletes = Array.filter(typed, isDeleteKey).length
-  const inputs = isOneInsert
+  const inputs = Array.reduce(
+    typed,
+    opening.length,
+    (sum, entry) => sum + inputCount(entry),
+  )
+  const most = isOneRun
     ? maxReplayedInputs
     : Math.min(maxReplayedInputs, maxReplayedLineCopies / lineCount)
   const copies = Math.max(
@@ -247,30 +280,34 @@ const furtherCopies = (
         { text: (opensLine ? '\n' : '') + text, kind: 'Charwise' },
         count ?? 1,
       ),
-      Math.floor(inputs / Math.max(1, copy.length)),
+      Math.floor(most / Math.max(1, inputs)),
       deletes === 0 ? Infinity : Math.floor(maxReplayedDeletes / deletes),
     ),
   )
   if (copies === 1) {
     return []
   }
-  if (!isOneInsert) {
-    return Array.drop(Array.flatten(Array.replicate(copy, copies)), copy.length)
+  if (!isOneRun) {
+    return Array.flatten(
+      Array.replicate(
+        [...opening, ...Array.flatMap(typed, stepsOf)],
+        copies - 1,
+      ),
+    )
   }
-  const rest = opensLine
-    ? text + `\n${text}`.repeat(copies - 2)
-    : text.repeat(copies - 1)
   return [
     ...opening,
-    ...(rest === ''
-      ? []
-      : [typedStep(Input.cases.Text.make({ text: rest, byKey: true }))]),
+    ...keySteps(
+      opensLine
+        ? text + `\n${text}`.repeat(copies - 2)
+        : text.repeat(copies - 1),
+    ),
   ]
 }
 
 const replayOf = (repeat: Repeat): ReadonlyArray<Replayed> => [
   Replayed.cases.Run.make({ command: repeat.command, count: repeat.count }),
-  ...Array.map(repeat.typed, typedStep),
+  ...Array.flatMap(repeat.typed, stepsOf),
   leave,
 ]
 
@@ -470,6 +507,45 @@ const leaving = (
     }),
   })
 
+const printableKeys = /^[\x20-\x7e\n]+$/u
+
+const runWith = (run: string, input: Input): Option.Option<string> => {
+  if (input._tag === 'Text') {
+    return input.byKey && printableKeys.test(input.text)
+      ? Option.some(run + input.text)
+      : Option.none()
+  }
+  if (input._tag !== 'Key' || run === '') {
+    return Option.none()
+  }
+  if (input.key === 'Enter') {
+    return Option.some(run + '\n')
+  }
+  if (input.key === 'Tab') {
+    return Option.some(run + '  ')
+  }
+  return input.key === 'Backspace' &&
+    run.length > 1 &&
+    !run.slice(-2).includes('\n')
+    ? Option.some(run.slice(0, -1))
+    : Option.none()
+}
+
+const typedWith = (
+  typed: ReadonlyArray<Recorded>,
+  input: Input,
+): ReadonlyArray<Recorded> => {
+  const last = typed[typed.length - 1]
+  const run = last?._tag === 'Keys' ? last.text : ''
+  return Option.match(runWith(run, input), {
+    onNone: () => [...typed, { _tag: 'Other', input }],
+    onSome: text => [
+      ...(run === '' ? typed : typed.slice(0, -1)),
+      { _tag: 'Keys', text },
+    ],
+  })
+}
+
 const pressInsert = (
   vim: Vim,
   buffer: Buffer.Buffer,
@@ -487,7 +563,7 @@ const pressInsert = (
                 _tag: 'Insert',
                 recording: Option.map(recording, repeat => ({
                   ...repeat,
-                  typed: [...repeat.typed, input],
+                  typed: typedWith(repeat.typed, input),
                 })),
               },
             }

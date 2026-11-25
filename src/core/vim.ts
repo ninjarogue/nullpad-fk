@@ -241,7 +241,7 @@ const firstNonBlankOf = (
 const changeBegan = (
   buffer: Buffer.Buffer,
   operator: OperatorName,
-  target: TargetName,
+  target: TargetName | 'Selection',
   range: Range,
 ): Buffer.Position => {
   const from = positionOf(buffer, range.from)
@@ -539,6 +539,7 @@ const runVisual = (
   visual: Visual,
   command: Keymap.VisualCommand,
   count: number | undefined,
+  register: Operators.RegisterName,
 ): Step => {
   const cleared = idle(vim)
   const unchanged: Step = {
@@ -554,6 +555,35 @@ const runVisual = (
     return { ...unchanged, vim: normal, buffer: rest(normal, buffer, false) }
   }
   return Keymap.VisualCommand.match(command, {
+    Operate: ({ operator, reach }) => {
+      const normal = leaveVisual(vim)
+      const range = Selection.rangeOf(
+        buffer,
+        Selection.endsOf(buffer, visual.kind, visual.anchor),
+        reach,
+      )
+      const applied = Operators.operators[operator](
+        buffer,
+        range,
+        kept.registers,
+        register,
+      )
+      const after: Vim = applied.inserting
+        ? {
+            ...normal,
+            mode: { _tag: 'Insert', recording: Option.none() },
+            want: 'Unset',
+          }
+        : { ...normal, want: 'Unset' }
+      return {
+        vim: after,
+        buffer: rest(after, applied.buffer, false),
+        kept: { ...kept, registers: applied.registers },
+        fate: done,
+        began: Option.some(changeBegan(buffer, operator, 'Selection', range)),
+        clipboard: applied.clipboard,
+      }
+    },
     Move: ({ motion }) => {
       const from = spotAt(buffer, buffer.caret, 'LineBreak')
       if (motionFails(motion, buffer, from, count)) {
@@ -663,7 +693,15 @@ const pressVisual = (
     onSome: key => {
       const advance = Keymap.advance(Keymap.visual, vim, key)
       return advance._tag === 'Run'
-        ? runVisual(vim, buffer, kept, visual, advance.command, advance.count)
+        ? runVisual(
+            vim,
+            buffer,
+            kept,
+            visual,
+            advance.command,
+            advance.count,
+            advance.register,
+          )
         : advance._tag === 'Wait'
           ? { ...unchanged, vim: { ...vim, ...advance.pending } }
           : { ...unchanged, vim: idle(vim) }

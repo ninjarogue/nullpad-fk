@@ -9,6 +9,7 @@ import {
   positionOf,
   spotAt,
 } from './motions'
+import type { Range } from './targets'
 
 export const Kind = Schema.Literals(['Letters', 'Lines'])
 export type Kind = typeof Kind.Type
@@ -69,5 +70,40 @@ export const shown = (buffer: Buffer.Buffer, ends: Ends): Shown => {
     from: positionOf(buffer, first),
     to: lineBreak ? positionOf(buffer, last) : endOf(buffer, last),
     lineBreak,
+  }
+}
+
+const linesOf = ({ anchor, cursor }: Ends, last: Spot): Range => {
+  const anchorLineStart = { line: anchor.line, cell: 0 }
+  return {
+    from: isBefore(anchorLineStart, cursor) ? anchorLineStart : cursor,
+    to: { line: last.line, cell: 0 },
+    kind: 'Linewise',
+    inclusive: true,
+  }
+}
+
+export const rangeOf = (
+  buffer: Buffer.Buffer,
+  ends: Ends,
+  reach: 'AsSelected' | 'WholeLines',
+): Range => {
+  const { first, last } = sorted(ends)
+  if (ends.kind === 'Lines' || reach === 'WholeLines') {
+    return linesOf(ends, last)
+  }
+  if (!isOnLineBreak(buffer, last)) {
+    return {
+      from: first,
+      to: { line: last.line, cell: last.cell + 1 },
+      kind: 'Charwise',
+      inclusive: true,
+    }
+  }
+  return {
+    from: first,
+    to: last.line < lastLine(buffer) ? { line: last.line + 1, cell: 0 } : last,
+    kind: 'Charwise',
+    inclusive: false,
   }
 }

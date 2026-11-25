@@ -35,8 +35,12 @@ export const Command = Schema.TaggedUnion({
 })
 export type Command = typeof Command.Type
 
+export const Reach = Schema.Literals(['AsSelected', 'WholeLines'])
+export type Reach = typeof Reach.Type
+
 export const VisualCommand = Schema.TaggedUnion({
   Move: { motion: MotionName },
+  Operate: { operator: OperatorName, reach: Reach },
   Swap: {},
   Select: { kind: SelectionKind },
   Leave: {},
@@ -217,6 +221,17 @@ const keysWithAnArgument: ReadonlyArray<Key> = [
 
 const leave = VisualCommand.cases.Leave.make({})
 
+const operateOn = (
+  notation: string,
+  operator: OperatorName,
+  reach: Reach,
+): Binding<VisualCommand> =>
+  bind(
+    notation,
+    VisualCommand.cases.Operate.make({ operator, reach }),
+    `${verbs[operator]} ${reach === 'WholeLines' ? 'the lines' : 'the selection'}`,
+  )
+
 export const visual: ReadonlyArray<Binding<VisualCommand>> = [
   ...Array.map(motionRows, ([notation, motion, about]) =>
     bind(notation, VisualCommand.cases.Move.make({ motion }), about),
@@ -232,6 +247,18 @@ export const visual: ReadonlyArray<Binding<VisualCommand>> = [
     VisualCommand.cases.Select.make({ kind: 'Lines' }),
     'select lines, or leave',
   ),
+  operateOn('d', 'Delete', 'AsSelected'),
+  operateOn('x', 'Delete', 'AsSelected'),
+  operateOn('<Del>', 'Delete', 'AsSelected'),
+  operateOn('y', 'Yank', 'AsSelected'),
+  operateOn('c', 'Change', 'AsSelected'),
+  operateOn('s', 'Change', 'AsSelected'),
+  operateOn('X', 'Delete', 'WholeLines'),
+  operateOn('D', 'Delete', 'WholeLines'),
+  operateOn('Y', 'Yank', 'WholeLines'),
+  operateOn('C', 'Change', 'WholeLines'),
+  operateOn('S', 'Change', 'WholeLines'),
+  operateOn('R', 'Change', 'WholeLines'),
   bind('<Esc>', leave, 'leave'),
   bind('<C-[>', leave, 'leave'),
   bind('<C-e>', leave, 'leave'),

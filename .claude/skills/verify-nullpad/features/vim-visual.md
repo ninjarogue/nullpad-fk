@@ -8,7 +8,7 @@ With vim on, `v` selects letters and `V` selects whole lines. Motions and text o
 - `visual-line-break` puts the cursor end on the line break with `$`, `l` or Space. The selection then holds that `\n`, and it is drawn one cell wide. `v` on an empty line selects its line break, and `vd` removes the line.
 - `visual-objects` selects with `iw aw iW aW ip ap i" a" i' a' i( a( i[ a[ i{ a{ i< a<` and their other spellings, and a second object grows the selection. `ip` in `v` makes whole lines, and `iw`, `i(` and `i"` in `V` make letters.
 - `visual-operators` runs `d x` and Delete, `y`, `c s`, the whole-line `X D Y C S R`, each with a register before it.
-- `visual-put` replaces the selection with `p` or `P` and a count, and with a paste (Ctrl-V), which is one undo change.
+- `visual-put` replaces the selection with `p` or `P` and a count, and with a paste (Ctrl-Shift-V), which is one undo change.
 - `visual-insert` types at the start of the selection's first line with `I` and after its cursor end with `A`, as Vim does.
 - `visual-dot` repeats a VISUAL operator from the cursor on the same amount of text: the same count of lines, or on one line the same width on screen.
 - `visual-gv` selects the last selection again with `gv`, with its kind.

@@ -449,7 +449,7 @@
     }
   },
   {
-    "caption": "Type ggviw, then paste X with Ctrl-V",
+    "caption": "Type ggviw, then paste X with Ctrl-Shift-V",
     "note": "A paste replaces the selection and lands in NORMAL. One u undoes it."
   },
   {

@@ -59,6 +59,10 @@ body {
   cursor: text;
 }
 
+.surface:active:not(:has(:active)) {
+  overflow-anchor: none;
+}
+
 .sheet {
   box-sizing: border-box;
   min-height: 100%;

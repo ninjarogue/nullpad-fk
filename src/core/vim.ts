@@ -293,7 +293,7 @@ const run = (
   const repeat = Option.some({ command, count, typed: [] })
   const recordingStay: Vim = {
     ...normal,
-    mode: Mode.cases.Insert.make({ recording: repeat }),
+    mode: { _tag: 'Insert', recording: repeat },
   }
   return Keymap.Command.match(command, {
     Cancel: () => unchanged,
@@ -400,7 +400,7 @@ const pressNormal = (
     return {
       ...unchanged,
       vim: interrupted(vim),
-      fate: Fate.cases.Plain.make({ input }),
+      fate: { _tag: 'Plain', input },
     }
   }
   return Option.match(keyOf(input), {
@@ -483,17 +483,18 @@ const pressInsert = (
         vim: isRecorded(buffer, input)
           ? {
               ...vim,
-              mode: Mode.cases.Insert.make({
+              mode: {
+                _tag: 'Insert',
                 recording: Option.map(recording, repeat => ({
                   ...repeat,
                   typed: [...repeat.typed, input],
                 })),
-              }),
+              },
             }
           : vim,
         buffer,
         kept,
-        fate: Fate.cases.Plain.make({ input }),
+        fate: { _tag: 'Plain', input },
         began: Option.none(),
       }
 

@@ -2838,6 +2838,26 @@ test('Ctrl-C leaves VISUAL as in Vim', async ({ nullpad }) => {
   ).toMatchObject({ line: 1, column: 5 })
 })
 
+test('P of whole lines over a selection on an emptied note leaves no empty last line, as in Vim', async ({
+  nullpad,
+}) => {
+  await begin(nullpad, 'a\nb')
+  await play(nullpad, 'dGvP')
+  expect(
+    await nullpad.text(),
+    'dG then vP: the lines go under the empty line, and nothing follows them',
+  ).toBe('\na\nb')
+  await play(nullpad, 'u')
+  expect(await nullpad.text(), 'u empties the note again').toBe('')
+  await nullpad.press('Control+v')
+  await play(nullpad, 'P')
+  expect(
+    await nullpad.text(),
+    'Ctrl-V then P: the lines replace the empty line',
+  ).toBe('a\nb')
+  expect(await modeOf(nullpad), 'the put lands in NORMAL').toBe('NORMAL')
+})
+
 for (const scale of [1.25, 1.75]) {
   test(`the rows of a highlight join with no gap at ${scale * 100}% scale`, async ({
     browser,

@@ -838,21 +838,21 @@ const selectionBoxes = (
       const stop = domPoint(line, to)
       range.setStart(start.node, start.offset)
       range.setEnd(stop.node, stop.offset)
-      const drawn: Array<Span> = []
-      for (const rect of range.getClientRects()) {
-        if (
-          rect.width > 0 &&
-          rect.bottom >= bandTop &&
-          rect.top <= bandBottom
-        ) {
-          drawn.push({
-            left: rect.left,
-            right: rect.right,
-            top: rowTop(rect.top),
-          })
-        }
-      }
-      for (const { left, right, top } of joinedWhereTouching(drawn)) {
+      const spans = Array.fromIterable(range.getClientRects())
+        .filter(rect => rect.bottom >= bandTop && rect.top <= bandBottom)
+        .map(rect => ({
+          left: rect.left,
+          right: rect.right,
+          top: rowTop(rect.top),
+        }))
+      const wide = spans.filter(span => span.right > span.left)
+      const drawn =
+        wide.length > 0
+          ? joinedWhereTouching(wide)
+          : spans
+              .slice(0, 1)
+              .map(span => ({ ...span, right: span.left + minCaretWidthPx }))
+      for (const { left, right, top } of drawn) {
         boxes.push({ left, top, width: right - left, isLineBreak: false })
       }
     }

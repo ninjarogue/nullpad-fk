@@ -512,13 +512,21 @@ const pressNormal = (
   }
   return Option.match(keyOf(input), {
     onNone: () => unchanged,
-    onSome: key =>
-      Keymap.Advance.match(Keymap.advance(Keymap.normal, vim, key), {
-        Drop: () => ({ ...unchanged, vim: idle(vim) }),
-        Wait: ({ pending }) => ({ ...unchanged, vim: { ...vim, ...pending } }),
-        Run: ({ command, count, register }) =>
-          run(vim, buffer, kept, command, count, register),
-      }),
+    onSome: key => {
+      const advance = Keymap.advance(Keymap.normal, vim, key)
+      return advance._tag === 'Run'
+        ? run(
+            vim,
+            buffer,
+            kept,
+            advance.command,
+            advance.count,
+            advance.register,
+          )
+        : advance._tag === 'Wait'
+          ? { ...unchanged, vim: { ...vim, ...advance.pending } }
+          : { ...unchanged, vim: idle(vim) }
+    },
   })
 }
 

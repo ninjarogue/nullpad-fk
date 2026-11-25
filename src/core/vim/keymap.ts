@@ -2,7 +2,12 @@ import { Array, Option, Schema } from 'effect'
 
 import * as History from '../history'
 import { MotionName } from './motions'
-import { RegisterName, Side, defaultRegister, registerNamed } from './operators'
+import {
+  type RegisterName,
+  Side,
+  defaultRegister,
+  registerNamed,
+} from './operators'
 import { OperatorName, TargetName } from './targets'
 
 export type Key = string
@@ -28,33 +33,40 @@ export const Command = Schema.TaggedUnion({
 })
 export type Command = typeof Command.Type
 
-export type Binding = Readonly<{
+export type Binding<C> = Readonly<{
   keys: ReadonlyArray<Key>
-  command: Command
+  command: C
   about: string
 }>
 
 export const keysOf = (notation: string): ReadonlyArray<Key> =>
   notation.match(/<[^>]+>|./gu) ?? []
 
-const bind = (notation: string, command: Command, about: string): Binding => ({
+const bind = <C>(notation: string, command: C, about: string): Binding<C> => ({
   keys: keysOf(notation),
   command,
   about,
 })
 
-const move = (notation: string, motion: MotionName, about: string): Binding =>
+const move = (
+  notation: string,
+  motion: MotionName,
+  about: string,
+): Binding<Command> =>
   bind(notation, Command.cases.Move.make({ motion }), about)
 
-const insert = (notation: string, at: InsertAt, about: string): Binding =>
-  bind(notation, Command.cases.Insert.make({ at }), about)
+const insert = (
+  notation: string,
+  at: InsertAt,
+  about: string,
+): Binding<Command> => bind(notation, Command.cases.Insert.make({ at }), about)
 
 const operate = (
   notation: string,
   operator: OperatorName,
   target: TargetName,
   about: string,
-): Binding =>
+): Binding<Command> =>
   bind(notation, Command.cases.Operate.make({ operator, target }), about)
 
 const motionRows: ReadonlyArray<
@@ -127,7 +139,9 @@ const verbs: Readonly<Record<OperatorName, string>> = {
   Yank: 'yank',
 }
 
-const operatorRows = (operator: OperatorName): ReadonlyArray<Binding> => {
+const operatorRows = (
+  operator: OperatorName,
+): ReadonlyArray<Binding<Command>> => {
   const key = operatorKeys[operator]
   const verb = verbs[operator]
   return [
@@ -141,7 +155,7 @@ const operatorRows = (operator: OperatorName): ReadonlyArray<Binding> => {
   ]
 }
 
-export const normal: ReadonlyArray<Binding> = [
+export const normal: ReadonlyArray<Binding<Command>> = [
   ...Array.map(motionRows, ([notation, motion, about]) =>
     move(notation, motion, about),
   ),
@@ -186,16 +200,19 @@ export const idle: Pending = {
   innerCount: '',
 }
 
-export const Advance = Schema.TaggedUnion({
-  Run: {
-    command: Command,
-    count: Schema.UndefinedOr(Schema.Int),
-    register: RegisterName,
-  },
-  Wait: { pending: Pending },
-  Drop: {},
-})
-export type Advance = typeof Advance.Type
+export type Advance<C> =
+  | Readonly<{
+      _tag: 'Run'
+      command: C
+      count: number | undefined
+      register: RegisterName
+    }>
+  | Readonly<{ _tag: 'Wait'; pending: Pending }>
+  | Readonly<{ _tag: 'Drop' }>
+
+const drop: Advance<never> = { _tag: 'Drop' }
+
+const wait = (pending: Pending): Advance<never> => ({ _tag: 'Wait', pending })
 
 const maxCountDigits = 7
 
@@ -206,10 +223,10 @@ const startsWith = (
   prefix: ReadonlyArray<Key>,
 ): boolean => prefix.every((key, index) => keys[index] === key)
 
-const reachable = (
-  bindings: ReadonlyArray<Binding>,
+const reachable = <C>(
+  bindings: ReadonlyArray<Binding<C>>,
   keys: ReadonlyArray<Key>,
-): ReadonlyArray<Binding> =>
+): ReadonlyArray<Binding<C>> =>
   Array.filter(bindings, binding => startsWith(binding.keys, keys))
 
 const isOperatorKey = (key: Key | undefined): boolean =>
@@ -259,37 +276,30 @@ const registerOf = ({ register }: Pending): RegisterName =>
 const awaitsRegisterName = (pending: Pending): boolean =>
   pending.register === registerPrefix
 
-const namesRegister = (pending: Pending, key: Key): Advance =>
+const namesRegister = (pending: Pending, key: Key): Advance<never> =>
   Option.match(registerNamed(key), {
-    onNone: () => Advance.cases.Drop.make({}),
-    onSome: () =>
-      Advance.cases.Wait.make({
-        pending: { ...pending, register: registerPrefix + key },
-      }),
+    onNone: () => drop,
+    onSome: () => wait({ ...pending, register: registerPrefix + key }),
   })
 
-const startsRegister = (pending: Pending): Advance =>
-  Advance.cases.Wait.make({
-    pending: {
-      ...pending,
-      outerCount: product([pending.outerCount, pending.count]),
-      register: registerPrefix,
-      count: '',
-    },
+const startsRegister = (pending: Pending): Advance<never> =>
+  wait({
+    ...pending,
+    outerCount: product([pending.outerCount, pending.count]),
+    register: registerPrefix,
+    count: '',
   })
 
-const advanceKeys = (
-  bindings: ReadonlyArray<Binding>,
+const advanceKeys = <C>(
+  bindings: ReadonlyArray<Binding<C>>,
   pending: Pending,
   key: Key,
-): Advance =>
+): Advance<C> =>
   Option.match(countSlot(pending, key), {
-    onSome: slot =>
-      Advance.cases.Wait.make({
-        pending: {
-          ...pending,
-          [slot]: (pending[slot] + key).slice(0, maxCountDigits),
-        },
+    onSome: (slot): Advance<C> =>
+      wait({
+        ...pending,
+        [slot]: (pending[slot] + key).slice(0, maxCountDigits),
       }),
     onNone: () => {
       const keys = [...pending.keys, key]
@@ -300,26 +310,24 @@ const advanceKeys = (
           binding => binding.keys.length === keys.length,
         ),
         {
-          onSome: ({ command }) =>
-            Advance.cases.Run.make({
-              command,
-              count: countOf(pending),
-              register: registerOf(pending),
-            }),
+          onSome: ({ command }): Advance<C> => ({
+            _tag: 'Run',
+            command,
+            count: countOf(pending),
+            register: registerOf(pending),
+          }),
           onNone: () =>
-            candidates.length > 0
-              ? Advance.cases.Wait.make({ pending: { ...pending, keys } })
-              : Advance.cases.Drop.make({}),
+            candidates.length > 0 ? wait({ ...pending, keys }) : drop,
         },
       )
     },
   })
 
-export const advance = (
-  bindings: ReadonlyArray<Binding>,
+export const advance = <C>(
+  bindings: ReadonlyArray<Binding<C>>,
   pending: Pending,
   key: Key,
-): Advance => {
+): Advance<C> => {
   if (awaitsRegisterName(pending)) {
     return namesRegister(pending, key)
   }
@@ -328,8 +336,8 @@ export const advance = (
     : advanceKeys(bindings, pending, key)
 }
 
-export const next = (
-  bindings: ReadonlyArray<Binding>,
+export const next = <C>(
+  bindings: ReadonlyArray<Binding<C>>,
   pending: Pending,
 ): ReadonlyArray<Readonly<{ key: Key; about: string }>> =>
   Array.map(reachable(bindings, pending.keys), binding => ({

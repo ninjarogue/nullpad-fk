@@ -18,6 +18,16 @@ import { type Browser, chromium } from '@playwright/test'
 
 import { newestSource } from '../scripts/build-stamp.ts'
 import {
+  type Cue,
+  burnCaptions,
+  drawCaptions,
+  hasFfmpeg,
+  keyByKey,
+  pace,
+  pauseAfter,
+  readingTime,
+} from './record.ts'
+import {
   type Step,
   describe,
   openPage,
@@ -94,6 +104,7 @@ const doctor = async (): Promise<number> => {
   } else {
     say('dist/ absent; runs build fresh anyway')
   }
+  say(`ffmpeg ${hasFfmpeg() ? 'yes' : 'no; --record needs it'}`)
   for (const problem of problems) {
     say(`problem: ${problem}`)
   }
@@ -109,6 +120,7 @@ const run = async (
     width: number
     height: number
     video: boolean
+    record: boolean
   }>,
 ): Promise<number> => {
   const { out } = options
@@ -187,7 +199,7 @@ const run = async (
     const context = await owned.browser.newContext({
       viewport: { width: options.width, height: options.height },
       deviceScaleFactor: 1,
-      ...(options.video
+      ...(options.video || options.record
         ? {
             recordVideo: {
               dir: scratch,
@@ -196,11 +208,36 @@ const run = async (
           }
         : {}),
     })
+    const filmingSince = Date.now()
+    const cues: Array<Cue> = []
     const { nullpad } = await openPage(context, url, pageErrors)
     const { page } = nullpad
     log(`nullpad at ${url}, viewport ${options.width}x${options.height}`)
+    const playSlowly = async (step: Step): Promise<ReadonlyArray<string>> => {
+      if ('caption' in step) {
+        const cue = {
+          at: Date.now() - filmingSince,
+          caption: step.caption,
+          note: step.note ?? '',
+        }
+        cues.push(cue)
+        await page.waitForTimeout(readingTime(cue))
+        return []
+      }
+      for (const key of keyByKey(step)) {
+        const misses = await play(nullpad, key, out)
+        if (misses.length > 0) {
+          return misses
+        }
+        await page.waitForTimeout(pace.betweenKeys)
+      }
+      await page.waitForTimeout(pauseAfter(step))
+      return []
+    }
     for (const [index, step] of steps.entries()) {
-      const misses = await play(nullpad, step, out)
+      const misses = options.record
+        ? await playSlowly(step)
+        : await play(nullpad, step, out)
       const screen = await nullpad.screen()
       const preedit = await nullpad.preedit()
       log(`${index + 1}. ${describe(step)} | ${stateLine(screen, preedit)}`)
@@ -222,11 +259,29 @@ const run = async (
       animations: 'disabled',
     })
     log(picture(screen))
+    if (options.record) {
+      await page.waitForTimeout(pace.atEnd)
+    }
     const video = page.video()
     await context.close()
     if (video !== null) {
       await video.saveAs(join(out, 'video.webm'))
       await video.delete()
+    }
+    if (options.record) {
+      burnCaptions({
+        video: join(out, 'video.webm'),
+        videoWidth: options.width,
+        cues,
+        images: await drawCaptions(
+          owned.browser,
+          cues,
+          options.width,
+          join(scratch, 'captions'),
+        ),
+        out: join(out, 'recording.mp4'),
+      })
+      log(`recording ${join(out, 'recording.mp4')}, ${cues.length} captions`)
     }
   } catch (error) {
     failed = true
@@ -254,6 +309,7 @@ const main = async (): Promise<number> => {
       width: { type: 'string', default: '1000' },
       height: { type: 'string', default: '600' },
       video: { type: 'boolean', default: false },
+      record: { type: 'boolean', default: false },
     },
   })
   if (values.doctor) {
@@ -262,7 +318,7 @@ const main = async (): Promise<number> => {
   const [source] = positionals
   if (source === undefined) {
     console.error(
-      'usage: node e2e/drive.ts <steps.json | -> [--out dir] [--dist dir] [--width 1000] [--height 600] [--video]\n       node e2e/drive.ts --doctor',
+      'usage: node e2e/drive.ts <steps.json | -> [--out dir] [--dist dir] [--width 1000] [--height 600] [--video | --record]\n       node e2e/drive.ts --doctor',
     )
     return 2
   }
@@ -284,6 +340,21 @@ const main = async (): Promise<number> => {
     )
   }
   const steps = parseSteps(readFileSync(source === '-' ? 0 : source, 'utf8'))
+  if (values.record && !steps.some(step => 'caption' in step)) {
+    throw new Error(
+      '--record needs caption steps: put {"caption": "what is done", "note": "what to look for"} before each action a person should follow',
+    )
+  }
+  if (values.record && steps.some(step => 'resize' in step)) {
+    throw new Error(
+      '--record takes no resize step, because a video keeps one size: set the window with --width and --height',
+    )
+  }
+  if (values.record && !hasFfmpeg()) {
+    throw new Error(
+      '--record needs ffmpeg on the path to draw the captions onto the video',
+    )
+  }
   const stamp = new Date().toISOString().replaceAll(/[:.]/g, '-')
   return run(steps, {
     out: resolve(values.out ?? join(repo, 'verify-out', stamp)),
@@ -291,6 +362,7 @@ const main = async (): Promise<number> => {
     width,
     height,
     video: values.video,
+    record: values.record,
   })
 }
 

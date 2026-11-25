@@ -498,7 +498,7 @@ const tools: ReadonlyArray<Tool> = [
   {
     name: 'batch',
     description:
-      'Play a list of drive.ts steps in one call and stop at the first failed expect. A step is one of {"type":"abc"}, {"press":"ArrowUp","times":3}, {"paste":"a\\nb"}, {"compose":"に"}, {"commit":"日"}, {"click":{"row":2,"cell":5}}, {"wheel":300}, {"resize":{"width":600,"height":400}}, {"shot":"name"}, {"expect":{"text":"…","status":"2:4 3L","under":"o","top":"40","full":true}}.',
+      'Play a list of drive.ts steps in one call and stop at the first failed expect. A step is one of {"type":"abc"}, {"press":"ArrowUp","times":3}, {"paste":"a\\nb"}, {"compose":"に"}, {"commit":"日"}, {"click":{"row":2,"cell":5}}, {"wheel":300}, {"resize":{"width":600,"height":400}}, {"shot":"name"}, {"caption":"what is done","note":"what to look for"}, {"expect":{"text":"…","status":"2:4 3L","under":"o","top":"40","full":true}}.',
     properties: {
       steps: { type: 'array', items: { type: 'object' }, minItems: 1 },
       detail: {

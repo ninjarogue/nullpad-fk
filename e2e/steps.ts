@@ -48,6 +48,7 @@ export type Step =
   | Readonly<{ shot: string }>
   | Readonly<{ reload: true }>
   | Readonly<{ wait: number }>
+  | Readonly<{ caption: string; note?: string }>
   | Readonly<{ expect: Expectation }>
 
 const stepKeys = [
@@ -63,8 +64,12 @@ const stepKeys = [
   'shot',
   'reload',
   'wait',
+  'caption',
   'expect',
 ] as const
+
+const captionLimit = 60
+const noteLimit = 90
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -85,6 +90,7 @@ export const parseStep = (value: unknown, index: number): Step => {
     kind,
     ...(kind === 'press' ? ['times'] : []),
     ...(kind === 'compose' ? ['replacing'] : []),
+    ...(kind === 'caption' ? ['note'] : []),
   ]
   const extra = Object.keys(value).filter(key => !allowed.includes(key))
   if (extra.length > 0) {
@@ -191,6 +197,20 @@ export const parseStep = (value: unknown, index: number): Step => {
       return number(body, 'wait') > 0 && number(body, 'wait') <= 10_000
         ? { wait: number(body, 'wait') }
         : fail('wait takes milliseconds from 1 to 10000')
+    case 'caption': {
+      const line = (field: unknown, name: string, limit: number): string =>
+        typeof field === 'string' &&
+        field.length > 0 &&
+        field.length <= limit &&
+        !/[\n\r]/u.test(field)
+          ? field
+          : fail(`${name} takes one line of 1 to ${limit} characters`)
+      const caption = line(body, 'caption', captionLimit)
+      const note = value['note']
+      return note === undefined
+        ? { caption }
+        : { caption, note: line(note, 'note', noteLimit) }
+    }
     case 'resize':
       if (isRecord(body)) {
         only(body, ['width', 'height'])
@@ -494,6 +514,8 @@ export const play = async (
     )
   } else if ('wait' in step) {
     await nullpad.page.waitForTimeout(step.wait)
+  } else if ('caption' in step) {
+    return []
   } else {
     return [
       ...check(await nullpad.screen(), step.expect),

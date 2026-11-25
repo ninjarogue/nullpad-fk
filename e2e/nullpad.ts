@@ -552,6 +552,66 @@ export const driver = (page: Page, cdp: CDPSession) => {
           .map(node => node.textContent)
           .join(''),
       ),
+    selection: async (): Promise<string> => {
+      await settle(page)
+      return page.evaluate(() => {
+        const boxes = [...document.querySelectorAll('#selection > *')]
+          .map(element => ({
+            rect: element.getBoundingClientRect(),
+            isLineBreak: element.hasAttribute('data-break'),
+          }))
+          .filter(({ rect }) => rect.width > 0 && rect.height > 0)
+        const covers = (isLineBreak: boolean, x: number, y: number) =>
+          boxes.some(
+            box =>
+              box.isLineBreak === isLineBreak &&
+              x > box.rect.left - 0.5 &&
+              x < box.rect.right + 0.5 &&
+              y > box.rect.top &&
+              y < box.rect.bottom,
+          )
+        const segmenter = new Intl.Segmenter(undefined, {
+          granularity: 'grapheme',
+        })
+        const range = document.createRange()
+        let selected = ''
+        for (const line of document.querySelectorAll('.surface .line')) {
+          const lineBox = line.getBoundingClientRect()
+          const touched = boxes.filter(
+            ({ rect }) =>
+              rect.top + rect.height / 2 > lineBox.top &&
+              rect.top + rect.height / 2 < lineBox.bottom,
+          )
+          if (touched.length === 0) {
+            continue
+          }
+          for (const node of line.childNodes) {
+            if (!(node instanceof Text)) {
+              continue
+            }
+            for (const { segment, index } of segmenter.segment(node.data)) {
+              range.setStart(node, index)
+              range.setEnd(node, index + segment.length)
+              const [rect] = range.getClientRects()
+              if (
+                rect !== undefined &&
+                covers(
+                  false,
+                  (rect.left + rect.right) / 2,
+                  (rect.top + rect.bottom) / 2,
+                )
+              ) {
+                selected += segment
+              }
+            }
+          }
+          if (touched.some(box => box.isLineBreak)) {
+            selected += '\n'
+          }
+        }
+        return selected
+      })
+    },
     notice: async () => {
       await settle(page)
       return page

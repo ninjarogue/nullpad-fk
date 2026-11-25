@@ -84,6 +84,21 @@ body {
   color: var(--fg);
 }
 
+#selection {
+  position: absolute;
+  inset: 0 auto auto 0;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+  overflow-anchor: none;
+}
+
+#selection > div {
+  position: absolute;
+  height: var(--row);
+  background: var(--sel);
+}
+
 .spacer {
   height: calc(var(--lines) * var(--row));
   overflow-anchor: none;

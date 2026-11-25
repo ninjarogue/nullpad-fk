@@ -696,6 +696,166 @@ const drawCaret = (surface: HTMLElement): void => {
   })
 }
 
+type Selected = Readonly<{
+  firstLine: number
+  firstColumn: number
+  lastLine: number
+  endColumn: number
+  lineBreak: boolean
+}>
+
+const selectedOf = (surface: HTMLElement): Option.Option<Selected> => {
+  const written = surface.dataset['selected'] ?? ''
+  if (written === '') {
+    return Option.none()
+  }
+  const [
+    firstLine = 0,
+    firstColumn = 0,
+    lastLine = 0,
+    endColumn = 0,
+    lineBreak,
+  ] = Array.map(written.split(','), Number)
+  return Option.some({
+    firstLine,
+    firstColumn,
+    lastLine,
+    endColumn,
+    lineBreak: lineBreak === 1,
+  })
+}
+
+type SelectionBox = Readonly<{
+  left: number
+  top: number
+  width: number
+  isLineBreak: boolean
+}>
+
+const selectionBoxes = (
+  surface: HTMLElement,
+  selected: Selected,
+): ReadonlyArray<SelectionBox> => {
+  const sheet = sheetOf(surface)
+  const screen = sheet.viewBottom - sheet.viewTop
+  const bandTop = sheet.viewTop - screen
+  const bandBottom = sheet.viewBottom + screen
+  const row = sheet.rowHeight
+  const cell =
+    pixels(getComputedStyle(surface).fontSize) * jetBrainsMonoAdvanceEm
+  const range = document.createRange()
+  const boxes: Array<SelectionBox> = []
+  const lines = surface.querySelectorAll<HTMLElement>('.line')
+  const textLeft = Option.match(Option.fromNullishOr(lines[0]), {
+    onNone: () => 0,
+    onSome: first => textEdges(first).left - first.getBoundingClientRect().left,
+  })
+  for (const line of lines) {
+    const index = indexOf(line)
+    if (index < selected.firstLine || index > selected.lastLine) {
+      continue
+    }
+    const box = line.getBoundingClientRect()
+    if (box.bottom < bandTop || box.top > bandBottom) {
+      continue
+    }
+    const rowTop = (top: number): number =>
+      box.top + Math.floor((top - box.top + row / 2) / row) * row
+    const text = lineText(line)
+    const from = index === selected.firstLine ? selected.firstColumn : 0
+    const to =
+      index === selected.lastLine
+        ? Math.min(selected.endColumn, text.length)
+        : text.length
+    if (to > from) {
+      const start = domPoint(line, from, 'After')
+      const stop = domPoint(line, to)
+      range.setStart(start.node, start.offset)
+      range.setEnd(stop.node, stop.offset)
+      let open: SelectionBox | undefined
+      for (const rect of range.getClientRects()) {
+        if (rect.bottom < bandTop || rect.top > bandBottom) {
+          continue
+        }
+        const top = rowTop(rect.top)
+        if (open !== undefined && open.top === top) {
+          open = {
+            ...open,
+            width: Math.max(open.left + open.width, rect.right) - open.left,
+          }
+          boxes[boxes.length - 1] = open
+        } else if (rect.width > 0) {
+          open = {
+            left: rect.left,
+            top,
+            width: rect.width,
+            isLineBreak: false,
+          }
+          boxes.push(open)
+        }
+      }
+    }
+    if (index < selected.lastLine || selected.lineBreak) {
+      const lastLetter =
+        text.length === 0
+          ? Option.none()
+          : rangeRect(line, graphemeBefore(text, text.length), text.length)
+      const end = Option.match(lastLetter, {
+        onNone: () => ({ left: box.left + textLeft, top: box.top }),
+        onSome: rect => ({
+          left: Math.min(rect.right, box.right),
+          top: rowTop(rect.top),
+        }),
+      })
+      if (end.top + row >= bandTop && end.top <= bandBottom) {
+        boxes.push({ ...end, width: cell, isLineBreak: true })
+      }
+    }
+  }
+  return boxes
+}
+
+const selectionPool: Array<HTMLElement> = []
+
+const drawnSelection = { scrollTop: 0 }
+
+const drawSelection = (surface: HTMLElement): void => {
+  const layer = surface.querySelector<HTMLElement>('#selection')
+  const boxes =
+    layer === null
+      ? []
+      : Option.match(selectedOf(surface), {
+          onNone: () => [],
+          onSome: selected => selectionBoxes(surface, selected),
+        })
+  const frame = surface.getBoundingClientRect()
+  const shiftLeft = surface.scrollLeft - frame.left
+  const shiftTop = surface.scrollTop - frame.top
+  drawnSelection.scrollTop = surface.scrollTop
+  boxes.forEach((box, index) => {
+    const element = selectionPool[index] ?? document.createElement('div')
+    selectionPool[index] = element
+    element.style.cssText = `left:${box.left + shiftLeft}px;top:${box.top + shiftTop}px;width:${box.width}px`
+    element.toggleAttribute('data-break', box.isLineBreak)
+    if (element.parentNode !== layer) {
+      layer?.append(element)
+    }
+  })
+  for (const unused of selectionPool.slice(boxes.length)) {
+    unused.remove()
+  }
+}
+
+const redrawSelectionAfterScroll = (surface: HTMLElement): void => {
+  if (
+    surface.dataset['selected'] !== '' &&
+    Math.abs(surface.scrollTop - drawnSelection.scrollTop) >
+      surface.clientHeight / 2
+  ) {
+    drawSelection(surface)
+  }
+}
+
 const lastReveal = { askedAt: 0 }
 
 export const revealCaret = (align: 'Nearest' | 'Top'): Effect.Effect<void> =>
@@ -705,6 +865,7 @@ export const revealCaret = (align: 'Nearest' | 'Top'): Effect.Effect<void> =>
     Effect.andThen(Render.afterCommit),
     Effect.map(() =>
       Option.map(findSurface(), surface => {
+        drawSelection(surface)
         drawCaret(surface)
         scrollApp(surface, () =>
           surface.querySelector('#caret')?.scrollIntoView({
@@ -794,6 +955,7 @@ const observe = (surface: HTMLElement): Stream.Stream<SurfaceMessage> =>
                 ),
               }),
             )
+            drawSelection(surface)
             drawCaret(surface)
           }
           const resizes = new ResizeObserver(measure)
@@ -848,6 +1010,7 @@ const observe = (surface: HTMLElement): Stream.Stream<SurfaceMessage> =>
             }
           }
           const patches = new MutationObserver(() => {
+            drawSelection(surface)
             drawCaret(surface)
             scrollPending('Drop')
           })
@@ -859,12 +1022,17 @@ const observe = (surface: HTMLElement): Stream.Stream<SurfaceMessage> =>
               'data-caret-column',
               'data-caret-end',
               'data-caret-shape',
+              'data-selected',
             ],
           })
-          surface.addEventListener('scroll', reportTop, {
-            signal,
-            passive: true,
-          })
+          surface.addEventListener(
+            'scroll',
+            () => {
+              reportTop()
+              redrawSelectionAfterScroll(surface)
+            },
+            { signal, passive: true },
+          )
           surface.addEventListener(
             'wheel',
             event => {
@@ -973,9 +1141,27 @@ export const surface = (
       h.DataAttribute('caret-end', String(frame.caret.atRowEnd)),
       h.DataAttribute('caret-shape', frame.caret.shape),
       h.DataAttribute('last-line', String(frame.status.lineCount - 1)),
+      h.DataAttribute(
+        'selected',
+        Option.match(frame.selection, {
+          onNone: () => '',
+          onSome: ({ from, to, lineBreak }) =>
+            `${from.line},${from.column},${to.line},${to.column},${lineBreak ? 1 : 0}`,
+        }),
+      ),
       h.OnMount(SurfacePort()),
     ],
     [
+      ...Option.match(frame.selection, {
+        onNone: () => [],
+        onSome: ({ kind }) => [
+          h.keyed('div')('selection', [
+            h.Id('selection'),
+            h.DataAttribute('kind', kind === 'Lines' ? 'lines' : 'letters'),
+            h.AriaHidden(true),
+          ]),
+        ],
+      }),
       spacer(frame.undrawnAbove, h),
       ...Array.map(frame.lines, line =>
         lazyLine(line.id, lineView, [

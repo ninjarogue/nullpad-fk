@@ -584,6 +584,22 @@ const landingOf = (
 const lastLetterOf = (buffer: Buffer.Buffer, line: number): Buffer.Position =>
   positionOf(buffer, { line, cell: Math.max(0, cellsIn(buffer, line) - 1) })
 
+const withoutEmptyLastLine = (placed: Placed): Placed => {
+  const { lines, caret } = placed.buffer
+  const last = lines.length - 1
+  if (last === 0 || lines[last]?.text !== '') {
+    return placed
+  }
+  const shorter = Buffer.removeLines(placed.buffer, last, last)
+  const kept = (position: Buffer.Position): Buffer.Position =>
+    position.line < last ? position : lastLetterOf(shorter, last - 1)
+  return {
+    buffer: Buffer.moveTo(shorter, kept(caret)),
+    first: kept(placed.first),
+    last: kept(placed.last),
+  }
+}
+
 export const putOver = (
   before: Buffer.Buffer,
   after: Buffer.Buffer,
@@ -606,22 +622,17 @@ export const putOver = (
       Charwise: () =>
         Buffer.insert(Buffer.moveTo(after, at), `\n${lines.join('\n')}\n`),
     })
-    const leftover = added.lines.length - 1
-    const removedAll = byKind(range, {
-      Linewise: () =>
-        range.to.line - range.from.line + 1 === before.lines.length,
-      Charwise: () => false,
-    })
     return {
-      buffer: atFirstNonBlank(
-        removedAll ? Buffer.removeLines(added, leftover, leftover) : added,
-        first,
-      ),
+      buffer: atFirstNonBlank(added, first),
       first: { line: first, column: 0 },
       last: lastLetterOf(added, first + lines.length - 1),
     }
   }
-  return Register.match(register, {
+  const leftVimsEmptyBuffer = byKind(range, {
+    Linewise: () => range.to.line - range.from.line + 1 === before.lines.length,
+    Charwise: () => isOneEmptyLine(before),
+  })
+  const placed = Register.match(register, {
     Linewise: ({ text }) => onLinesOfTheirOwn(linesOf(text.slice(0, -1))),
     Charwise: ({ text }) =>
       byKind(range, {
@@ -642,6 +653,7 @@ export const putOver = (
         },
       }),
   })
+  return leftVimsEmptyBuffer ? withoutEmptyLastLine(placed) : placed
 }
 
 export const blackHole = RegisterName.cases.BlackHole.make({})
@@ -1063,7 +1075,7 @@ export const putOverBlock = (
     line: block.first,
     column: landingOf(after, block.first, cut.start, cut.edge),
   }
-  return Register.match(register, {
+  const placed = Register.match(register, {
     Charwise: ({ text }) =>
       text === '' || text.includes('\n')
         ? lettersAt(after, at, text, times)
@@ -1093,6 +1105,7 @@ export const putOverBlock = (
         count,
       ),
   })
+  return isOneEmptyLine(before) ? withoutEmptyLastLine(placed) : placed
 }
 
 export const homeOf = (

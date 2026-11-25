@@ -102,11 +102,11 @@ export const caretColumnOf = (line: Buffer.Line, cell: number): number => {
 export const cellAtScreenColumn = (
   line: Buffer.Line,
   wanted: number,
+  endCell: number,
 ): number => {
-  const cells = cellCount(line)
   let column = 0
   let cell = 0
-  while (cell < cells - 1) {
+  while (cell < endCell) {
     column += widthAt(cellText(line, cell), column)
     if (column > wanted) {
       return cell

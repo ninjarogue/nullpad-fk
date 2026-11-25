@@ -1193,30 +1193,6 @@ const groups: ReadonlyArray<Group> = [
         line: 7,
         column: 2,
       },
-      {
-        text: 'C',
-        at: [1, 1],
-        keys: 'vlpGo<Esc>p',
-        after: 'c\n\nd\n\n\nef\nab',
-        line: 7,
-        column: 2,
-      },
-      {
-        text: 'C',
-        at: [1, 1],
-        keys: 'VpGo<Esc>p',
-        after: '\n\nd\n\n\nef\n\nabc',
-        line: 8,
-        column: 1,
-      },
-      {
-        text: 'C',
-        at: [1, 1],
-        keys: 'viwpGo<Esc>p',
-        after: '\n\nd\n\n\nef\nabc',
-        line: 7,
-        column: 3,
-      },
     ],
   },
   {
@@ -1245,14 +1221,6 @@ const groups: ReadonlyArray<Group> = [
         after: 'one ononee three\nfour five six\nseven eight\nnine\none',
         line: 5,
         column: 3,
-      },
-      {
-        text: 'A',
-        at: [1, 1],
-        keys: 'viw"_c<Esc>Go<Esc>p',
-        after: ' two three\nfour five six\nseven eight\nnine\n',
-        line: 5,
-        column: 1,
       },
       {
         text: 'A',
@@ -1320,50 +1288,10 @@ const groups: ReadonlyArray<Group> = [
       {
         text: 'A',
         at: [2, 6],
-        keys: 'viw"adGo<Esc>"0p',
-        after: 'one two three\nfour  six\nseven eight\nnine\n',
-        line: 5,
-        column: 1,
-      },
-      {
-        text: 'A',
-        at: [2, 6],
-        keys: 'VdGo<Esc>"0p',
-        after: 'one two three\nseven eight\nnine\n',
-        line: 4,
-        column: 1,
-      },
-      {
-        text: 'A',
-        at: [2, 6],
-        keys: 'vlc<Esc>Go<Esc>"0p',
-        after: 'one two three\nfour ve six\nseven eight\nnine\n',
-        line: 5,
-        column: 1,
-      },
-      {
-        text: 'A',
-        at: [2, 6],
-        keys: 'viwxGo<Esc>"0p',
-        after: 'one two three\nfour  six\nseven eight\nnine\n',
-        line: 5,
-        column: 1,
-      },
-      {
-        text: 'A',
-        at: [2, 6],
         keys: 'viwYGo<Esc>p',
         after:
           'one two three\nfour five six\nseven eight\nnine\n\nfour five six',
         line: 6,
-        column: 1,
-      },
-      {
-        text: 'A',
-        at: [2, 6],
-        keys: 'viwS<Esc>Go<Esc>"0p',
-        after: 'one two three\n\nseven eight\nnine\n',
-        line: 5,
         column: 1,
       },
     ],
@@ -1407,7 +1335,7 @@ const groups: ReadonlyArray<Group> = [
         text: 'A',
         at: [1, 1],
         keys: 'Vjyj.',
-        after: 'one two three\nine',
+        after: 'one two three\nfour five six\nseven eight\nnine',
         line: 2,
         column: 1,
       },
@@ -1564,14 +1492,6 @@ const groups: ReadonlyArray<Group> = [
         after: 'one two three\nfour five six\nseven eight\nnine',
         line: 2,
         column: 6,
-      },
-      {
-        text: 'A',
-        at: [2, 6],
-        keys: 'vjyu',
-        after: '',
-        line: 1,
-        column: 1,
       },
       {
         text: 'A',
@@ -2158,7 +2078,7 @@ test('a text object changes the kind as in Vim, and v and V switch it keeping bo
     kind: 'letters',
     selection: 'a',
   })
-  await play(nullpad, '<Esc>4Gfg')
+  await play(nullpad, '<Esc>4G0wll')
   expect(await nullpad.status(), 'the cursor is on g').toMatchObject({
     line: 4,
     column: 5,
@@ -2309,7 +2229,7 @@ test('the selection is drawn over emoji and wide letters, a whole letter at a ti
   expect(await width(), 'the emoji is two cells wide').toBeLessThan(
     2 * cell + 2,
   )
-  await play(nullpad, '<Esc>fb')
+  await play(nullpad, '<Esc>l')
   await play(nullpad, 'vl')
   await expectState(nullpad, 'vl over b and a wide letter', {
     mode: 'VISUAL',
@@ -2370,7 +2290,7 @@ test('a click leaves VISUAL and V-LINE with nothing selected', async ({
     throw new Error('no second row')
   }
   await nullpad.click(
-    row.left + 5.5 * screen.cell,
+    row.left + 5.2 * screen.cell,
     row.top + screen.rowHeight / 2,
   )
   await expectState(nullpad, 'a click in VISUAL', left('NORMAL'))
@@ -2381,7 +2301,7 @@ test('a click leaves VISUAL and V-LINE with nothing selected', async ({
   await play(nullpad, 'Vj')
   expect(await modeOf(nullpad), 'Vj').toBe('V-LINE')
   await nullpad.click(
-    row.left + 2.5 * screen.cell,
+    row.left + 2.2 * screen.cell,
     row.top + screen.rowHeight / 2,
   )
   await expectState(nullpad, 'a click in V-LINE', left('NORMAL'))

@@ -505,13 +505,13 @@ const respond = (model: Model, outcome: Editor.Outcome): UpdateReturn => {
       edits: () => edits,
     }),
     commands: [
-      ...Option.match(outcome.need, {
-        onNone: () => [],
-        onSome: need => [ask(need)],
-      }),
       ...Option.match(outcome.writeClipboard, {
         onNone: () => [],
         onSome: text => [WriteClipboard({ text })],
+      }),
+      ...Option.match(outcome.need, {
+        onNone: () => [],
+        onSome: need => [ask(need)],
       }),
       ...(outcome.reveal === 'None'
         ? []

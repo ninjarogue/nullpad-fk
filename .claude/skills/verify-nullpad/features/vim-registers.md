@@ -12,7 +12,7 @@ With vim on, a `"` and a name before a command pick the register it writes or re
 - `register-dot` repeats a put with its register: `"bp.` puts `"b` twice.
 - `clipboard-write` copies with `"+yy`, so another app pastes the line.
 - `clipboard-read` puts what another app copied with `"+p`, `"+P` and `"*p`. Text that ends in a line break goes in as whole lines. A `.` reads the clipboard again.
-- `clipboard-blocked` shows `clipboard blocked, use Ctrl-V` in `.status .notice` when the browser refuses a read or a write, or a read has no answer in 3 seconds. The note stays as it was. The next key clears the notice.
+- `clipboard-blocked` shows `clipboard blocked, use Ctrl-V` in `.status .notice` when the browser refuses a read or a write, or a read has no answer in 3 seconds (no limit while Chrome asks the person for permission). The note stays as it was. The next key clears the notice.
 - `clipboard-wait` holds keys typed while the read is out and runs them in order after it. Ctrl-E in the wait opens the read view when the answer lands.
 
 ## How to get to it (user POV)

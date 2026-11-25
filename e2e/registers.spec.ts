@@ -1311,3 +1311,117 @@ test('a clipboard that never answers is given up after about 3 seconds', async (
     })
     .toBe('def')
 })
+
+test('a put from the clipboard typed right after a yank to it puts the yanked text', async ({
+  nullpad,
+}) => {
+  await begin(nullpad, 'alpha beta\ngamma')
+  await placeAt(nullpad, 2, 1)
+  await setClipboard(nullpad, 'OLD')
+  await play(nullpad, '"+yiw"+p')
+  await expect
+    .poll(() => nullpad.text(), {
+      message: '"+p put the word "+yiw just took, not what the clipboard held',
+      timeout: 5000,
+    })
+    .toBe('alpha beta\nggammaamma')
+  await expect
+    .poll(() => clipboardOf(nullpad), {
+      message: 'the system clipboard holds the yanked word',
+      timeout: 3000,
+    })
+    .toBe('gamma')
+  expect(await noticeOf(nullpad), 'no notice').toBe('')
+})
+
+test('keys typed ahead of a slow clipboard read run in order, a yank to it included', async ({
+  nullpad,
+}) => {
+  await begin(nullpad, 'alpha beta\ngamma')
+  await setClipboard(nullpad, 'OLD')
+  await nullpad.holdClipboardReads()
+  await play(nullpad, '"+Pj"+yiw"+p')
+  expect(await nullpad.text(), 'while the read is held nothing ran').toBe(
+    'alpha beta\ngamma',
+  )
+  await nullpad.releaseClipboardReads()
+  await expect
+    .poll(() => nullpad.text(), {
+      message:
+        'the first put gave OLDalpha beta, then the yank and the put ran in order',
+      timeout: 5000,
+    })
+    .toBe('OLDalpha beta\nggammaamma')
+  await expect
+    .poll(() => clipboardOf(nullpad), {
+      message: 'the system clipboard holds the yanked word',
+      timeout: 3000,
+    })
+    .toBe('gamma')
+  expect(await noticeOf(nullpad), 'no notice').toBe('')
+})
+
+test('a clipboard answer that is not text is a blocked clipboard', async ({
+  nullpad,
+}) => {
+  await nullpad.page.addInitScript(() => {
+    if (navigator.clipboard === undefined) {
+      return
+    }
+    Object.defineProperty(navigator.clipboard, 'readText', {
+      value: () => Promise.resolve(null),
+    })
+  })
+  await openFresh(nullpad.page)
+  await begin(nullpad, 'abc\ndef')
+  await play(nullpad, '"+p')
+  await blocked(nullpad)
+  expect(await nullpad.text(), 'the note did not change').toBe('abc\ndef')
+  expect(await nullpad.status(), 'the cursor did not move').toMatchObject({
+    line: 1,
+    column: 1,
+  })
+  expect(await modeOf(nullpad), 'NORMAL').toBe('NORMAL')
+  expect(await pendingOf(nullpad), 'nothing pending').toBe('')
+  await play(nullpad, 'x')
+  expect(await nullpad.text(), 'later keys still work').toBe('bc\ndef')
+  expect(await noticeOf(nullpad), 'the next key clears the notice').toBe('')
+})
+
+test('while Chrome asks for clipboard permission, "+p waits for the answer', async ({
+  nullpad,
+}) => {
+  await nullpad.page.addInitScript(() => {
+    if (navigator.clipboard === undefined) {
+      return
+    }
+    const query = navigator.permissions.query.bind(navigator.permissions)
+    Object.defineProperty(navigator.permissions, 'query', {
+      value: (descriptor: { name: string }) =>
+        String(descriptor.name) === 'clipboard-read'
+          ? Promise.resolve({ state: 'prompt' })
+          : query(descriptor as PermissionDescriptor),
+    })
+    Object.defineProperty(navigator.clipboard, 'readText', {
+      value: () =>
+        new Promise<string>(resolve =>
+          setTimeout(() => resolve('HELLO'), 5000),
+        ),
+    })
+  })
+  await openFresh(nullpad.page)
+  await begin(nullpad, 'abcdef')
+  await play(nullpad, '"+p')
+  await nullpad.page.waitForTimeout(4000)
+  expect(await noticeOf(nullpad), 'no notice while the prompt is open').toBe('')
+  expect(await nullpad.text(), 'the note is as it was while it waits').toBe(
+    'abcdef',
+  )
+  await expect
+    .poll(() => nullpad.text(), {
+      message: 'the put ran with the answer when it came',
+      timeout: 6000,
+    })
+    .toBe('aHELLObcdef')
+  expect(await noticeOf(nullpad), 'no notice after the answer').toBe('')
+})

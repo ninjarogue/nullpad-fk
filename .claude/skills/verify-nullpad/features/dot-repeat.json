@@ -1,0 +1,562 @@
+[
+  {
+    "paste": "one two three\nfour five six\nseven eight\nnine ten"
+  },
+  {
+    "press": "Control+Comma"
+  },
+  {
+    "type": "gg"
+  },
+  {
+    "expect": {
+      "mode": "NORMAL",
+      "status": "1:1 4L"
+    }
+  },
+  {
+    "type": "x."
+  },
+  {
+    "expect": {
+      "text": "e two three\nfour five six\nseven eight\nnine ten",
+      "status": "1:1 4L",
+      "mode": "NORMAL",
+      "pending": ""
+    }
+  },
+  {
+    "type": "u"
+  },
+  {
+    "expect": {
+      "text": "ne two three\nfour five six\nseven eight\nnine ten",
+      "status": "1:1 4L",
+      "mode": "NORMAL",
+      "pending": ""
+    }
+  },
+  {
+    "press": "Control+r"
+  },
+  {
+    "expect": {
+      "text": "e two three\nfour five six\nseven eight\nnine ten",
+      "status": "1:1 4L",
+      "mode": "NORMAL",
+      "pending": ""
+    }
+  },
+  {
+    "type": "3x"
+  },
+  {
+    "type": "2."
+  },
+  {
+    "expect": {
+      "text": " three\nfour five six\nseven eight\nnine ten",
+      "status": "1:1 4L",
+      "mode": "NORMAL",
+      "pending": ""
+    }
+  },
+  {
+    "type": "."
+  },
+  {
+    "expect": {
+      "text": "hree\nfour five six\nseven eight\nnine ten",
+      "status": "1:1 4L",
+      "mode": "NORMAL",
+      "pending": ""
+    }
+  },
+  {
+    "type": "j0ciwnew"
+  },
+  {
+    "press": "Escape"
+  },
+  {
+    "type": "w."
+  },
+  {
+    "expect": {
+      "text": "hree\nnew new six\nseven eight\nnine ten",
+      "status": "2:7 4L",
+      "mode": "NORMAL",
+      "pending": ""
+    }
+  },
+  {
+    "type": "jA;"
+  },
+  {
+    "press": "Escape"
+  },
+  {
+    "type": "j."
+  },
+  {
+    "expect": {
+      "text": "hree\nnew new six\nseven eight;\nnine ten;",
+      "status": "4:9 4L",
+      "mode": "NORMAL",
+      "pending": ""
+    }
+  },
+  {
+    "type": "ggAab"
+  },
+  {
+    "press": "Backspace"
+  },
+  {
+    "type": "c"
+  },
+  {
+    "press": "Escape"
+  },
+  {
+    "type": "j."
+  },
+  {
+    "expect": {
+      "text": "hreeac\nnew new sixac\nseven eight;\nnine ten;",
+      "status": "2:13 4L",
+      "mode": "NORMAL",
+      "pending": ""
+    }
+  },
+  {
+    "type": "ggx"
+  },
+  {
+    "type": "i"
+  },
+  {
+    "press": "Escape"
+  },
+  {
+    "expect": {
+      "text": "reeac\nnew new sixac\nseven eight;\nnine ten;",
+      "status": "1:1 4L",
+      "mode": "NORMAL",
+      "pending": ""
+    }
+  },
+  {
+    "type": "l."
+  },
+  {
+    "expect": {
+      "text": "reeac\nnew new sixac\nseven eight;\nnine ten;",
+      "status": "1:1 4L",
+      "mode": "NORMAL",
+      "pending": ""
+    }
+  },
+  {
+    "type": "jdd"
+  },
+  {
+    "type": "yyk"
+  },
+  {
+    "expect": {
+      "text": "reeac\nseven eight;\nnine ten;",
+      "status": "1:1 3L",
+      "mode": "NORMAL",
+      "pending": ""
+    }
+  },
+  {
+    "type": "."
+  },
+  {
+    "expect": {
+      "text": "seven eight;\nnine ten;",
+      "status": "1:1 2L",
+      "mode": "NORMAL",
+      "pending": ""
+    }
+  },
+  {
+    "type": "Gdj"
+  },
+  {
+    "expect": {
+      "text": "seven eight;\nnine ten;",
+      "status": "2:1 2L",
+      "mode": "NORMAL",
+      "pending": ""
+    }
+  },
+  {
+    "type": "k."
+  },
+  {
+    "expect": {
+      "text": "nine ten;",
+      "status": "1:1 1L",
+      "mode": "NORMAL",
+      "pending": ""
+    }
+  },
+  {
+    "type": "yyp"
+  },
+  {
+    "type": "."
+  },
+  {
+    "expect": {
+      "text": "nine ten;\nnine ten;\nnine ten;",
+      "status": "3:1 3L",
+      "mode": "NORMAL",
+      "pending": ""
+    }
+  },
+  {
+    "type": "ohello"
+  },
+  {
+    "press": "Escape"
+  },
+  {
+    "type": "."
+  },
+  {
+    "expect": {
+      "text": "nine ten;\nnine ten;\nnine ten;\nhello\nhello",
+      "status": "5:5 5L",
+      "mode": "NORMAL",
+      "pending": ""
+    }
+  },
+  {
+    "type": "gg3"
+  },
+  {
+    "expect": {
+      "pending": "3"
+    }
+  },
+  {
+    "type": "ix"
+  },
+  {
+    "press": "Escape"
+  },
+  {
+    "expect": {
+      "text": "xxxnine ten;\nnine ten;\nnine ten;\nhello\nhello",
+      "status": "1:3 5L",
+      "mode": "NORMAL",
+      "pending": ""
+    }
+  },
+  {
+    "type": "u"
+  },
+  {
+    "expect": {
+      "text": "nine ten;\nnine ten;\nnine ten;\nhello\nhello",
+      "status": "1:1 5L",
+      "mode": "NORMAL",
+      "pending": ""
+    }
+  },
+  {
+    "press": "Control+r"
+  },
+  {
+    "type": "j."
+  },
+  {
+    "expect": {
+      "text": "xxxnine ten;\nxxxnine ten;\nnine ten;\nhello\nhello",
+      "status": "2:3 5L",
+      "mode": "NORMAL",
+      "pending": ""
+    }
+  },
+  {
+    "type": "j2."
+  },
+  {
+    "expect": {
+      "text": "xxxnine ten;\nxxxnine ten;\nnixxne ten;\nhello\nhello",
+      "status": "3:4 5L",
+      "mode": "NORMAL",
+      "pending": ""
+    }
+  },
+  {
+    "type": "gg2Aab"
+  },
+  {
+    "press": "Escape"
+  },
+  {
+    "expect": {
+      "text": "xxxnine ten;abab\nxxxnine ten;\nnixxne ten;\nhello\nhello",
+      "status": "1:16 5L",
+      "mode": "NORMAL",
+      "pending": ""
+    }
+  },
+  {
+    "type": "3ohi"
+  },
+  {
+    "press": "Escape"
+  },
+  {
+    "expect": {
+      "text": "xxxnine ten;abab\nhi\nhi\nhi\nxxxnine ten;\nnixxne ten;\nhello\nhello",
+      "status": "4:2 8L",
+      "mode": "NORMAL",
+      "pending": ""
+    }
+  },
+  {
+    "type": "2Ohi"
+  },
+  {
+    "press": "Escape"
+  },
+  {
+    "expect": {
+      "text": "xxxnine ten;abab\nhi\nhi\nhi\nhi\nhi\nxxxnine ten;\nnixxne ten;\nhello\nhello",
+      "status": "5:2 10L",
+      "mode": "NORMAL",
+      "pending": ""
+    }
+  },
+  {
+    "type": "u"
+  },
+  {
+    "expect": {
+      "text": "xxxnine ten;abab\nhi\nhi\nhi\nxxxnine ten;\nnixxne ten;\nhello\nhello",
+      "status": "4:2 8L",
+      "mode": "NORMAL",
+      "pending": ""
+    }
+  },
+  {
+    "type": "gg2cwXY"
+  },
+  {
+    "press": "Escape"
+  },
+  {
+    "expect": {
+      "text": "XY;abab\nhi\nhi\nhi\nxxxnine ten;\nnixxne ten;\nhello\nhello",
+      "status": "1:2 8L",
+      "mode": "NORMAL",
+      "pending": ""
+    }
+  },
+  {
+    "type": "j0."
+  },
+  {
+    "expect": {
+      "text": "XY;abab\nXY\nhi\nxxxnine ten;\nnixxne ten;\nhello\nhello",
+      "status": "2:2 7L",
+      "mode": "NORMAL",
+      "pending": ""
+    }
+  },
+  {
+    "type": "ggix"
+  },
+  {
+    "press": "Delete"
+  },
+  {
+    "press": "Escape"
+  },
+  {
+    "wait": 300
+  },
+  {
+    "expect": {
+      "text": "xY;abab\nXY\nhi\nxxxnine ten;\nnixxne ten;\nhello\nhello",
+      "status": "1:1 7L",
+      "mode": "NORMAL",
+      "pending": ""
+    }
+  },
+  {
+    "type": "j02."
+  },
+  {
+    "wait": 300
+  },
+  {
+    "expect": {
+      "text": "xY;abab\nxx\nhi\nxxxnine ten;\nnixxne ten;\nhello\nhello",
+      "status": "2:2 7L",
+      "mode": "NORMAL",
+      "pending": ""
+    }
+  },
+  {
+    "type": "u"
+  },
+  {
+    "wait": 300
+  },
+  {
+    "expect": {
+      "text": "xY;abab\nXY\nhi\nxxxnine ten;\nnixxne ten;\nhello\nhello",
+      "status": "2:1 7L",
+      "mode": "NORMAL",
+      "pending": ""
+    }
+  },
+  {
+    "type": "j0.A!"
+  },
+  {
+    "press": "Escape"
+  },
+  {
+    "wait": 300
+  },
+  {
+    "expect": {
+      "text": "xY;abab\nXY\nxx!\nxxxnine ten;\nnixxne ten;\nhello\nhello",
+      "status": "3:3 7L",
+      "mode": "NORMAL",
+      "pending": ""
+    }
+  },
+  {
+    "shot": "1-one-note"
+  },
+  {
+    "press": "Control+p"
+  },
+  {
+    "type": "second"
+  },
+  {
+    "press": "Enter"
+  },
+  {
+    "expect": {
+      "text": "second",
+      "mode": "NORMAL",
+      "status": "1:6 1L"
+    }
+  },
+  {
+    "type": "."
+  },
+  {
+    "expect": {
+      "text": "second!",
+      "status": "1:7 1L",
+      "mode": "NORMAL"
+    }
+  },
+  {
+    "press": "Control+Comma"
+  },
+  {
+    "expect": {
+      "mode": "EDIT"
+    }
+  },
+  {
+    "press": "Control+Comma"
+  },
+  {
+    "expect": {
+      "mode": "NORMAL"
+    }
+  },
+  {
+    "type": "0."
+  },
+  {
+    "expect": {
+      "text": "second!!",
+      "status": "1:8 1L",
+      "mode": "NORMAL"
+    }
+  },
+  {
+    "type": "I."
+  },
+  {
+    "press": "Escape"
+  },
+  {
+    "expect": {
+      "text": ".second!!",
+      "status": "1:1 1L",
+      "mode": "NORMAL"
+    }
+  },
+  {
+    "type": "$."
+  },
+  {
+    "expect": {
+      "text": "..second!!",
+      "status": "1:1 1L"
+    }
+  },
+  {
+    "type": "9999999i-"
+  },
+  {
+    "press": "Escape"
+  },
+  {
+    "expect": {
+      "status": "1:20000 1L",
+      "mode": "NORMAL",
+      "pending": ""
+    }
+  },
+  {
+    "shot": "2-twenty-thousand"
+  },
+  {
+    "type": "u"
+  },
+  {
+    "expect": {
+      "text": "..second!!",
+      "status": "1:1 1L"
+    }
+  },
+  {
+    "wait": 1000
+  },
+  {
+    "reload": true
+  },
+  {
+    "expect": {
+      "text": "..second!!",
+      "mode": "NORMAL"
+    }
+  },
+  {
+    "type": "."
+  },
+  {
+    "expect": {
+      "text": "..second!!",
+      "mode": "NORMAL"
+    }
+  }
+]

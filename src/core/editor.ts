@@ -54,6 +54,7 @@ const Queued = Schema.TaggedUnion({
   Fed: { input: Input },
   Clicked: { x: Schema.Finite, line: Schema.Int, yInLine: Schema.Finite },
   ToggledVim: {},
+  Again: { step: Vim.Replayed },
 })
 type Queued = typeof Queued.Type
 
@@ -63,7 +64,7 @@ export const Editor = Schema.Struct({
   buffer: Buffer.Buffer,
   history: History.History,
   vim: Schema.Option(Vim.Vim),
-  registers: Vim.Registers,
+  kept: Vim.Kept,
   discards: Schema.Int,
   preedit: Schema.String,
   goalX: Schema.Option(Schema.Finite),
@@ -122,7 +123,7 @@ export const open = (text: string, vim = false): Editor => {
     buffer,
     history: History.empty(buffer),
     vim: vim ? Option.some(Vim.start) : Option.none(),
-    registers: Vim.noRegisters,
+    kept: Vim.nothingKept,
     discards: 0,
     preedit: '',
     goalX: Option.none(),
@@ -185,7 +186,7 @@ export const reopen = (
   }
   return {
     ...opened,
-    registers: editor.registers,
+    kept: editor.kept,
     discards: editor.discards,
     buffer: atRest(
       opened,
@@ -283,7 +284,7 @@ type Plan =
       _tag: 'Done'
       outcome: Outcome
       began: Option.Option<Buffer.Position>
-      travelled: boolean
+      recordsItself: boolean
     }>
   | Readonly<{
       _tag: 'Ask'
@@ -299,7 +300,7 @@ const now = (
   _tag: 'Done',
   outcome: done(editor, reveal),
   began,
-  travelled: false,
+  recordsItself: false,
 })
 
 const ask = (query: Query, land: (answer: Answer) => Outcome): Plan => ({
@@ -605,7 +606,7 @@ const travelPlan = (
           },
         ),
       ),
-      travelled: true,
+      recordsItself: true,
     }),
   })
 }
@@ -653,22 +654,21 @@ const plainPlan = (editor: Editor, input: Input): Plan =>
     Commit: ({ text }) => now(insertText(text)({ ...editor, preedit: '' })),
   })
 
-const vimPlan = (editor: Editor, vim: Vim.Vim, input: Input): Plan => {
-  const step = Vim.press(vim, editor.buffer, editor.registers, input)
-  const stepped = {
-    ...editor,
-    vim: Option.some(step.vim),
-    registers: step.registers,
-  }
-  const counted = {
-    ...stepped,
-    discards:
-      editor.discards +
-      (input._tag === 'Key' || input._tag === 'Chord' ? 0 : 1),
-  }
+const vimPlan = (editor: Editor, step: Vim.Step, swallowed: number): Plan => {
+  const stepped = { ...editor, vim: Option.some(step.vim), kept: step.kept }
+  const counted = { ...stepped, discards: editor.discards + swallowed }
   return Vim.Fate.match(step.fate, {
-    Plain: () => plainPlan(stepped, input),
+    Plain: ({ input }) => plainPlan(stepped, input),
     Travel: ({ way, count }) => travelPlan(counted, way, count, 'Vim'),
+    Replay: ({ steps }): Plan => ({
+      _tag: 'Done',
+      outcome: replay(
+        done(counted, 'None'),
+        Array.map(steps, again => Queued.cases.Again.make({ step: again })),
+      ),
+      began: Option.none(),
+      recordsItself: true,
+    }),
     Done: () => {
       const moved = step.buffer !== editor.buffer
       return now(
@@ -686,7 +686,19 @@ const vimPlan = (editor: Editor, vim: Vim.Vim, input: Input): Plan => {
 const inputPlan = (editor: Editor, input: Input): Plan =>
   Option.match(editor.vim, {
     onNone: () => plainPlan(editor, input),
-    onSome: vim => vimPlan(editor, vim, input),
+    onSome: vim =>
+      vimPlan(
+        editor,
+        Vim.press(vim, editor.buffer, editor.kept, input),
+        input._tag === 'Key' || input._tag === 'Chord' ? 0 : 1,
+      ),
+  })
+
+const againPlan = (editor: Editor, step: Vim.Replayed): Plan =>
+  Option.match(editor.vim, {
+    onNone: () => now(editor, 'None'),
+    onSome: vim =>
+      vimPlan(editor, Vim.again(vim, editor.buffer, editor.kept, step), 0),
   })
 
 const toggleVim = (editor: Editor): Editor =>
@@ -720,10 +732,11 @@ const planFor = (editor: Editor, queued: Queued): Plan =>
         yInLine,
       ),
     ToggledVim: () => now(toggleVim(editor)),
+    Again: ({ step }) => againPlan(editor, step),
   })
 
 const isInInsert = (editor: Editor): boolean =>
-  Option.exists(editor.vim, vim => vim.mode === 'Insert')
+  Option.exists(editor.vim, vim => vim.mode._tag === 'Insert')
 
 type Grouping = Pick<History.Edit, 'kind' | 'joinsOnto' | 'staysOpen'>
 
@@ -814,7 +827,7 @@ const planOf = (editor: Editor, queued: Queued): Plan => {
       land: answer => tracked(editor, queued, plan.land(answer), Option.none()),
     }
   }
-  return plan.travelled
+  return plan.recordsItself
     ? plan
     : { ...plan, outcome: tracked(editor, queued, plan.outcome, plan.began) }
 }
@@ -859,15 +872,39 @@ const enqueue = (editor: Editor, queued: Queued): Outcome =>
 
 const strongest = (a: Reveal, b: Reveal): Reveal => (b === 'None' ? a : b)
 
-const replay = (start: Outcome, queued: ReadonlyArray<Queued>): Outcome =>
-  Array.reduce(queued, start, (outcome, next) => {
-    const result = enqueue(outcome.editor, next)
-    return {
-      editor: result.editor,
-      locate: Option.isSome(result.locate) ? result.locate : outcome.locate,
-      reveal: strongest(outcome.reveal, result.reveal),
-    }
-  })
+const held = (editor: Editor, queued: ReadonlyArray<Queued>): Editor => ({
+  ...editor,
+  locating: Option.map(editor.locating, locating => ({
+    ...locating,
+    queued: [...locating.queued, ...queued],
+  })),
+})
+
+const replay = (start: Outcome, queued: ReadonlyArray<Queued>): Outcome => {
+  const { outcome, ran } = Array.reduce(
+    queued,
+    { outcome: start, ran: 0 },
+    (reached, next) => {
+      if (Option.isSome(reached.outcome.editor.locating)) {
+        return reached
+      }
+      const result = run(reached.outcome.editor, next)
+      return {
+        outcome: {
+          editor: result.editor,
+          locate: Option.isSome(result.locate)
+            ? result.locate
+            : reached.outcome.locate,
+          reveal: strongest(reached.outcome.reveal, result.reveal),
+        },
+        ran: reached.ran + 1,
+      }
+    },
+  )
+  return ran === queued.length
+    ? outcome
+    : { ...outcome, editor: held(outcome.editor, queued.slice(ran)) }
+}
 
 const countPendingReveal = (outcome: Outcome): Outcome =>
   outcome.reveal === 'None'
@@ -943,6 +980,7 @@ const awaitedLine = (editor: Editor): Option.Option<number> =>
           Fed: () => editor.buffer.caret.line,
           Clicked: ({ line }) => line,
           ToggledVim: () => editor.buffer.caret.line,
+          Again: () => editor.buffer.caret.line,
         }),
       ),
   })
@@ -1063,9 +1101,7 @@ export const paint = (editor: Editor): Frame => {
     caret: {
       ...caret,
       atRowEnd: editor.caretAtRowEnd,
-      shape: Option.exists(editor.vim, vim => vim.mode === 'Insert')
-        ? 'Bar'
-        : 'Block',
+      shape: isInInsert(editor) ? 'Bar' : 'Block',
     },
     surrounding: {
       text: (lines[caret.line]?.text ?? '').slice(
@@ -1078,7 +1114,7 @@ export const paint = (editor: Editor): Frame => {
     status: {
       mode: Option.match(editor.vim, {
         onNone: () => 'Plain' as const,
-        onSome: vim => vim.mode,
+        onSome: vim => vim.mode._tag,
       }),
       pending: Option.match(editor.vim, {
         onNone: () => '',

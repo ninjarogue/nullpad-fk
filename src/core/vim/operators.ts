@@ -181,7 +181,7 @@ const maxPutUnitsOnOneLine = 50_000
 
 const maxPutLines = 200_000
 
-const boundedCount = (register: Register, count: number): number => {
+export const boundedCount = (register: Register, count: number): number => {
   const lines = register.text.split('\n').length - 1
   const units =
     register.kind === 'Charwise' && lines === 0

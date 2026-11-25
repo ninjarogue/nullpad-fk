@@ -24,6 +24,7 @@ export const Command = Schema.TaggedUnion({
   Insert: { at: InsertAt },
   Cancel: {},
   Travel: { way: History.Way },
+  Repeat: {},
 })
 export type Command = typeof Command.Type
 
@@ -163,6 +164,7 @@ export const normal: ReadonlyArray<Binding> = [
   insert('O', 'LineAbove', 'open line above'),
   bind('u', Command.cases.Travel.make({ way: 'Undo' }), 'undo'),
   bind('<C-r>', Command.cases.Travel.make({ way: 'Redo' }), 'redo'),
+  bind('.', Command.cases.Repeat.make({}), 'repeat last change'),
   bind('<Esc>', Command.cases.Cancel.make({}), 'cancel'),
   bind('<C-[>', Command.cases.Cancel.make({}), 'cancel'),
 ]

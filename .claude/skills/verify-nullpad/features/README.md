@@ -30,3 +30,4 @@ Each file opens with what the person sees, then four sections: `Sub-features`, `
 - [Vim](./vim.md) covers turning vim on and off, Normal mode motions, counts, `x`, entering and leaving Insert, and the remembered setting.
 - [Vim operators](./vim-operators.md) covers `d c y` with motions, doubled keys and text objects, counts on both sides, the shorthands, `p P`, and the store across notes, vim off and a reload.
 - [Undo](./undo.md) covers Ctrl-Z, Ctrl-Shift-Z and Ctrl-Y with vim off, `u` and Ctrl-R with counts in NORMAL, how changes group, where the cursor lands, the task box, saving and the history per note.
+- [Dot repeat](./dot-repeat.md) covers `.` after deletes, changes, puts and INSERT stays, a count before it, what leaves it alone, undo of a repeat, counts on `i a I A o O`, a replayed Delete key, another note, vim off and on, a reload and the bound.

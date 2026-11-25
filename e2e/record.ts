@@ -1,6 +1,8 @@
 import { execFileSync } from 'node:child_process'
-import { mkdirSync, writeFileSync } from 'node:fs'
+import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
+
+import { type Browser } from '@playwright/test'
 
 import { type Step } from './steps.ts'
 
@@ -20,6 +22,9 @@ export const readingTime = (cue: Cue): number =>
     (cue.caption.length + cue.note.length) * pace.readPerCharacter,
   )
 
+export const pauseAfter = (step: Step): number =>
+  'expect' in step ? 0 : pace.afterStep
+
 export const keyByKey = (step: Step): ReadonlyArray<Step> => {
   if ('type' in step) {
     return Array.from(step.type, character => ({ type: character }))
@@ -32,45 +37,93 @@ export const keyByKey = (step: Step): ReadonlyArray<Step> => {
   return [step]
 }
 
-const strip = { height: 96, least: 960, ground: '0x171726', rule: '0x4a90e2' }
+export const hasFfmpeg = (): boolean => {
+  try {
+    execFileSync('ffmpeg', ['-version'], { stdio: 'ignore' })
+    return true
+  } catch {
+    return false
+  }
+}
+
+const strip = { height: 96, minWidth: 960, background: '#171726' }
+
+const frameWidth = (videoWidth: number): number =>
+  Math.ceil(Math.max(videoWidth, strip.minWidth) / 2) * 2
+
+const stripPage = `<!doctype html>
+<style>
+  body { margin: 0; }
+  #strip {
+    box-sizing: border-box;
+    height: ${strip.height}px;
+    padding: 0 28px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    background: ${strip.background};
+    border-bottom: 3px solid #4a90e2;
+    font-family: Inter, system-ui, sans-serif;
+    color: #fff;
+  }
+  #strip div { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #caption { font-size: 26px; line-height: 34px; font-weight: 600; }
+  #note { font-size: 20px; line-height: 30px; color: #bfe0ff; }
+</style>
+<div id="strip"><div id="caption"></div><div id="note"></div></div>`
+
+export const drawCaptions = async (
+  browser: Browser,
+  cues: ReadonlyArray<Cue>,
+  videoWidth: number,
+  folder: string,
+): Promise<ReadonlyArray<string>> => {
+  mkdirSync(folder, { recursive: true })
+  const page = await browser.newPage({
+    viewport: { width: frameWidth(videoWidth), height: strip.height },
+    deviceScaleFactor: 1,
+  })
+  await page.setContent(stripPage)
+  const images: Array<string> = []
+  for (const [index, cue] of cues.entries()) {
+    await page.locator('#caption').evaluate((element, text) => {
+      element.textContent = text
+    }, cue.caption)
+    await page.locator('#note').evaluate((element, text) => {
+      element.textContent = text
+    }, cue.note)
+    const image = join(folder, `caption-${index}.png`)
+    await page.locator('#strip').screenshot({ path: image })
+    images.push(image)
+  }
+  await page.close()
+  return images
+}
 
 const seconds = (ms: number): string => (ms / 1000).toFixed(3)
 
-const filterFor = (cues: ReadonlyArray<Cue>, end: number): string => {
-  const shown = cues.flatMap((cue, index) => {
-    const until = cues[index + 1]?.at ?? end
-    const during = `enable='between(t,${seconds(cue.at)},${seconds(until)})'`
-    return [
-      `drawtext=expansion=none:textfile=caption-${index}.txt:fontsize=26:fontcolor=white:x=28:y=16:${during}`,
-      ...(cue.note === ''
-        ? []
-        : [
-            `drawtext=expansion=none:textfile=note-${index}.txt:fontsize=20:fontcolor=0xbfe0ff:x=28:y=56:${during}`,
-          ]),
-    ]
+const filterFor = (cues: ReadonlyArray<Cue>, videoWidth: number): string => {
+  const padded = `[0:v]pad=w=${frameWidth(videoWidth)}:h='ceil((ih+${strip.height})/2)*2':x='(ow-iw)/2':y=${strip.height}:color=${strip.background.replace('#', '0x')}[v0]`
+  const overlays = cues.map((cue, index) => {
+    const next = cues[index + 1]
+    const during =
+      next === undefined
+        ? `gte(t,${seconds(cue.at)})`
+        : `between(t,${seconds(cue.at)},${seconds(next.at)})`
+    return `[v${index}][${index + 1}:v]overlay=0:0:enable='${during}'[v${index + 1}]`
   })
-  return [
-    `pad=w='ceil(max(iw,${strip.least})/2)*2':h='ceil((ih+${strip.height})/2)*2':x='(ow-iw)/2':y=${strip.height}:color=${strip.ground}`,
-    `drawbox=x=0:y=${strip.height - 3}:w=iw:h=3:color=${strip.rule}:t=fill`,
-    ...shown,
-  ].join(',')
+  return [padded, ...overlays].join(';')
 }
 
 export const burnCaptions = (
   options: Readonly<{
     video: string
+    videoWidth: number
     cues: ReadonlyArray<Cue>
-    end: number
-    scratch: string
+    images: ReadonlyArray<string>
     out: string
   }>,
 ): void => {
-  const work = join(options.scratch, 'cues')
-  mkdirSync(work, { recursive: true })
-  for (const [index, cue] of options.cues.entries()) {
-    writeFileSync(join(work, `caption-${index}.txt`), cue.caption)
-    writeFileSync(join(work, `note-${index}.txt`), cue.note)
-  }
   execFileSync(
     'ffmpeg',
     [
@@ -79,8 +132,11 @@ export const burnCaptions = (
       'error',
       '-i',
       options.video,
-      '-vf',
-      filterFor(options.cues, options.end),
+      ...options.images.flatMap(image => ['-i', image]),
+      '-filter_complex',
+      filterFor(options.cues, options.videoWidth),
+      '-map',
+      `[v${options.cues.length}]`,
       '-c:v',
       'libx264',
       '-pix_fmt',
@@ -89,6 +145,6 @@ export const burnCaptions = (
       '+faststart',
       options.out,
     ],
-    { cwd: work, stdio: ['ignore', 'ignore', 'inherit'] },
+    { stdio: ['ignore', 'ignore', 'inherit'] },
   )
 }

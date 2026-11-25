@@ -53,8 +53,8 @@ const stepKeys = [
   'expect',
 ] as const
 
-export const captionLimit = 60
-export const noteLimit = 90
+const captionLimit = 60
+const noteLimit = 90
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value)

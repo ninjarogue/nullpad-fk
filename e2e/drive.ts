@@ -20,8 +20,11 @@ import { newestSource } from '../scripts/build-stamp.ts'
 import {
   type Cue,
   burnCaptions,
+  drawCaptions,
+  hasFfmpeg,
   keyByKey,
   pace,
+  pauseAfter,
   readingTime,
 } from './record.ts'
 import {
@@ -101,6 +104,7 @@ const doctor = async (): Promise<number> => {
   } else {
     say('dist/ absent; runs build fresh anyway')
   }
+  say(`ffmpeg ${hasFfmpeg() ? 'yes' : 'no; --record needs it'}`)
   for (const problem of problems) {
     say(`problem: ${problem}`)
   }
@@ -227,9 +231,7 @@ const run = async (
         }
         await page.waitForTimeout(pace.betweenKeys)
       }
-      if (!('expect' in step)) {
-        await page.waitForTimeout(pace.afterStep)
-      }
+      await page.waitForTimeout(pauseAfter(step))
       return []
     }
     for (const [index, step] of steps.entries()) {
@@ -260,7 +262,6 @@ const run = async (
     if (options.record) {
       await page.waitForTimeout(pace.atEnd)
     }
-    const filmed = Date.now() - filmingSince
     const video = page.video()
     await context.close()
     if (video !== null) {
@@ -270,9 +271,14 @@ const run = async (
     if (options.record) {
       burnCaptions({
         video: join(out, 'video.webm'),
+        videoWidth: options.width,
         cues,
-        end: filmed,
-        scratch,
+        images: await drawCaptions(
+          owned.browser,
+          cues,
+          options.width,
+          join(scratch, 'captions'),
+        ),
         out: join(out, 'recording.mp4'),
       })
       log(`recording ${join(out, 'recording.mp4')}, ${cues.length} captions`)
@@ -337,6 +343,16 @@ const main = async (): Promise<number> => {
   if (values.record && !steps.some(step => 'caption' in step)) {
     throw new Error(
       '--record needs caption steps: put {"caption": "what is done", "note": "what to look for"} before each action a person should follow',
+    )
+  }
+  if (values.record && steps.some(step => 'resize' in step)) {
+    throw new Error(
+      '--record takes no resize step, because a video keeps one size: set the window with --width and --height',
+    )
+  }
+  if (values.record && !hasFfmpeg()) {
+    throw new Error(
+      '--record needs ffmpeg on the path to draw the captions onto the video',
     )
   }
   const stamp = new Date().toISOString().replaceAll(/[:.]/g, '-')

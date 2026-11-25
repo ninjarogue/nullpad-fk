@@ -131,7 +131,7 @@ Each run writes to `verify-out/<time>/` (gitignored), or to `--out`:
 - `screen.json`, the last screen as data: rows with line ids, starts and pixel boxes, the cursor, the status, the cell width.
 - `final.png`, plus one PNG per `shot` step. Open them with the Read tool to look at them.
 - `video.webm` with `--video`.
-- `recording.mp4` with `--record`.
+- `recording.mp4` and `video.webm`, the same video without captions, with `--record`.
 
 The last line is `PASS evidence in <folder>` or `FAIL evidence in <folder>`. The exit code is 0 on a pass, 1 on a failed `expect`, a thrown step or any page error, 2 on bad steps or options, and 130 or 143 when interrupted. Read `FAIL` lines for a missed `expect` and `ERROR` lines for a step that threw.
 
@@ -152,7 +152,11 @@ The recording is the proof, played slowly, with a caption before each action. No
 2. Run `node e2e/drive.ts steps.json --record`. It types key by key, holds each caption long enough to read, and still checks every `expect`.
 3. Attach `recording.mp4` from the evidence folder.
 
-The captions sit in a strip above the app, drawn onto the video by `ffmpeg` after the run. Nothing is added to the page, so window sizes, clicks and `expect` values are those of a plain run. A window narrower than 960 pixels is centred in a 960 pixel frame, so the captions keep their size. `--record` needs `ffmpeg` on the path and at least one `caption` step.
+The captions sit in a strip above the app. Chromium draws each one as a picture, so any script and emoji show, and `ffmpeg` lays the pictures over the video after the run. Nothing is added to the app's page. A window narrower than 960 pixels is centred in a 960 pixel frame, so the captions keep their size. A caption too wide for the frame ends in `…`.
+
+- A record run is slower than a plain run: about 90 ms a key, 0.7 s after each step and 1.5 s or more on each caption. A proof that passes only at full speed fails here, such as one that looks at the finder before the 800 ms save lands. Fix the proof so that it holds at any speed.
+- A failed `expect` still stops the run and exits 1. `recording.mp4` then shows the run up to that step.
+- `--record` exits 2 before it builds when the steps hold no `caption`, when they hold a `resize` (a video keeps one size, so set the window with `--width` and `--height`), or when `ffmpeg` is not on the path. `--doctor` says whether it is.
 
 ## Cleanup
 

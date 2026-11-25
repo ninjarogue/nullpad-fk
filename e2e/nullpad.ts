@@ -361,6 +361,35 @@ const readFinder = (page: Page): Promise<FinderScreen | null> =>
     }
   })
 
+export type ClipboardKind = 'read' | 'write'
+
+/**
+ * Headless Chromium keeps one clipboard for the whole browser, so a page of another context reads what this page wrote,
+ * and about:blank has no clipboard, so the other page is an empty one of the app's own origin.
+ */
+const anotherApp = async (page: Page) => {
+  const browser = page.context().browser()
+  if (browser === null) {
+    throw new Error('no browser to open another app in')
+  }
+  const context = await browser.newContext()
+  await context.grantPermissions(['clipboard-read', 'clipboard-write'])
+  const other = await context.newPage()
+  await other.route('**/*', route =>
+    route.fulfill({
+      contentType: 'text/html',
+      body: '<!doctype html><title>another app</title>',
+    }),
+  )
+  await other.goto(new URL(page.url()).origin)
+  return {
+    copied: () => other.evaluate(() => navigator.clipboard.readText()),
+    copy: (text: string) =>
+      other.evaluate(value => navigator.clipboard.writeText(value), text),
+    close: () => context.close(),
+  }
+}
+
 export const driver = (page: Page, cdp: CDPSession) => {
   const screen = () => screenOf(page)
   return {
@@ -523,6 +552,47 @@ export const driver = (page: Page, cdp: CDPSession) => {
           .map(node => node.textContent)
           .join(''),
       ),
+    notice: async () => {
+      await settle(page)
+      return page
+        .locator('.status .notice')
+        .evaluateAll(found =>
+          found.map(element => element.textContent).join(''),
+        )
+    },
+    allowClipboard: async (kinds: ReadonlyArray<ClipboardKind>) => {
+      await page.context().clearPermissions()
+      await page
+        .context()
+        .grantPermissions(kinds.map(kind => `clipboard-${kind}`))
+    },
+    holdClipboardReads: () =>
+      page.evaluate(() => {
+        const { clipboard } = navigator
+        const read = clipboard.readText.bind(clipboard)
+        const gate = { open: () => {} }
+        const opened = new Promise<void>(resolve => {
+          gate.open = resolve
+        })
+        clipboard.readText = () => opened.then(read)
+        Reflect.set(globalThis, 'nullpadReleaseClipboard', () => {
+          clipboard.readText = read
+          gate.open()
+        })
+      }),
+    releaseClipboardReads: async () => {
+      await page.evaluate(() => {
+        const release: unknown = Reflect.get(
+          globalThis,
+          'nullpadReleaseClipboard',
+        )
+        if (typeof release === 'function') {
+          release()
+        }
+      })
+      await settle(page)
+    },
+    outside: () => anotherApp(page),
   }
 }
 

@@ -88,7 +88,9 @@ const readScreen = async (page: Page): Promise<Screen> => {
       top: box.top + Number.parseFloat(padding.paddingTop),
       bottom: box.bottom - Number.parseFloat(padding.paddingBottom),
     }
-    const segmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' })
+    const segmenter = new Intl.Segmenter(undefined, {
+      granularity: 'grapheme',
+    })
     const range = document.createRange()
     type Drawn = {
       top: number
@@ -558,12 +560,16 @@ export const driver = (page: Page, cdp: CDPSession) => {
     selection: async (): Promise<string> => {
       await settle(page)
       return page.evaluate(() => {
-        const boxes = [...document.querySelectorAll('#selection > *')]
+        const isBlock =
+          document.querySelector('#selection')?.getAttribute('data-kind') ===
+          'block'
+        const placed = [...document.querySelectorAll('#selection > *')]
           .map(element => ({
             rect: element.getBoundingClientRect(),
             isLineBreak: element.hasAttribute('data-break'),
           }))
-          .filter(({ rect }) => rect.width > 0 && rect.height > 0)
+          .filter(({ rect }) => rect.height > 0)
+        const boxes = placed.filter(({ rect }) => rect.width > 0)
         const covers = (isLineBreak: boolean, x: number, y: number) =>
           boxes.some(
             box =>
@@ -578,9 +584,10 @@ export const driver = (page: Page, cdp: CDPSession) => {
         })
         const range = document.createRange()
         let selected = ''
+        const blockLines: Array<string> = []
         for (const line of document.querySelectorAll('.surface .line')) {
           const lineBox = line.getBoundingClientRect()
-          const touched = boxes.filter(
+          const touched = placed.filter(
             ({ rect }) =>
               rect.top + rect.height / 2 > lineBox.top &&
               rect.top + rect.height / 2 < lineBox.bottom,
@@ -588,6 +595,7 @@ export const driver = (page: Page, cdp: CDPSession) => {
           if (touched.length === 0) {
             continue
           }
+          const before = selected.length
           for (const node of line.childNodes) {
             if (!(node instanceof Text)) {
               continue
@@ -608,11 +616,12 @@ export const driver = (page: Page, cdp: CDPSession) => {
               }
             }
           }
+          blockLines.push(selected.slice(before))
           if (touched.some(box => box.isLineBreak)) {
             selected += '\n'
           }
         }
-        return selected
+        return isBlock ? blockLines.join('\n') : selected
       })
     },
     notice: async () => {

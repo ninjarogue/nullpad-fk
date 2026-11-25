@@ -2384,7 +2384,7 @@ test('a paste in VISUAL, by Ctrl-Shift-V, replaces the selection and lands in NO
   expect(await nullpad.text(), 'the editor still works').toBe('one  three')
 })
 
-test('Ctrl-V in NORMAL pastes nothing, and Ctrl-Shift-V pastes', async ({
+test('Ctrl-V in NORMAL starts V-BLOCK and pastes nothing, and Ctrl-Shift-V pastes', async ({
   nullpad,
 }) => {
   await begin(nullpad, 'abc\ndef')
@@ -2399,7 +2399,12 @@ test('Ctrl-V in NORMAL pastes nothing, and Ctrl-Shift-V pastes', async ({
     await nullpad.text(),
     'Ctrl-V in NORMAL leaves the text, with PP still on the clipboard',
   ).toBe('PPabc\ndef')
-  await play(nullpad, '<Esc>gg0v<Esc>')
+  expect(await modeOf(nullpad), 'Ctrl-V in NORMAL starts V-BLOCK').toBe(
+    'V-BLOCK',
+  )
+  await nullpad.press('Control+v')
+  expect(await modeOf(nullpad), 'a second Ctrl-V leaves it').toBe('NORMAL')
+  await play(nullpad, 'gg0v<Esc>')
   await nullpad.paste('Q')
   expect(await nullpad.text(), 'and after a v and Esc').toBe('QPPabc\ndef')
   expect(await modeOf(nullpad), 'NORMAL').toBe('NORMAL')

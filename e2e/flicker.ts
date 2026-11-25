@@ -34,7 +34,7 @@ const areaOf = (page: Page, selector: string): Promise<Area> =>
       throw new Error(`no ${selector}`)
     }
     const box = element.getBoundingClientRect()
-    const style = getComputedStyle(element)
+    const style = getComputedStyle(element.querySelector('.sheet') ?? element)
     const top = Math.ceil(box.top + Number.parseFloat(style.paddingTop))
     return {
       x: Math.ceil(box.left),

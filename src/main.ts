@@ -31,7 +31,13 @@ import {
 import { Message } from './message'
 import { readBounds, reading, reveal, scrollReading } from './reading'
 import * as Storage from './storage'
-import { locate, revealCaret, statusLine, surface } from './surface'
+import {
+  locate,
+  revealCaret,
+  scrollToEnd,
+  statusLine,
+  surface,
+} from './surface'
 
 export { Message }
 
@@ -189,6 +195,11 @@ const RevealCaret = Command.define('RevealCaret', {
   messages: [Message.CompletedRevealCaret],
   execute: ({ align }) =>
     revealCaret(align).pipe(Effect.as(Message.CompletedRevealCaret())),
+})
+
+const ScrollSurfaceToEnd = Command.define('ScrollSurfaceToEnd', {
+  messages: [Message.CompletedScrollSurfaceToEnd],
+  execute: scrollToEnd.pipe(Effect.as(Message.CompletedScrollSurfaceToEnd())),
 })
 
 const autosaveDelay = '800 millis'
@@ -947,11 +958,15 @@ const handle = (model: Model, message: Message) =>
     FailedWriteClipboard: () => ({
       model: modifyFields(model, { editor: Editor.clipboardBlocked }),
     }),
-    ScrolledSurface: ({ top }) => ({
-      model: modifyFields(model, {
-        editor: editor => Editor.scrolled(editor, top),
-      }),
-    }),
+    ScrolledSurface: ({ top, atEnd }) => {
+      const editor = Editor.scrolled(model.editor, top)
+      return {
+        model: modifyFields(model, { editor: () => editor }),
+        commands:
+          atEnd && editor !== model.editor ? [ScrollSurfaceToEnd()] : [],
+      }
+    },
+    CompletedScrollSurfaceToEnd: () => ({ model }),
     ResizedScreen: ({ rows }) =>
       respond(model, Editor.resized(model.editor, rows)),
     CompletedRevealCaret: () => ({

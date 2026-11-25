@@ -8,6 +8,7 @@ import {
   type Screen,
   driver,
   linesOf,
+  settle,
 } from './nullpad.ts'
 
 type Point = Readonly<{ x: number; y: number }>
@@ -45,6 +46,8 @@ export type Step =
   | Readonly<{ commit: string }>
   | Readonly<{ click: Point | Spot }>
   | Readonly<{ wheel: number }>
+  | Readonly<{ drag: Readonly<{ from: Point; to: Point }> }>
+  | Readonly<{ scheme: 'light' | 'dark' }>
   | Readonly<{ resize: Readonly<{ width: number; height: number }> }>
   | Readonly<{ shot: string }>
   | Readonly<{ reload: true }>
@@ -61,6 +64,8 @@ const stepKeys = [
   'commit',
   'click',
   'wheel',
+  'drag',
+  'scheme',
   'resize',
   'shot',
   'reload',
@@ -192,6 +197,35 @@ export const parseStep = (value: unknown, index: number): Step => {
         : fail('click takes { row, cell } or { x, y }')
     case 'wheel':
       return { wheel: number(body, 'wheel') }
+    case 'drag': {
+      const shape = 'drag takes { from: { x, y }, to: { x, y } }'
+      if (!isRecord(body)) {
+        return fail(shape)
+      }
+      only(body, ['from', 'to'])
+      const { from, to } = body
+      if (!isRecord(from) || !isRecord(to)) {
+        return fail(shape)
+      }
+      only(from, ['x', 'y'])
+      only(to, ['x', 'y'])
+      return {
+        drag: {
+          from: {
+            x: number(from['x'], 'drag.from.x'),
+            y: number(from['y'], 'drag.from.y'),
+          },
+          to: {
+            x: number(to['x'], 'drag.to.x'),
+            y: number(to['y'], 'drag.to.y'),
+          },
+        },
+      }
+    }
+    case 'scheme':
+      return body === 'light' || body === 'dark'
+        ? { scheme: body }
+        : fail('scheme takes "light" or "dark"')
     case 'reload':
       return body === true ? { reload: true } : fail('reload takes true')
     case 'wait':
@@ -471,6 +505,29 @@ const check = (screen: Screen, expectation: Expectation): Array<string> => {
   return misses
 }
 
+const dragMoves = 30
+
+const drag = async (nullpad: Nullpad, from: Point, to: Point) => {
+  const { page } = nullpad
+  await page.mouse.move(from.x, from.y)
+  await page.mouse.down()
+  await Array.from({ length: dragMoves }, (_, index) => index + 1).reduce(
+    (moved, index) =>
+      moved.then(async () => {
+        await page.mouse.move(
+          from.x + ((to.x - from.x) * index) / dragMoves,
+          from.y + ((to.y - from.y) * index) / dragMoves,
+        )
+        await page.waitForTimeout(30)
+      }),
+    Promise.resolve(),
+  )
+  await page.waitForTimeout(500)
+  await page.mouse.up()
+  await settle(page)
+  await settle(page)
+}
+
 const clickPoint = (screen: Screen, target: Point | Spot): Point => {
   if ('x' in target) {
     return target
@@ -509,6 +566,10 @@ export const play = async (
     await nullpad.click(point.x, point.y)
   } else if ('wheel' in step) {
     await nullpad.wheel(step.wheel)
+  } else if ('drag' in step) {
+    await drag(nullpad, step.drag.from, step.drag.to)
+  } else if ('scheme' in step) {
+    await nullpad.page.emulateMedia({ colorScheme: step.scheme })
   } else if ('resize' in step) {
     await nullpad.resize(step.resize.width, step.resize.height)
   } else if ('shot' in step) {
@@ -538,6 +599,8 @@ export const play = async (
 
 export const stateLine = (screen: Screen, preedit: string): string =>
   `${statusText(screen)} | ${cursorText(screen)}${preedit === '' ? '' : ` | composing ${JSON.stringify(preedit)}`}`
+
+export const launchOptions = { ignoreDefaultArgs: ['--hide-scrollbars'] }
 
 export const openPage = async (
   context: BrowserContext,

@@ -264,7 +264,10 @@ test('a click on the right half of the last character of a wrapped row puts the 
     ((first?.top ?? 0) + (first?.bottom ?? 0)) / 2,
   )
   const cursor = await nullpad.cursor()
-  expect({ row: cursor?.row, cell: cursor?.cell }).toEqual({ row: 0, cell: 76 })
+  expect({ row: cursor?.row, cell: cursor?.cell }).toEqual({
+    row: 0,
+    cell: 76,
+  })
   await nullpad.type('Z')
   expect(await nullpad.text()).toBe(`${'x'.repeat(76)}Z${'x'.repeat(24)}`)
 })
@@ -639,4 +642,203 @@ test('a wheel turn right after a key scrolls the screen', async ({
       `trial ${trial}: the turn scrolled three rows`,
     ).toBe('4')
   }
+})
+
+const scrollbarOf = (nullpad: Nullpad) =>
+  nullpad.page.evaluate(() => {
+    const surface = document.querySelector<HTMLElement>('.surface')
+    if (surface === null) {
+      throw new Error('no .surface')
+    }
+    const box = surface.getBoundingClientRect()
+    const width = surface.offsetWidth - surface.clientWidth
+    return {
+      width,
+      x: box.right - width / 2,
+      top: box.top,
+      bottom: box.top + surface.clientHeight,
+      textRight: box.left + surface.clientWidth,
+    }
+  })
+
+const firstNumber = (screen: Screen) => Number(screen.rows[0]?.number)
+
+test('the scrollbar thumb scrolls the note when dragged down, leaves the cursor where it was, and typing still lands at the cursor', async ({
+  nullpad,
+}) => {
+  await nullpad.paste(numberedLines(200))
+  await nullpad.press('Control+Home')
+  await nullpad.press('ArrowDown', 3)
+  const before = await nullpad.screen()
+  const bar = await scrollbarOf(nullpad)
+  expect(
+    bar.width,
+    'the surface has a scrollbar taking layout width',
+  ).toBeGreaterThan(0)
+  expect(firstNumber(before), 'the note starts at its top').toBe(1)
+  const grab = { x: bar.x, y: bar.top + bar.width + 5 }
+  await nullpad.page.mouse.move(grab.x, grab.y)
+  await nullpad.page.mouse.down()
+  await nullpad.page.mouse.move(grab.x, grab.y + 100, { steps: 5 })
+  await nullpad.page.mouse.move(grab.x, grab.y + 300, { steps: 10 })
+  await nullpad.page.mouse.up()
+  const dragged = await nullpad.screen()
+  expect(
+    firstNumber(dragged),
+    `first line on screen after dragging the thumb 300 px down (rows ${dragged.rows[0]?.number}-${dragged.rows.at(-1)?.number})`,
+  ).toBeGreaterThan(20)
+  expect(
+    await nullpad.status(),
+    'the cursor is on the line and column it had before the drag',
+  ).toEqual(before.status)
+  expectNumberedLinesIntact(dragged, 'after the drag')
+  await nullpad.type('Z')
+  const typed = await nullpad.screen()
+  expect(typed.cursor?.inside, 'typing brings the cursor back on screen').toBe(
+    true,
+  )
+  expect(linesOf(typed)[0], 'the first line on screen after typing').toBe(
+    'Zline 4',
+  )
+  expect(
+    linesOf(typed).find(line => line.includes('Z')),
+    'the letter went in at the cursor, line 4',
+  ).toBe('Zline 4')
+  expect(typed.status, 'the cursor sits after the typed letter').toEqual({
+    line: 4,
+    column: 2,
+    lineCount: 200,
+  })
+})
+
+test('a press on the scrollbar track below the thumb scrolls a page and leaves the cursor and the text as they were', async ({
+  nullpad,
+}) => {
+  await nullpad.paste(numberedLines(200))
+  await nullpad.press('Control+Home')
+  await nullpad.press('ArrowDown', 2)
+  const before = await nullpad.screen()
+  const bar = await scrollbarOf(nullpad)
+  expect(
+    bar.width,
+    'the surface has a scrollbar taking layout width',
+  ).toBeGreaterThan(0)
+  await nullpad.click(bar.x, bar.bottom - 20)
+  const after = await settleScroll(nullpad)
+  expect(
+    firstNumber(after),
+    `first line on screen after a press on the track (rows ${after.rows[0]?.number}-${after.rows.at(-1)?.number})`,
+  ).toBeGreaterThan(firstNumber(before) + 5)
+  expect(
+    await nullpad.status(),
+    'the cursor is on the line and column it had before the press',
+  ).toEqual(before.status)
+  expectNumberedLinesIntact(after, 'after the press')
+  await nullpad.type('Z')
+  expect(
+    linesOf(await nullpad.screen())[0],
+    'the letter typed after the press lands at the cursor and brings it back',
+  ).toBe('Zline 3')
+  expect(await nullpad.status(), 'status after the letter').toEqual({
+    line: 3,
+    column: 2,
+    lineCount: 200,
+  })
+})
+
+test('a click on the text next to the scrollbar still puts the cursor on that line', async ({
+  nullpad,
+}) => {
+  await nullpad.paste(numberedLines(200))
+  await nullpad.press('Control+Home')
+  const screen = await nullpad.screen()
+  const bar = await scrollbarOf(nullpad)
+  expect(
+    bar.width,
+    'the surface has a scrollbar taking layout width',
+  ).toBeGreaterThan(0)
+  const row = screen.rows[5]
+  const y = ((row?.top ?? 0) + (row?.bottom ?? 0)) / 2
+  await nullpad.click(bar.textRight - 3, y)
+  expect(
+    await nullpad.status(),
+    'a click 3 px left of the scrollbar lands at the end of line 6',
+  ).toEqual({ line: 6, column: 7, lineCount: 200 })
+  await nullpad.type('Z')
+  expect(linesOf(await nullpad.screen())[5], 'the letter lands in line 6').toBe(
+    'line 6Z',
+  )
+})
+
+test('dragging the scrollbar thumb to the bottom of a long wrapped note shows its last line and leaves the cursor where it was', async ({
+  nullpad,
+}) => {
+  await nullpad.page.setViewportSize({ width: 1000, height: 600 })
+  const note = Array.from(
+    { length: 3000 },
+    (_, i) => `line ${i + 1} ${'lorem ipsum dolor sit amet '.repeat(7)}`,
+  ).join('\n')
+  await nullpad.paste(note)
+  await nullpad.press('Control+Home')
+  const before = await nullpad.status()
+  const bar = await scrollbarOf(nullpad)
+  expect(
+    bar.width,
+    'the surface has a scrollbar taking layout width',
+  ).toBeGreaterThan(0)
+  const grab = { x: bar.x, y: bar.top + bar.width + 5 }
+  await nullpad.page.mouse.move(grab.x, grab.y)
+  await nullpad.page.mouse.down()
+  for (let i = 1; i <= 40; i++) {
+    await nullpad.page.mouse.move(grab.x, grab.y + 15 * i)
+    await nullpad.page.waitForTimeout(12)
+  }
+  await nullpad.page.waitForTimeout(800)
+  await nullpad.page.mouse.up()
+  const after = await settleScroll(nullpad)
+  expect(
+    linesOf(after).at(-1)?.startsWith('line 3000 '),
+    `the last line on screen after dragging the thumb to the bottom (rows ${after.rows[0]?.number}-${after.rows.at(-1)?.number})`,
+  ).toBe(true)
+  expect(
+    await nullpad.status(),
+    'the cursor is on the line and column it had before the drag',
+  ).toEqual(before)
+})
+
+test('dragging the scrollbar thumb past the bottom of the bar on a note of short and wrapped lines shows the last line and leaves the cursor where it was', async ({
+  nullpad,
+}) => {
+  await nullpad.page.setViewportSize({ width: 1280, height: 720 })
+  const note = Array.from(
+    { length: 450 },
+    (_, i) =>
+      `line ${i + 1} ${i % 4 === 0 ? 'lorem ipsum dolor sit amet '.repeat(12) : 'short'}`,
+  ).join('\n')
+  await nullpad.paste(note)
+  await nullpad.press('Control+Home')
+  const before = await nullpad.status()
+  const bar = await scrollbarOf(nullpad)
+  expect(
+    bar.width,
+    'the surface has a scrollbar taking layout width',
+  ).toBeGreaterThan(0)
+  const grab = { x: bar.x, y: bar.top + bar.width + 5 }
+  await nullpad.page.mouse.move(grab.x, grab.y)
+  await nullpad.page.mouse.down()
+  for (let i = 1; i <= 30; i++) {
+    await nullpad.page.mouse.move(grab.x, grab.y + ((719 - grab.y) * i) / 30)
+    await nullpad.page.waitForTimeout(30)
+  }
+  await nullpad.page.waitForTimeout(500)
+  await nullpad.page.mouse.up()
+  const after = await settleScroll(nullpad)
+  expect(
+    linesOf(after).at(-1)?.startsWith('line 450 '),
+    `the last line on screen after dragging the thumb past the bottom of the bar (rows ${after.rows[0]?.number}-${after.rows.at(-1)?.number})`,
+  ).toBe(true)
+  expect(
+    await nullpad.status(),
+    'the cursor is on the line and column it had before the drag',
+  ).toEqual(before)
 })

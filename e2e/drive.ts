@@ -30,6 +30,7 @@ import {
 import {
   type Step,
   describe,
+  launchOptions,
   openPage,
   parseSteps,
   picture,
@@ -78,10 +79,12 @@ const doctor = async (): Promise<number> => {
   const problems: Array<string> = []
   const say = (line: string) => console.log(line)
   say(`node ${process.version}`)
-  const browser = await chromium.launch().catch((error: unknown) => {
-    problems.push(`chromium does not launch: ${String(error)}`)
-    return null
-  })
+  const browser = await chromium
+    .launch(launchOptions)
+    .catch((error: unknown) => {
+      problems.push(`chromium does not launch: ${String(error)}`)
+      return null
+    })
   if (browser !== null) {
     const page = await browser.newPage()
     const editContext = await page.evaluate(() => 'EditContext' in window)
@@ -195,7 +198,7 @@ const run = async (
       { cwd: repo, stdio: 'ignore', detached: true },
     )
     await waitForServer(url, owned.server)
-    owned.browser = await chromium.launch()
+    owned.browser = await chromium.launch(launchOptions)
     const context = await owned.browser.newContext({
       viewport: { width: options.width, height: options.height },
       deviceScaleFactor: 1,

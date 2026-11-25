@@ -34,6 +34,7 @@ It prints the Node and Chromium versions, whether Chromium has EditContext, and 
 ```sh
 node e2e/drive.ts steps.json            # or - to read the steps from stdin
 node e2e/drive.ts steps.json --video    # also records video.webm
+node e2e/drive.ts steps.json --record   # plays slowly and writes recording.mp4 with the captions on it
 node e2e/drive.ts steps.json --width 600 --height 400 --out verify-out/my-check
 ```
 
@@ -53,6 +54,7 @@ A step is an object with exactly one of these keys. A malformed step (an unknown
 | `{"shot": "before-fix"}`                                                                                                                                                           | Saves a screenshot as `before-fix.png`. Names use letters, digits, `-` and `_`. Proves nothing alone. |
 | `{"reload": true}`                                                                                                                                                                 | Reloads the page and waits until the editor is ready again.                                           |
 | `{"wait": 900}`                                                                                                                                                                    | Waits that many milliseconds, up to 10000, such as for a save to land.                                |
+| `{"caption": "Press Ctrl and Z", "note": "The sentence goes away."}`                                                                                                               | Shows nothing in the app. `--record` draws it above the app until the next caption.                   |
 | `{"expect": {"text": "…", "status": "2:4 3L", "under": "o", "top": "40", "full": true, "title": "…", "finder": "…", "mode": "NORMAL", "pending": "2g", "keydown": "z cancelled"}}` | Checks the screen. Give any of the fields. A miss prints `FAIL` and stops the run.                    |
 
 Each `expect` field is an exact match:
@@ -129,6 +131,7 @@ Each run writes to `verify-out/<time>/` (gitignored), or to `--out`:
 - `screen.json`, the last screen as data: rows with line ids, starts and pixel boxes, the cursor, the status, the cell width.
 - `final.png`, plus one PNG per `shot` step. Open them with the Read tool to look at them.
 - `video.webm` with `--video`.
+- `recording.mp4` with `--record`.
 
 The last line is `PASS evidence in <folder>` or `FAIL evidence in <folder>`. The exit code is 0 on a pass, 1 on a failed `expect`, a thrown step or any page error, 2 on bad steps or options, and 130 or 143 when interrupted. Read `FAIL` lines for a missed `expect` and `ERROR` lines for a step that threw.
 
@@ -139,7 +142,17 @@ Proof standards:
 - A behavior change needs a run that fails on the old build and passes on the new one. Build the old commit with `git worktree add` and `pnpm exec vite build --outDir <folder>`, then pass `--dist <folder>`.
 - A page error fails the run even when every `expect` passed. Read the `PAGE ERROR` lines.
 - When the proof should guard the behavior for good, write it as a scenario in `e2e/` (see Testing in `AGENTS.md`). The steps map to the `nullpad` fixture one to one: `type`, `press`, `paste`, `compose`, `commit`, `click`, `wheel`, `resize`.
-- A PR that changes behavior needs a recording. Run its steps with `--video` and attach `video.webm`.
+- A PR that changes behavior needs a recording. See Record a PR.
+
+## Record a PR
+
+The recording is the proof, played slowly, with a caption before each action. No agent drives the app for it.
+
+1. Put a `caption` step before each action of the proof a person should follow. `caption` says what is done, in at most 60 characters. `note` says what to look for, in at most 90. Each is one line.
+2. Run `node e2e/drive.ts steps.json --record`. It types key by key, holds each caption long enough to read, and still checks every `expect`.
+3. Attach `recording.mp4` from the evidence folder.
+
+The captions sit in a strip above the app, drawn onto the video by `ffmpeg` after the run. Nothing is added to the page, so window sizes, clicks and `expect` values are those of a plain run. A window narrower than 960 pixels is centred in a 960 pixel frame, so the captions keep their size. `--record` needs `ffmpeg` on the path and at least one `caption` step.
 
 ## Cleanup
 

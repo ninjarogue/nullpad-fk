@@ -2,7 +2,14 @@ import { Schema } from 'effect'
 
 import * as Buffer from '../buffer'
 import {
+  caretColumnOf,
+  cellAtScreenColumn,
+  lastScreenColumnOf,
+  screenColumnOf,
+} from './cells'
+import {
   type Spot,
+  type Want,
   cellsIn,
   endOf,
   lastLine,
@@ -156,4 +163,78 @@ export const movedBy = (
     return { line: from.line, column: from.column + mark.column }
   }
   return { ...mark, line: operator === 'Delete' ? from.line : from.line + 1 }
+}
+
+export const Amount = Schema.TaggedUnion({
+  Lines: { lines: Schema.Int },
+  Width: { columns: Schema.Int },
+  Through: { lines: Schema.Int, column: Schema.Int },
+  ToLineEnd: { lines: Schema.Int },
+})
+export type Amount = typeof Amount.Type
+
+const textOf = (buffer: Buffer.Buffer, line: number): Buffer.Line =>
+  buffer.lines[line] ?? buffer.lines[0]
+
+export const amountOf = (
+  buffer: Buffer.Buffer,
+  ends: Ends,
+  reach: 'AsSelected' | 'WholeLines',
+  want: Want,
+): Amount => {
+  const { first, last } = sorted(ends)
+  const lines = last.line - first.line + 1
+  if (ends.kind === 'Lines' || reach === 'WholeLines') {
+    return { _tag: 'Lines', lines }
+  }
+  if (want === 'End') {
+    return { _tag: 'ToLineEnd', lines }
+  }
+  const column = lastScreenColumnOf(textOf(buffer, last.line), last.cell)
+  return lines === 1
+    ? {
+        _tag: 'Width',
+        columns:
+          column - screenColumnOf(textOf(buffer, first.line), first.cell) + 1,
+      }
+    : { _tag: 'Through', lines, column }
+}
+
+export const rangeFrom = (
+  buffer: Buffer.Buffer,
+  cursor: Spot,
+  amount: Amount,
+): Range => {
+  const reached = (lines: number): number =>
+    Math.min(lastLine(buffer), cursor.line + lines - 1)
+  const through = (line: number, column: number): Spot => ({
+    line,
+    cell: cellAtScreenColumn(
+      textOf(buffer, line),
+      column,
+      cellsIn(buffer, line),
+    ),
+  })
+  const end = Amount.match(amount, {
+    Lines: ({ lines }) => ({ line: reached(lines), cell: cursor.cell }),
+    Width: ({ columns }) =>
+      through(
+        cursor.line,
+        caretColumnOf(textOf(buffer, cursor.line), cursor.cell) + columns - 1,
+      ),
+    Through: ({ lines, column }) => through(reached(lines), column),
+    ToLineEnd: ({ lines }) => ({
+      line: reached(lines),
+      cell: cellsIn(buffer, reached(lines)),
+    }),
+  })
+  return rangeOf(
+    buffer,
+    {
+      kind: amount._tag === 'Lines' ? 'Lines' : 'Letters',
+      anchor: cursor,
+      cursor: end,
+    },
+    'AsSelected',
+  )
 }

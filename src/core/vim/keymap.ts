@@ -8,7 +8,7 @@ import {
   defaultRegister,
   registerNamed,
 } from './operators'
-import { Kind as SelectionKind } from './selection'
+import { Amount, Kind as SelectionKind } from './selection'
 import { OperatorName, TargetName } from './targets'
 
 export type Key = string
@@ -26,6 +26,7 @@ export type InsertAt = typeof InsertAt.Type
 export const Command = Schema.TaggedUnion({
   Move: { motion: MotionName },
   Operate: { operator: OperatorName, target: TargetName },
+  OperateAmount: { operator: OperatorName, amount: Amount },
   Put: { side: Side },
   Insert: { at: InsertAt },
   Cancel: {},

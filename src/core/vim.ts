@@ -447,6 +447,17 @@ const putStep = (
   }
 }
 
+const repeatOf = (
+  operator: OperatorName,
+  amount: Selection.Amount,
+  register: Operators.RegisterName,
+): Repeat => ({
+  command: { _tag: 'OperateAmount', operator, amount },
+  count: undefined,
+  register,
+  typed: [],
+})
+
 const putOverStep = (
   vim: Vim,
   buffer: Buffer.Buffer,
@@ -455,16 +466,15 @@ const putOverStep = (
   { side, count }: Put,
   held: Option.Option<Operators.Register>,
 ): Step => {
-  const range = Selection.rangeOf(
-    buffer,
-    Selection.endsOf(buffer, visual.kind, visual.anchor),
-    'AsSelected',
-  )
+  const ends = Selection.endsOf(buffer, visual.kind, visual.anchor)
+  const range = Selection.rangeOf(buffer, ends, 'AsSelected')
+  const deletesInto =
+    side === 'After' ? Operators.defaultRegister : Operators.blackHole
   const deleted = Operators.operators.Delete(
     buffer,
     range,
     kept.registers,
-    side === 'After' ? Operators.defaultRegister : Operators.blackHole,
+    deletesInto,
   )
   const put = Option.map(held, register =>
     Operators.putOver(buffer, deleted.buffer, range, register, count ?? 1),
@@ -490,7 +500,16 @@ const putOverStep = (
       }),
       false,
     ),
-    kept: { ...kept, registers: deleted.registers },
+    kept: {
+      registers: deleted.registers,
+      dot: Option.some(
+        repeatOf(
+          'Delete',
+          Selection.amountOf(buffer, ends, 'AsSelected', vim.want),
+          deletesInto,
+        ),
+      ),
+    },
     fate: done,
     began: Option.some(positionOf(buffer, range.from)),
     clipboard: Option.none(),
@@ -543,6 +562,30 @@ const run = (
     ...normal,
     mode: { _tag: 'Insert', recording: repeat },
   }
+  const operated = (
+    operator: OperatorName,
+    target: TargetName | 'Selection',
+    range: Range,
+  ): Step => {
+    const applied = Operators.operators[operator](
+      buffer,
+      range,
+      kept.registers,
+      register,
+    )
+    const after = applied.inserting ? recordingStay : normal
+    return {
+      vim: after,
+      buffer: rest(after, applied.buffer, false),
+      kept: {
+        registers: applied.registers,
+        dot: operator === 'Delete' ? repeat : kept.dot,
+      },
+      fate: done,
+      began: Option.some(changeBegan(buffer, operator, target, range)),
+      clipboard: applied.clipboard,
+    }
+  }
   return Keymap.Command.match(command, {
     Cancel: () => unchanged,
     Move: ({ motion }) => {
@@ -566,27 +609,14 @@ const run = (
         targetFor(operator, target)(buffer, spotOf(buffer), count, vim.want),
         {
           onNone: () => unchanged,
-          onSome: range => {
-            const applied = Operators.operators[operator](
-              buffer,
-              range,
-              kept.registers,
-              register,
-            )
-            const after = applied.inserting ? recordingStay : normal
-            return {
-              vim: after,
-              buffer: rest(after, applied.buffer, false),
-              kept: {
-                registers: applied.registers,
-                dot: operator === 'Delete' ? repeat : kept.dot,
-              },
-              fate: done,
-              began: Option.some(changeBegan(buffer, operator, target, range)),
-              clipboard: applied.clipboard,
-            }
-          },
+          onSome: range => operated(operator, target, range),
         },
+      ),
+    OperateAmount: ({ operator, amount }) =>
+      operated(
+        operator,
+        'Selection',
+        Selection.rangeFrom(buffer, spotOf(buffer), amount),
       ),
     Put: ({ side }) => {
       const source = Operators.registerFor(kept.registers, register)
@@ -669,10 +699,14 @@ const runVisual = (
   }
   return Keymap.VisualCommand.match(command, {
     Operate: ({ operator, reach }) => {
-      const range = Selection.rangeOf(
-        buffer,
-        Selection.endsOf(buffer, visual.kind, visual.anchor),
-        reach,
+      const ends = Selection.endsOf(buffer, visual.kind, visual.anchor)
+      const range = Selection.rangeOf(buffer, ends, reach)
+      const repeat = Option.some(
+        repeatOf(
+          operator,
+          Selection.amountOf(buffer, ends, reach, vim.want),
+          register,
+        ),
       )
       const applied = Operators.operators[operator](
         buffer,
@@ -689,14 +723,17 @@ const runVisual = (
       const after: Vim = applied.inserting
         ? {
             ...normal,
-            mode: { _tag: 'Insert', recording: Option.none() },
+            mode: { _tag: 'Insert', recording: repeat },
             want: 'Unset',
           }
         : { ...normal, want: 'Unset' }
       return {
         vim: after,
         buffer: rest(after, applied.buffer, false),
-        kept: { ...kept, registers: applied.registers },
+        kept: {
+          registers: applied.registers,
+          dot: operator === 'Delete' ? repeat : kept.dot,
+        },
         fate: done,
         began: Option.some(changeBegan(buffer, operator, 'Selection', range)),
         clipboard: applied.clipboard,

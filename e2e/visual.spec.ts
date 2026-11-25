@@ -1,5 +1,6 @@
 import {
   type Nullpad,
+  driver,
   expect,
   numberedLines,
   openFresh,
@@ -2575,3 +2576,317 @@ test('a held j in V-LINE on a 20,000-line note selects every line it passed', as
     20_000,
   )
 })
+
+type Rect = Readonly<{
+  left: number
+  top: number
+  right: number
+  bottom: number
+}>
+
+const selectionBoxes = (nullpad: Nullpad): Promise<ReadonlyArray<Rect>> =>
+  nullpad.page.evaluate(() =>
+    [...document.querySelectorAll('#selection > *')]
+      .map(element => element.getBoundingClientRect())
+      .filter(rect => rect.width > 0 && rect.height > 0)
+      .map(rect => ({
+        left: rect.left,
+        top: rect.top,
+        right: rect.right,
+        bottom: rect.bottom,
+      })),
+  )
+
+const caretRect = (nullpad: Nullpad): Promise<Rect> =>
+  nullpad.page.evaluate(() => {
+    const rect = document.getElementById('caret')?.getBoundingClientRect()
+    if (rect === undefined) {
+      throw new Error('no #caret')
+    }
+    return {
+      left: rect.left,
+      top: rect.top,
+      right: rect.right,
+      bottom: rect.bottom,
+    }
+  })
+
+type Pixel = readonly [number, number, number]
+
+const pixelsOf = async (
+  nullpad: Nullpad,
+  points: ReadonlyArray<readonly [number, number]>,
+): Promise<ReadonlyArray<Pixel>> => {
+  await settle(nullpad.page)
+  const png = await nullpad.page.screenshot({
+    animations: 'disabled',
+    caret: 'hide',
+  })
+  return nullpad.page.evaluate(
+    async ({ base64, wanted }) => {
+      const image = new Image()
+      image.src = `data:image/png;base64,${base64}`
+      await image.decode()
+      const canvas = document.createElement('canvas')
+      canvas.width = image.width
+      canvas.height = image.height
+      const context = canvas.getContext('2d')
+      if (context === null) {
+        throw new Error('no 2d canvas to read the screenshot')
+      }
+      context.drawImage(image, 0, 0)
+      return wanted.map(([x, y]): [number, number, number] => {
+        const [r = 0, g = 0, b = 0] = context.getImageData(x, y, 1, 1).data
+        return [r, g, b]
+      })
+    },
+    { base64: png.toString('base64'), wanted: points },
+  )
+}
+
+const apart = (a: Pixel, b: Pixel) =>
+  Math.max(Math.abs(a[0] - b[0]), Math.abs(a[1] - b[1]), Math.abs(a[2] - b[2]))
+
+const lettersPerRow = async (nullpad: Nullpad): Promise<number> => {
+  await nullpad.paste('x'.repeat(400))
+  const { rows } = await nullpad.screen()
+  const first = rows[0]
+  if (first === undefined) {
+    throw new Error('no row drawn')
+  }
+  return first.text.length
+}
+
+for (const trailing of ['', '  ']) {
+  test(`the block cursor sits on the line break after a line that fills its row exactly${trailing === '' ? '' : ', with two trailing spaces'}`, async ({
+    nullpad,
+  }) => {
+    const fill = await lettersPerRow(nullpad)
+    await openFresh(nullpad.page)
+    await begin(nullpad, `${'x'.repeat(fill)}${trailing}\nend`)
+    const { cell, rows } = await nullpad.screen()
+    expect(
+      rows.filter(row => row.lineId === rows[0]?.lineId).length,
+      `${fill} letters fill one row exactly${trailing === '' ? '' : ' (the spaces hang)'}`,
+    ).toBe(1)
+    await play(nullpad, 'gg0v$')
+    expect(await modeOf(nullpad), 'v$').toBe('VISUAL')
+    expect(
+      (await selectionOf(nullpad)).endsWith('\n'),
+      'the selection holds the line break',
+    ).toBe(true)
+    const caret = await caretRect(nullpad)
+    expect(
+      caret.right - caret.left,
+      'the cursor on the line break is a block, wider than half a cell',
+    ).toBeGreaterThan(cell / 2)
+    const boxes = (await selectionBoxes(nullpad)).filter(
+      box => Math.abs(box.top - caret.top) < 3,
+    )
+    const rightmost = boxes.reduce<Rect | null>(
+      (best, box) => (best === null || box.right > best.right ? box : best),
+      null,
+    )
+    expect(rightmost, 'a highlight box on the cursor row').not.toBeNull()
+    expect(
+      caret.left < (rightmost?.right ?? 0) &&
+        caret.right > (rightmost?.left ?? 0),
+      `the cursor (${caret.left} to ${caret.right}) lies on the highlight of the break (${rightmost?.left} to ${rightmost?.right})`,
+    ).toBe(true)
+  })
+}
+
+test('the highlight covers only the selected letters on a line that mixes left-to-right and right-to-left text', async ({
+  nullpad,
+}) => {
+  const note = 'abc אבג def'
+  await begin(nullpad, note)
+  await play(nullpad, 'gg0vw')
+  expect(await modeOf(nullpad), 'vw').toBe('VISUAL')
+  expect(
+    await nullpad.status(),
+    'the cursor end is the first Hebrew letter',
+  ).toMatchObject({ line: 1, column: 5 })
+  const boxes = await selectionBoxes(nullpad)
+  const covered = await nullpad.page.evaluate(
+    ({ rects }) => {
+      const segmenter = new Intl.Segmenter(undefined, {
+        granularity: 'grapheme',
+      })
+      const range = document.createRange()
+      const found: Array<{ letter: string; index: number; covered: boolean }> =
+        []
+      let index = 0
+      for (const line of document.querySelectorAll('.surface .line')) {
+        for (const node of line.childNodes) {
+          if (!(node instanceof Text)) {
+            continue
+          }
+          for (const part of segmenter.segment(node.data)) {
+            range.setStart(node, part.index)
+            range.setEnd(node, part.index + part.segment.length)
+            const [rect] = range.getClientRects()
+            if (rect !== undefined) {
+              const x = (rect.left + rect.right) / 2
+              const y = (rect.top + rect.bottom) / 2
+              found.push({
+                letter: part.segment,
+                index,
+                covered: rects.some(
+                  box =>
+                    x > box.left &&
+                    x < box.right &&
+                    y > box.top &&
+                    y < box.bottom,
+                ),
+              })
+            }
+            index += 1
+          }
+        }
+        break
+      }
+      return found
+    },
+    { rects: boxes },
+  )
+  expect(covered.length, 'every letter of the line has a rect').toBe(11)
+  for (const { letter, index, covered: isCovered } of covered) {
+    expect(
+      isCovered,
+      `letter ${index} (${JSON.stringify(letter)}) is ${index < 5 ? '' : 'not '}covered`,
+    ).toBe(index < 5)
+  }
+})
+
+test('a selected letter that has no width still shows a highlight', async ({
+  nullpad,
+}) => {
+  await begin(nullpad, '‌')
+  await play(nullpad, 'v')
+  expect(await modeOf(nullpad), 'v').toBe('VISUAL')
+  expect(await selectionOf(nullpad), 'the letter under the cursor').toBe('‌')
+  const widths = (await selectionBoxes(nullpad)).map(
+    box => box.right - box.left,
+  )
+  expect(
+    widths.some(width => width > 0),
+    `a highlight box with a width (boxes ${JSON.stringify(widths)})`,
+  ).toBe(true)
+})
+
+test('the highlight shows in forced colours', async ({ nullpad }) => {
+  await nullpad.page.emulateMedia({ forcedColors: 'active' })
+  await begin(nullpad, 'hello')
+  await play(nullpad, 'viw')
+  expect(await selectionOf(nullpad), 'viw').toBe('hello')
+  const box = await selectionBox(nullpad)
+  if (box === null) {
+    throw new Error('no highlight box')
+  }
+  const { rowHeight } = await nullpad.screen()
+  const [inside, outside] = await pixelsOf(nullpad, [
+    [Math.round(box.left) + 1, Math.round(box.top) + 1],
+    [500, Math.round(box.top + rowHeight * 6)],
+  ])
+  expect(
+    apart(inside ?? [0, 0, 0], outside ?? [0, 0, 0]),
+    `the highlight pixel ${JSON.stringify(inside)} differs from the page background ${JSON.stringify(outside)}`,
+  ).toBeGreaterThan(8)
+})
+
+test('gv after an undo selects the lines that were selected', async ({
+  nullpad,
+}) => {
+  await begin(nullpad, 'one two\nthree four')
+  await play(nullpad, 'ggVd')
+  expect(await nullpad.text(), 'Vd took the first line').toBe('three four')
+  await play(nullpad, 'u')
+  expect(await nullpad.text(), 'u brought it back').toBe('one two\nthree four')
+  await play(nullpad, 'gv')
+  expect(await modeOf(nullpad), 'gv').toBe('V-LINE')
+  expect(await selectionOf(nullpad), 'gv selects the first line').toBe(
+    'one two\n',
+  )
+  await play(nullpad, 'd')
+  expect(await nullpad.text(), 'd took it again').toBe('three four')
+})
+
+test('Ctrl-C leaves VISUAL as in Vim', async ({ nullpad }) => {
+  await begin(nullpad, 'hello world')
+  await play(nullpad, 'viw')
+  expect(await selectionOf(nullpad), 'viw').toBe('hello')
+  await nullpad.press('Control+c')
+  expect(await modeOf(nullpad), 'Ctrl-C leaves').toBe('NORMAL')
+  expect(await selectionOf(nullpad), 'nothing is selected').toBe('')
+  expect(await nullpad.text(), 'the text is unchanged').toBe('hello world')
+  expect(
+    await nullpad.status(),
+    'the cursor stays on its letter',
+  ).toMatchObject({ line: 1, column: 5 })
+})
+
+for (const scale of [1.25, 1.75]) {
+  test(`the rows of a highlight join with no gap at ${scale * 100}% scale`, async ({
+    browser,
+    baseURL,
+  }) => {
+    const context = await browser.newContext({
+      viewport: { width: 1000, height: 600 },
+      deviceScaleFactor: scale,
+    })
+    try {
+      await context.grantPermissions(['clipboard-read', 'clipboard-write'])
+      const page = await context.newPage()
+      await page.goto(baseURL ?? '/')
+      await page.locator('#caret').waitFor()
+      await page.evaluate(() => document.fonts.ready.then(() => undefined))
+      const nullpad = driver(page, await context.newCDPSession(page))
+      await begin(
+        nullpad,
+        Array.from({ length: 40 }, (_, i) => `ab${i % 7}`).join('\n'),
+      )
+      await play(nullpad, 'ggV10j')
+      expect(await modeOf(nullpad), 'V10j').toBe('V-LINE')
+      const breaks = await nullpad.page.evaluate(() =>
+        [...document.querySelectorAll('#selection > [data-break]')].map(
+          element => {
+            const rect = element.getBoundingClientRect()
+            return {
+              left: rect.left,
+              right: rect.right,
+              top: rect.top,
+              bottom: rect.bottom,
+            }
+          },
+        ),
+      )
+      const boxes = await selectionBoxes(nullpad)
+      expect(boxes.length, 'the highlight is drawn').toBeGreaterThan(0)
+      const first = breaks[0]
+      expect(first, 'the line breaks of V-LINE are highlighted').toBeDefined()
+      const x = Math.floor(
+        (((first?.left ?? 0) + (first?.right ?? 0)) / 2) * scale,
+      )
+      const top = Math.ceil(Math.min(...boxes.map(box => box.top)) * scale)
+      const bottom = Math.floor(
+        Math.max(...boxes.map(box => box.bottom)) * scale,
+      )
+      const points: Array<readonly [number, number]> = []
+      for (let y = top; y < bottom; y++) {
+        points.push([x, y])
+      }
+      const column = await pixelsOf(nullpad, points)
+      const reference = column[Math.floor(column.length / 2)] ?? [0, 0, 0]
+      const gaps = column
+        .map((pixel, i) => ({ y: top + i, pixel }))
+        .filter(({ pixel }) => apart(pixel, reference) > 6)
+      expect(
+        gaps,
+        `pixels in column ${x} from ${top} to ${bottom} that are not the highlight colour ${JSON.stringify(reference)}`,
+      ).toEqual([])
+    } finally {
+      await context.close()
+    }
+  })
+}

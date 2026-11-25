@@ -92,6 +92,13 @@ export const screenColumnOf = (line: Buffer.Line, cell: number): number => {
   return column
 }
 
+export const lastScreenColumnOf = (line: Buffer.Line, cell: number): number => {
+  const start = screenColumnOf(line, cell)
+  return cell < cellCount(line)
+    ? start + widthAt(cellText(line, cell), start) - 1
+    : start
+}
+
 export const caretColumnOf = (line: Buffer.Line, cell: number): number => {
   const start = screenColumnOf(line, cell)
   return cell < cellCount(line) && cellText(line, cell) === '\t'
@@ -102,11 +109,11 @@ export const caretColumnOf = (line: Buffer.Line, cell: number): number => {
 export const cellAtScreenColumn = (
   line: Buffer.Line,
   wanted: number,
+  endCell: number,
 ): number => {
-  const cells = cellCount(line)
   let column = 0
   let cell = 0
-  while (cell < cells - 1) {
+  while (cell < endCell) {
     column += widthAt(cellText(line, cell), column)
     if (column > wanted) {
       return cell

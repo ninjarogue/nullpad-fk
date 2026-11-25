@@ -1,0 +1,635 @@
+[
+  {
+    "paste": "one two three\nfour (five six) seven\n  eight \"nine ten\" end\n\nsecond para\nlast line here"
+  },
+  {
+    "press": "Control+Home"
+  },
+  {
+    "press": "Control+,"
+  },
+  {
+    "expect": {
+      "mode": "NORMAL",
+      "status": "1:1 6L",
+      "selection": ""
+    }
+  },
+  {
+    "caption": "Press v, then e",
+    "note": "VISUAL: the letters from the start to the cursor are selected."
+  },
+  {
+    "type": "v"
+  },
+  {
+    "expect": {
+      "mode": "VISUAL",
+      "selection": "o",
+      "status": "1:1 6L",
+      "text": "one two three\nfour (five six) seven\n  eight \"nine ten\" end\n\nsecond para\nlast line here"
+    }
+  },
+  {
+    "type": "e"
+  },
+  {
+    "expect": {
+      "mode": "VISUAL",
+      "selection": "one",
+      "status": "1:3 6L",
+      "under": "e"
+    }
+  },
+  {
+    "caption": "Press o twice",
+    "note": "The cursor goes to the other end and back. The selection stays."
+  },
+  {
+    "type": "o"
+  },
+  {
+    "expect": {
+      "selection": "one",
+      "status": "1:1 6L"
+    }
+  },
+  {
+    "type": "o"
+  },
+  {
+    "expect": {
+      "selection": "one",
+      "status": "1:3 6L"
+    }
+  },
+  {
+    "caption": "Press w, then d",
+    "note": "The selection grows to the next word, and d deletes it."
+  },
+  {
+    "type": "w"
+  },
+  {
+    "expect": {
+      "selection": "one t",
+      "status": "1:5 6L"
+    }
+  },
+  {
+    "type": "d"
+  },
+  {
+    "expect": {
+      "mode": "NORMAL",
+      "selection": "",
+      "status": "1:1 6L",
+      "text": "wo three\nfour (five six) seven\n  eight \"nine ten\" end\n\nsecond para\nlast line here"
+    }
+  },
+  {
+    "type": "u"
+  },
+  {
+    "expect": {
+      "text": "one two three\nfour (five six) seven\n  eight \"nine ten\" end\n\nsecond para\nlast line here",
+      "status": "1:1 6L"
+    }
+  },
+  {
+    "caption": "Press V, then j",
+    "note": "V-LINE: whole lines are selected."
+  },
+  {
+    "type": "V"
+  },
+  {
+    "expect": {
+      "mode": "V-LINE",
+      "selection": "one two three\n",
+      "status": "1:1 6L"
+    }
+  },
+  {
+    "type": "j"
+  },
+  {
+    "expect": {
+      "mode": "V-LINE",
+      "selection": "one two three\nfour (five six) seven\n",
+      "status": "2:1 6L"
+    }
+  },
+  {
+    "caption": "Press y, then G and p",
+    "note": "The two lines are yanked and put below the last line."
+  },
+  {
+    "type": "y"
+  },
+  {
+    "expect": {
+      "mode": "NORMAL",
+      "selection": "",
+      "status": "1:1 6L"
+    }
+  },
+  {
+    "type": "Gp"
+  },
+  {
+    "expect": {
+      "text": "one two three\nfour (five six) seven\n  eight \"nine ten\" end\n\nsecond para\nlast line here\none two three\nfour (five six) seven",
+      "status": "7:1 8L"
+    }
+  },
+  {
+    "type": "u"
+  },
+  {
+    "expect": {
+      "text": "one two three\nfour (five six) seven\n  eight \"nine ten\" end\n\nsecond para\nlast line here",
+      "status": "6:1 6L"
+    }
+  },
+  {
+    "caption": "Type ggw, viw, then c, 2 and Esc",
+    "note": "viw selects the word. c changes it."
+  },
+  {
+    "type": "ggwviw"
+  },
+  {
+    "expect": {
+      "mode": "VISUAL",
+      "selection": "two",
+      "status": "1:7 6L"
+    }
+  },
+  {
+    "type": "c"
+  },
+  {
+    "expect": {
+      "mode": "INSERT",
+      "selection": ""
+    }
+  },
+  {
+    "type": "2"
+  },
+  {
+    "press": "Escape"
+  },
+  {
+    "expect": {
+      "mode": "NORMAL",
+      "text": "one 2 three\nfour (five six) seven\n  eight \"nine ten\" end\n\nsecond para\nlast line here",
+      "status": "1:5 6L"
+    }
+  },
+  {
+    "caption": "Press j, 0 and a dot",
+    "note": "The dot changes the same width of text at the cursor: three letters."
+  },
+  {
+    "type": "j0."
+  },
+  {
+    "expect": {
+      "text": "one 2 three\n2r (five six) seven\n  eight \"nine ten\" end\n\nsecond para\nlast line here",
+      "status": "2:1 6L",
+      "mode": "NORMAL"
+    }
+  },
+  {
+    "type": "uu"
+  },
+  {
+    "expect": {
+      "text": "one two three\nfour (five six) seven\n  eight \"nine ten\" end\n\nsecond para\nlast line here",
+      "status": "1:5 6L"
+    }
+  },
+  {
+    "caption": "Type 2Gw, then vi( and a(",
+    "note": "A text object selects, and the next one grows the selection."
+  },
+  {
+    "type": "2Gwvi("
+  },
+  {
+    "expect": {
+      "mode": "VISUAL",
+      "selection": "five six",
+      "status": "2:14 6L"
+    }
+  },
+  {
+    "type": "a("
+  },
+  {
+    "expect": {
+      "selection": "(five six)",
+      "status": "2:15 6L"
+    }
+  },
+  {
+    "press": "Escape"
+  },
+  {
+    "expect": {
+      "mode": "NORMAL",
+      "selection": "",
+      "status": "2:15 6L"
+    }
+  },
+  {
+    "type": "3Gvi\""
+  },
+  {
+    "expect": {
+      "selection": "nine ten",
+      "status": "3:17 6L"
+    }
+  },
+  {
+    "type": "y"
+  },
+  {
+    "expect": {
+      "mode": "NORMAL",
+      "status": "3:10 6L"
+    }
+  },
+  {
+    "caption": "Type gg, vip, then v",
+    "note": "ip makes whole lines. v switches to letters and keeps both ends."
+  },
+  {
+    "type": "ggvip"
+  },
+  {
+    "expect": {
+      "mode": "V-LINE",
+      "selection": "one two three\nfour (five six) seven\n  eight \"nine ten\" end\n",
+      "status": "3:1 6L"
+    }
+  },
+  {
+    "type": "v"
+  },
+  {
+    "expect": {
+      "mode": "VISUAL",
+      "selection": "one two three\nfour (five six) seven\n ",
+      "status": "3:1 6L"
+    }
+  },
+  {
+    "caption": "Press Esc, then gv",
+    "note": "gv selects the last selection again."
+  },
+  {
+    "press": "Escape"
+  },
+  {
+    "expect": {
+      "mode": "NORMAL",
+      "selection": "",
+      "status": "3:1 6L"
+    }
+  },
+  {
+    "type": "gv"
+  },
+  {
+    "expect": {
+      "mode": "VISUAL",
+      "selection": "one two three\nfour (five six) seven\n ",
+      "status": "3:1 6L"
+    }
+  },
+  {
+    "press": "Escape"
+  },
+  {
+    "caption": "Type 4G, v and d on the empty line",
+    "note": "The selection is the line break. d takes the line away."
+  },
+  {
+    "type": "4Gv"
+  },
+  {
+    "expect": {
+      "mode": "VISUAL",
+      "selection": "\n",
+      "status": "4:1 6L"
+    }
+  },
+  {
+    "type": "d"
+  },
+  {
+    "expect": {
+      "mode": "NORMAL",
+      "text": "one two three\nfour (five six) seven\n  eight \"nine ten\" end\nsecond para\nlast line here",
+      "status": "4:1 5L"
+    }
+  },
+  {
+    "type": "u"
+  },
+  {
+    "expect": {
+      "text": "one two three\nfour (five six) seven\n  eight \"nine ten\" end\n\nsecond para\nlast line here"
+    }
+  },
+  {
+    "type": "ggv$"
+  },
+  {
+    "expect": {
+      "selection": "one two three\n",
+      "status": "1:14 6L"
+    }
+  },
+  {
+    "press": "Escape"
+  },
+  {
+    "expect": {
+      "mode": "NORMAL",
+      "status": "1:13 6L"
+    }
+  },
+  {
+    "caption": "Type ggve, then I, ! and Esc; then gv, A, ? and Esc",
+    "note": "I types at the start of the first line and A after the cursor end."
+  },
+  {
+    "type": "ggveI"
+  },
+  {
+    "expect": {
+      "mode": "INSERT"
+    }
+  },
+  {
+    "type": "!"
+  },
+  {
+    "press": "Escape"
+  },
+  {
+    "expect": {
+      "text": "!one two three\nfour (five six) seven\n  eight \"nine ten\" end\n\nsecond para\nlast line here",
+      "status": "1:1 6L",
+      "mode": "NORMAL"
+    }
+  },
+  {
+    "type": "gv"
+  },
+  {
+    "expect": {
+      "selection": "!on"
+    }
+  },
+  {
+    "type": "A?"
+  },
+  {
+    "press": "Escape"
+  },
+  {
+    "expect": {
+      "text": "!on?e two three\nfour (five six) seven\n  eight \"nine ten\" end\n\nsecond para\nlast line here",
+      "status": "1:4 6L"
+    }
+  },
+  {
+    "type": "uu"
+  },
+  {
+    "expect": {
+      "text": "one two three\nfour (five six) seven\n  eight \"nine ten\" end\n\nsecond para\nlast line here",
+      "status": "1:1 6L"
+    }
+  },
+  {
+    "caption": "Type w, viw and \"ay; then j, V and \"ap",
+    "note": "A register before y and p: the line becomes the yanked word."
+  },
+  {
+    "type": "wviw\"ay"
+  },
+  {
+    "expect": {
+      "mode": "NORMAL",
+      "status": "1:5 6L"
+    }
+  },
+  {
+    "type": "jV\"ap"
+  },
+  {
+    "expect": {
+      "text": "one two three\ntwo\n  eight \"nine ten\" end\n\nsecond para\nlast line here",
+      "status": "2:1 6L",
+      "mode": "NORMAL"
+    }
+  },
+  {
+    "type": "u"
+  },
+  {
+    "expect": {
+      "text": "one two three\nfour (five six) seven\n  eight \"nine ten\" end\n\nsecond para\nlast line here"
+    }
+  },
+  {
+    "caption": "Type ggviw, then paste X with Ctrl-V",
+    "note": "A paste replaces the selection and lands in NORMAL. One u undoes it."
+  },
+  {
+    "type": "ggviw"
+  },
+  {
+    "expect": {
+      "selection": "one"
+    }
+  },
+  {
+    "paste": "X"
+  },
+  {
+    "expect": {
+      "mode": "NORMAL",
+      "selection": "",
+      "text": "X two three\nfour (five six) seven\n  eight \"nine ten\" end\n\nsecond para\nlast line here"
+    }
+  },
+  {
+    "type": "u"
+  },
+  {
+    "expect": {
+      "text": "one two three\nfour (five six) seven\n  eight \"nine ten\" end\n\nsecond para\nlast line here"
+    }
+  },
+  {
+    "type": "V"
+  },
+  {
+    "paste": "Y"
+  },
+  {
+    "expect": {
+      "mode": "NORMAL",
+      "text": "Y\nfour (five six) seven\n  eight \"nine ten\" end\n\nsecond para\nlast line here",
+      "status": "1:1 6L"
+    }
+  },
+  {
+    "type": "u"
+  },
+  {
+    "expect": {
+      "text": "one two three\nfour (five six) seven\n  eight \"nine ten\" end\n\nsecond para\nlast line here"
+    }
+  },
+  {
+    "caption": "Type v, 2 and Esc; then v, J and ~",
+    "note": "Esc leaves VISUAL. Keys that are not built change nothing."
+  },
+  {
+    "type": "v2"
+  },
+  {
+    "expect": {
+      "mode": "VISUAL",
+      "pending": "2"
+    }
+  },
+  {
+    "press": "Escape"
+  },
+  {
+    "expect": {
+      "mode": "NORMAL",
+      "pending": "",
+      "selection": ""
+    }
+  },
+  {
+    "type": "vJ~"
+  },
+  {
+    "expect": {
+      "mode": "VISUAL",
+      "text": "one two three\nfour (five six) seven\n  eight \"nine ten\" end\n\nsecond para\nlast line here",
+      "selection": "o"
+    }
+  },
+  {
+    "press": "Escape"
+  },
+  {
+    "caption": "Press V, then click the third line",
+    "note": "A click leaves VISUAL with nothing selected."
+  },
+  {
+    "type": "V"
+  },
+  {
+    "expect": {
+      "mode": "V-LINE"
+    }
+  },
+  {
+    "click": {
+      "row": 2,
+      "cell": 3
+    }
+  },
+  {
+    "expect": {
+      "mode": "NORMAL",
+      "selection": "",
+      "text": "one two three\nfour (five six) seven\n  eight \"nine ten\" end\n\nsecond para\nlast line here"
+    }
+  },
+  {
+    "caption": "Press v, then Ctrl-E and Esc",
+    "note": "The read view closes the selection. Back in the editor it is NORMAL."
+  },
+  {
+    "type": "v"
+  },
+  {
+    "press": "Control+e"
+  },
+  {
+    "expect": {
+      "mode": "READ"
+    }
+  },
+  {
+    "press": "Escape"
+  },
+  {
+    "expect": {
+      "mode": "NORMAL",
+      "selection": ""
+    }
+  },
+  {
+    "type": "v"
+  },
+  {
+    "press": "Control+,"
+  },
+  {
+    "expect": {
+      "mode": "EDIT",
+      "selection": ""
+    }
+  },
+  {
+    "press": "Control+,"
+  },
+  {
+    "expect": {
+      "mode": "NORMAL",
+      "selection": ""
+    }
+  },
+  {
+    "caption": "Type ggvG$",
+    "note": "The whole note is selected: wide on text, one cell on the empty line."
+  },
+  {
+    "type": "ggvG$"
+  },
+  {
+    "expect": {
+      "mode": "VISUAL",
+      "selection": "one two three\nfour (five six) seven\n  eight \"nine ten\" end\n\nsecond para\nlast line here\n",
+      "status": "6:15 6L"
+    }
+  },
+  {
+    "shot": "whole-note-selected"
+  },
+  {
+    "press": "Escape"
+  },
+  {
+    "expect": {
+      "mode": "NORMAL",
+      "selection": "",
+      "text": "one two three\nfour (five six) seven\n  eight \"nine ten\" end\n\nsecond para\nlast line here"
+    }
+  }
+]

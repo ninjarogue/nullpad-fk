@@ -100,6 +100,51 @@ body {
   color: var(--fg);
 }
 
+#selection {
+  position: absolute;
+  inset: 0 auto auto 0;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+  overflow-anchor: none;
+}
+
+#selection > div {
+  position: absolute;
+  height: var(--row);
+  background: var(--sel);
+}
+
+/* Where a row's edge falls inside a device pixel, as at 125% and 175%, the box above and the box below each half
+   cover that pixel and the page shows through. This strip lies over the edge, as wide as the two boxes share. */
+#selection > div::after {
+  content: '';
+  position: absolute;
+  top: calc(100% - 1px);
+  left: var(--seam-left);
+  width: var(--seam-width);
+  height: 2px;
+  background: inherit;
+}
+
+/* In forced colours Chrome paints a plate of the page colour behind text, over a highlight drawn under the letters.
+   Text that takes its parent's forced colour gets no plate. Highlight is the selection's system colour, mixed with
+   the page colour because the letters over it keep the text colour. */
+@media (forced-colors: active) {
+  .line {
+    forced-color-adjust: preserve-parent-color;
+  }
+
+  .line::before {
+    forced-color-adjust: auto;
+  }
+
+  #selection > div {
+    forced-color-adjust: none;
+    background: color-mix(in srgb, Highlight 40%, Canvas);
+  }
+}
+
 .spacer {
   height: calc(var(--lines) * var(--row));
   overflow-anchor: none;

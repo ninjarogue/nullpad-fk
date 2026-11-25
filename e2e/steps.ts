@@ -26,6 +26,7 @@ type Expectation = Readonly<{
   keydown?: string
   notice?: string
   clipboard?: string
+  selection?: string
 }>
 
 type ClipboardStep =
@@ -260,7 +261,7 @@ export const parseStep = (value: unknown, index: number): Step => {
     case 'expect': {
       if (!isRecord(body)) {
         return fail(
-          'expect takes { text?, status?, under?, top?, full?, title?, finder?, mode?, pending?, keydown?, notice?, clipboard? }',
+          'expect takes { text?, status?, under?, top?, full?, title?, finder?, mode?, pending?, keydown?, notice?, clipboard?, selection? }',
         )
       }
       const fields = [
@@ -275,6 +276,7 @@ export const parseStep = (value: unknown, index: number): Step => {
         'keydown',
         'notice',
         'clipboard',
+        'selection',
       ] as const
       const unknown = Object.keys(body).filter(
         key => ![...fields, 'full'].includes(key),
@@ -389,7 +391,7 @@ const playClipboard = async (
   }
 }
 
-const checkClipboard = async (
+const checkThroughDriver = async (
   nullpad: Nullpad,
   expectation: Expectation,
 ): Promise<Array<string>> => {
@@ -399,6 +401,14 @@ const checkClipboard = async (
     if (notice !== expectation.notice) {
       misses.push(
         `notice shows ${JSON.stringify(notice)}, expected ${JSON.stringify(expectation.notice)}`,
+      )
+    }
+  }
+  if (expectation.selection !== undefined) {
+    const selection = await nullpad.selection()
+    if (selection !== expectation.selection) {
+      misses.push(
+        `the selection is ${JSON.stringify(selection)}, expected ${JSON.stringify(expectation.selection)}`,
       )
     }
   }
@@ -581,7 +591,7 @@ export const play = async (
     return [
       ...check(await nullpad.screen(), step.expect),
       ...(await checkPage(nullpad.page, step.expect)),
-      ...(await checkClipboard(nullpad, step.expect)),
+      ...(await checkThroughDriver(nullpad, step.expect)),
     ]
   }
   return []

@@ -8,7 +8,13 @@ import * as Notes from './notes'
 import * as Vim from './vim'
 import * as Words from './words'
 
-export const Mode = Schema.Literals(['Plain', 'Normal', 'Insert'])
+export const Mode = Schema.Literals([
+  'Plain',
+  'Normal',
+  'Insert',
+  'Visual',
+  'VisualLine',
+])
 export type Mode = typeof Mode.Type
 
 export const Query = Schema.TaggedUnion({
@@ -107,6 +113,13 @@ export type PaintedLine = Readonly<{
   parts: ReadonlyArray<Part>
 }>
 
+export type Selection = Readonly<{
+  kind: 'Letters' | 'Lines'
+  from: Buffer.Position
+  to: Buffer.Position
+  lineBreak: boolean
+}>
+
 export type Frame = Readonly<{
   lines: ReadonlyArray<PaintedLine>
   undrawnAbove: number
@@ -118,6 +131,7 @@ export type Frame = Readonly<{
     atRowEnd: boolean
     shape: 'Block' | 'Bar'
   }>
+  selection: Option.Option<Selection>
   surrounding: Readonly<{ text: string; caret: number }>
   discards: number
   status: Readonly<{
@@ -186,7 +200,7 @@ const vimAfterReopen = (
   return !isOn
     ? Option.none()
     : landing === 'SameNote' && wasOn
-      ? Option.map(editor.vim, Vim.interrupted)
+      ? Option.map(editor.vim, Vim.reshown)
       : Option.some(Vim.start)
 }
 
@@ -717,10 +731,18 @@ const vimPlan = (
   step: Vim.Step,
   swallowed: number,
 ): Plan => {
-  const stepped = { ...editor, vim: Option.some(step.vim), kept: step.kept }
+  const stepped = changeDrawn(
+    { ...editor, vim: Option.some(step.vim), kept: step.kept },
+    step.buffer === editor.buffer
+      ? {}
+      : { buffer: step.buffer, caretAtRowEnd: false },
+  )
   const counted = { ...stepped, discards: editor.discards + swallowed }
   return Vim.Fate.match(step.fate, {
-    Plain: ({ input }) => plainPlan(stepped, input),
+    Plain: ({ input }) => {
+      const plan = plainPlan(stepped, input)
+      return plan._tag === 'Done' ? { ...plan, began: step.began } : plan
+    },
     Travel: ({ way, count }) => travelPlan(counted, way, count, 'Vim'),
     Replay: ({ steps }): Plan => ({
       _tag: 'Done',
@@ -792,7 +814,10 @@ const planFor = (editor: Editor, queued: Queued): Plan =>
     Fed: ({ input }) => inputPlan(editor, input),
     Clicked: ({ x, line, yInLine }) =>
       clickPlan(
-        { ...editor, vim: Option.map(editor.vim, Vim.interrupted) },
+        {
+          ...editor,
+          vim: Option.map(editor.vim, vim => Vim.clicked(vim, editor.buffer)),
+        },
         x,
         line,
         yInLine,
@@ -1224,6 +1249,7 @@ export const paint = (editor: Editor): Frame => {
       atRowEnd: editor.caretAtRowEnd,
       shape: isInInsert(editor) ? 'Bar' : 'Block',
     },
+    selection: Option.flatMap(editor.vim, vim => Vim.selection(vim, buffer)),
     surrounding: {
       text: (lines[caret.line]?.text ?? '').slice(
         near.from.column,
@@ -1235,7 +1261,7 @@ export const paint = (editor: Editor): Frame => {
     status: {
       mode: Option.match(editor.vim, {
         onNone: () => 'Plain' as const,
-        onSome: vim => vim.mode._tag,
+        onSome: Vim.modeName,
       }),
       pending: Option.match(editor.vim, {
         onNone: () => '',

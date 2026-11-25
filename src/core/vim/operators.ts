@@ -3,10 +3,7 @@ import { Array, Option, Schema } from 'effect'
 import * as Buffer from '../buffer'
 import { cellAt, cellStart } from './cells'
 import { cellsIn, endOf, firstNonBlank, positionOf, spotOf } from './motions'
-import { Kind, type Range, isInIndent } from './targets'
-
-export const OperatorName = Schema.Literals(['Delete', 'Change', 'Yank'])
-export type OperatorName = typeof OperatorName.Type
+import { Kind, type OperatorName, type Range } from './targets'
 
 export const Register = Schema.Struct({ text: Schema.String, kind: Kind })
 export type Register = typeof Register.Type
@@ -187,19 +184,6 @@ const coversNothing = (buffer: Buffer.Buffer, range: Range): boolean => {
   )
 }
 
-const restIsBlank = (buffer: Buffer.Buffer, range: Range): boolean =>
-  /^[ \t]*$/u.test(
-    lineText(buffer, range.to.line).slice(positionOf(buffer, range.to).column),
-  )
-
-const linewiseWhenBlankAround = (buffer: Buffer.Buffer, range: Range): Range =>
-  range.kind === 'Charwise' &&
-  range.to.line > range.from.line &&
-  restIsBlank(buffer, range) &&
-  isInIndent(buffer, range.from)
-    ? { ...range, kind: 'Linewise' }
-    : range
-
 const atFirstNonBlank = (buffer: Buffer.Buffer, line: number): Buffer.Buffer =>
   Buffer.moveTo(
     buffer,
@@ -245,9 +229,8 @@ export const operators: Readonly<
     ) => Applied
   >
 > = {
-  Delete: (buffer, picked, registers, name) => {
-    const range = linewiseWhenBlankAround(buffer, picked)
-    return isOneEmptyLine(buffer) || coversNothing(buffer, range)
+  Delete: (buffer, range, registers, name) =>
+    isOneEmptyLine(buffer) || coversNothing(buffer, range)
       ? {
           buffer: toStart(buffer, range),
           inserting: false,
@@ -258,8 +241,7 @@ export const operators: Readonly<
           buffer: remove(buffer, range),
           inserting: false,
           ...remembered(registers, name, registerOf(buffer, range), false),
-        }
-  },
+        },
   Change: (buffer, range, registers, name) => {
     const isNothing = coversNothing(buffer, range)
     if (isOneEmptyLine(buffer) || (isNothing && !range.inclusive)) {
@@ -349,3 +331,58 @@ export const put = (
   const added = Buffer.insert(Buffer.moveTo(buffer, at), text)
   return Buffer.moveTo(added, text.includes('\n') ? at : lastCellBefore(added))
 }
+
+export type PutOver = Readonly<{
+  buffer: Buffer.Buffer
+  first: Buffer.Position
+  last: Buffer.Position
+}>
+
+const lastLetterOf = (buffer: Buffer.Buffer, line: number): Buffer.Position =>
+  positionOf(buffer, { line, cell: Math.max(0, cellsIn(buffer, line) - 1) })
+
+export const putOver = (
+  before: Buffer.Buffer,
+  after: Buffer.Buffer,
+  range: Range,
+  register: Register,
+  count: number,
+): PutOver => {
+  const times = boundedCount(register, count)
+  const isLines = register.kind === 'Linewise'
+  const at = positionOf(before, range.from)
+  if (range.kind === 'Linewise' || isLines) {
+    const once = linesOf(isLines ? register.text.slice(0, -1) : register.text)
+    const lines = Array.flatten(Array.replicate(once, times))
+    const first = range.kind === 'Linewise' ? at.line : at.line + 1
+    const added =
+      range.kind === 'Linewise'
+        ? Buffer.insertLines(after, first, lines)
+        : Buffer.insert(Buffer.moveTo(after, at), `\n${lines.join('\n')}\n`)
+    const leftover = added.lines.length - 1
+    const removedAll =
+      range.kind === 'Linewise' &&
+      range.to.line - range.from.line + 1 === before.lines.length
+    return {
+      buffer: atFirstNonBlank(
+        removedAll ? Buffer.removeLines(added, leftover, leftover) : added,
+        first,
+      ),
+      first: { line: first, column: 0 },
+      last: lastLetterOf(added, first + lines.length - 1),
+    }
+  }
+  if (register.text === '') {
+    return { buffer: after, first: at, last: at }
+  }
+  const text = register.text.repeat(times)
+  const added = Buffer.insert(Buffer.moveTo(after, at), text)
+  const last = lastCellBefore(added)
+  return {
+    buffer: Buffer.moveTo(added, text.includes('\n') ? at : last),
+    first: at,
+    last,
+  }
+}
+
+export const blackHole = RegisterName.cases.BlackHole.make({})

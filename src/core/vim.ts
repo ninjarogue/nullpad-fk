@@ -739,6 +739,32 @@ const runVisual = (
         clipboard: applied.clipboard,
       }
     },
+    Insert: ({ at }): Step => {
+      const ends = Selection.endsOf(buffer, visual.kind, visual.anchor)
+      const stay: Repeat = {
+        command: {
+          _tag: 'Insert',
+          at: at === 'Start' ? 'Here' : 'After',
+        },
+        count,
+        register: Operators.defaultRegister,
+        typed: [],
+      }
+      return {
+        ...unchanged,
+        vim: {
+          ...leaveVisual(vim, buffer),
+          mode: { _tag: 'Insert', recording: Option.some(stay) },
+          want: 'Unset',
+        },
+        buffer: Buffer.moveTo(
+          buffer,
+          at === 'Start'
+            ? Selection.insertAt(buffer, ends)
+            : Selection.appendAt(buffer, ends),
+        ),
+      }
+    },
     Replace: ({ side }) => {
       const source = Operators.registerFor(kept.registers, register)
       return source._tag === 'Clipboard'

@@ -238,3 +238,17 @@ export const rangeFrom = (
     'AsSelected',
   )
 }
+
+export const insertAt = (buffer: Buffer.Buffer, ends: Ends): Buffer.Position =>
+  positionOf(buffer, rangeOf(buffer, ends, 'WholeLines').from)
+
+export const appendAt = (
+  buffer: Buffer.Buffer,
+  ends: Ends,
+): Buffer.Position => {
+  const { anchor, cursor } = ends
+  const end = isBefore({ line: anchor.line, cell: 0 }, cursor) ? cursor : anchor
+  return isOnLineBreak(buffer, end)
+    ? positionOf(buffer, { line: end.line, cell: cellsIn(buffer, end.line) })
+    : endOf(buffer, end)
+}

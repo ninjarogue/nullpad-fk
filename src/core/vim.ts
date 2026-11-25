@@ -634,11 +634,20 @@ const putOverStep = (
   )
   const normal: Vim = {
     ...Option.match(put, {
-      onNone: () =>
-        leaveVisual(vim, buffer, deleted.buffer, () => ({
-          anchor: began,
-          cursor: began,
-        })),
+      onNone: () => {
+        const landed =
+          began.line < deleted.buffer.lines.length
+            ? rest(
+                { ...vim, mode: normalMode },
+                Buffer.moveTo(deleted.buffer, began),
+                false,
+              ).caret
+            : began
+        return leaveVisual(vim, buffer, deleted.buffer, () => ({
+          anchor: landed,
+          cursor: landed,
+        }))
+      },
       onSome: ({ buffer: after, first, last }) =>
         leaveVisual(vim, buffer, after, () => ({
           anchor: first,
@@ -1180,7 +1189,7 @@ const runVisual = (
         buffer,
         from,
         count,
-        Selection.wantOf(buffer, ends, vim.want),
+        Selection.wantOf(buffer, ends, vim.want, visual.column),
       )
       const caret = positionOf(buffer, spot)
       return {

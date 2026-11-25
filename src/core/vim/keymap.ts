@@ -119,7 +119,7 @@ const motionRows: ReadonlyArray<
   ['b', 'WordBackward', 'previous word'],
   ['e', 'WordEnd', 'end of word'],
   ['0', 'LineStart', 'line start'],
-  ['<Home>', 'LineStart', 'line start'],
+  ['<Home>', 'FirstColumn', 'line start'],
   ['^', 'FirstNonBlank', 'first non-blank'],
   ['$', 'LineEnd', 'line end'],
   ['<End>', 'LineEnd', 'line end'],

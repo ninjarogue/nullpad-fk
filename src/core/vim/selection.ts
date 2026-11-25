@@ -86,15 +86,6 @@ export const wantBefore = (buffer: Buffer.Buffer, want: Want): Want => {
   return want === 'Unset' ? caretColumnOf(textOf(buffer, line), cell) : want
 }
 
-export const wantOf = (
-  buffer: Buffer.Buffer,
-  { anchor, cursor }: Ends,
-  want: Want,
-): Want =>
-  want === 'Unset' && !isBefore(anchor, cursor)
-    ? screenColumnOf(textOf(buffer, cursor.line), cursor.cell)
-    : want
-
 export const Column = Schema.Literals(['AsInNormal', 'AsInVisual'])
 export type Column = typeof Column.Type
 
@@ -108,6 +99,13 @@ export const columnOf = (
     ? caretColumnOf(text, cursor.cell)
     : screenColumnOf(text, cursor.cell)
 }
+
+export const wantOf = (
+  buffer: Buffer.Buffer,
+  ends: Ends,
+  want: Want,
+  column: Column,
+): Want => (want === 'Unset' ? columnOf(buffer, ends, column) : want)
 
 export const isOnLineBreak = (buffer: Buffer.Buffer, spot: Spot): boolean =>
   spot.cell >= cellsIn(buffer, spot.line)

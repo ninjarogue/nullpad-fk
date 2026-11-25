@@ -273,6 +273,7 @@ export const MotionName = Schema.Literals([
   'WordBackward',
   'WordEnd',
   'LineStart',
+  'FirstColumn',
   'FirstNonBlank',
   'LineEnd',
   'FirstLine',
@@ -302,6 +303,7 @@ const motionsFor = (
   WordBackward: repeated(wordBackward, 'DropsWant'),
   WordEnd: repeated(wordEnd(lineEnd), 'DropsWant'),
   LineStart: (_buffer, from) => free({ ...from, cell: 0 }),
+  FirstColumn: (_buffer, from) => ({ spot: { ...from, cell: 0 }, want: 0 }),
   FirstNonBlank: (buffer, from) =>
     free({ ...from, cell: firstNonBlank(buffer, from.line) }),
   LineEnd: (buffer, from, count = 1) => {

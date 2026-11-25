@@ -72,7 +72,7 @@ const modifiersOf = (event: KeyboardEvent): Modifiers => ({
 })
 
 const isControlAlone = (event: KeyboardEvent, key: string): boolean =>
-  event.key === key &&
+  event.key.toLowerCase() === key &&
   event.ctrlKey &&
   !event.shiftKey &&
   !event.altKey &&

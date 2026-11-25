@@ -732,6 +732,34 @@ type SelectionBox = Readonly<{
   isLineBreak: boolean
 }>
 
+type Span = Readonly<{ left: number; right: number; top: number }>
+
+const touchingPx = 0.5
+
+const joinedWhereTouching = (
+  spans: ReadonlyArray<Span>,
+): ReadonlyArray<Span> => {
+  const joined: Array<Span> = []
+  for (const span of [...spans].sort(
+    (a, b) => a.top - b.top || a.left - b.left,
+  )) {
+    const open = joined[joined.length - 1]
+    if (
+      open !== undefined &&
+      open.top === span.top &&
+      span.left <= open.right + touchingPx
+    ) {
+      joined[joined.length - 1] = {
+        ...open,
+        right: Math.max(open.right, span.right),
+      }
+    } else {
+      joined.push(span)
+    }
+  }
+  return joined
+}
+
 const selectionBoxes = (
   surface: HTMLElement,
   selected: Selected,
@@ -772,27 +800,22 @@ const selectionBoxes = (
       const stop = domPoint(line, to)
       range.setStart(start.node, start.offset)
       range.setEnd(stop.node, stop.offset)
-      let open: SelectionBox | undefined
+      const drawn: Array<Span> = []
       for (const rect of range.getClientRects()) {
-        if (rect.bottom < bandTop || rect.top > bandBottom) {
-          continue
-        }
-        const top = rowTop(rect.top)
-        if (open !== undefined && open.top === top) {
-          open = {
-            ...open,
-            width: Math.max(open.left + open.width, rect.right) - open.left,
-          }
-          boxes[boxes.length - 1] = open
-        } else if (rect.width > 0) {
-          open = {
+        if (
+          rect.width > 0 &&
+          rect.bottom >= bandTop &&
+          rect.top <= bandBottom
+        ) {
+          drawn.push({
             left: rect.left,
-            top,
-            width: rect.width,
-            isLineBreak: false,
-          }
-          boxes.push(open)
+            right: rect.right,
+            top: rowTop(rect.top),
+          })
         }
+      }
+      for (const { left, right, top } of joinedWhereTouching(drawn)) {
+        boxes.push({ left, top, width: right - left, isLineBreak: false })
       }
     }
     if (index < selected.lastLine || selected.lineBreak) {

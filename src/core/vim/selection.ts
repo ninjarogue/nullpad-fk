@@ -218,10 +218,12 @@ export const marked = (
   }))
   const line =
     pastEnd === 'LastLine' ? Math.min(found.line, lastLine(buffer)) : found.line
-  const text = buffer.lines[line]
-  return text === undefined
+  return buffer.lines[line] === undefined
     ? undefined
-    : { line, column: Math.min(found.column, text.text.length) }
+    : positionOf(
+        buffer,
+        spotAt(buffer, { line, column: found.column }, 'LineBreak'),
+      )
 }
 
 export const movedBy = (

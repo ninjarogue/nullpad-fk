@@ -303,6 +303,7 @@ export const visual: ReadonlyArray<Binding<VisualCommand>> = [
   ),
   bind('<Esc>', leave, 'leave'),
   bind('<C-[>', leave, 'leave'),
+  bind('<C-c>', leave, 'leave'),
   bind('<C-e>', leave, 'leave'),
   bind('<C-p>', leave, 'leave'),
   ...Array.map(keysWithAnArgument, key =>

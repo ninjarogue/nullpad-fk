@@ -105,7 +105,10 @@ export const wantOf = (
   ends: Ends,
   want: Want,
   column: Column,
-): Want => (want === 'Unset' ? columnOf(buffer, ends, column) : want)
+): Want =>
+  want === 'Unset' && !isBefore(ends.anchor, ends.cursor)
+    ? columnOf(buffer, ends, column)
+    : want
 
 export const isOnLineBreak = (buffer: Buffer.Buffer, spot: Spot): boolean =>
   spot.cell >= cellsIn(buffer, spot.line)

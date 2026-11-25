@@ -391,7 +391,7 @@ const groups: ReadonlyArray<Group> = [
       {
         text: 'M',
         at: [1, 1],
-        keys: 'x"zpu',
+        keys: 'x"zp',
         after: 'ne two\nthree four\nfive six\nseven',
         line: 1,
         column: 1,

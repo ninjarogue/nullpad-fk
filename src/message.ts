@@ -12,7 +12,7 @@ export const Message = defineMessageUnion({
   ClickedText: { x: Schema.Finite, line: Schema.Int, yInLine: Schema.Finite },
   ScrolledSurface: { top: Schema.Int },
   ResizedScreen: { rows: Schema.Int },
-  CompletedLocate: { answer: Answer },
+  CompletedLocate: { ticket: Schema.Int, answer: Answer },
   CompletedRevealCaret: {},
   FocusedKeyboard: {},
   BlurredKeyboard: {},

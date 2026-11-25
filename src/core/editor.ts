@@ -58,7 +58,11 @@ const Queued = Schema.TaggedUnion({
 })
 type Queued = typeof Queued.Type
 
-const Locating = Schema.Struct({ cause: Queued, queued: Schema.Array(Queued) })
+const Locating = Schema.Struct({
+  ticket: Schema.Int,
+  cause: Queued,
+  queued: Schema.Array(Queued),
+})
 
 export const Editor = Schema.Struct({
   buffer: Buffer.Buffer,
@@ -73,6 +77,7 @@ export const Editor = Schema.Struct({
   screenRows: Schema.Int,
   drawnRevision: Schema.Int,
   locating: Schema.Option(Locating),
+  asked: Schema.Int,
   pendingReveals: Schema.Int,
 })
 export type Editor = typeof Editor.Type
@@ -81,7 +86,9 @@ export type Reveal = 'None' | 'Nearest' | 'Top'
 
 export type Outcome = Readonly<{
   editor: Editor
-  locate: Option.Option<Readonly<{ query: Query; revision: number }>>
+  locate: Option.Option<
+    Readonly<{ ticket: number; query: Query; revision: number }>
+  >
   reveal: Reveal
 }>
 
@@ -132,6 +139,7 @@ export const open = (text: string, vim = false): Editor => {
     screenRows: 24,
     drawnRevision: 0,
     locating: Option.none(),
+    asked: 0,
     pendingReveals: 0,
   }
 }
@@ -196,6 +204,7 @@ export const reopen = (
     ),
     screenRows: editor.screenRows,
     drawnRevision: editor.drawnRevision + 1,
+    asked: editor.asked,
   }
 }
 
@@ -842,13 +851,19 @@ const run = (editor: Editor, queued: Queued): Outcome => {
   if (plan._tag === 'Done') {
     return plan.outcome
   }
+  const ticket = editor.asked + 1
   const drawn = withQueriedLineDrawn(editor, plan.query)
   return {
     editor: {
       ...drawn,
-      locating: Option.some({ cause: queued, queued: [] }),
+      locating: Option.some({ ticket, cause: queued, queued: [] }),
+      asked: ticket,
     },
-    locate: Option.some({ query: plan.query, revision: drawn.drawnRevision }),
+    locate: Option.some({
+      ticket,
+      query: plan.query,
+      revision: drawn.drawnRevision,
+    }),
     reveal:
       plan.query._tag === 'Point' || drawn === editor ? 'None' : 'Nearest',
   }
@@ -957,10 +972,17 @@ export const overwrite = (
     { ...alone, began: Option.none() },
   )
 
-export const located = (editor: Editor, answer: Answer): Outcome =>
+export const located = (
+  editor: Editor,
+  ticket: number,
+  answer: Answer,
+): Outcome =>
   Option.match(editor.locating, {
     onNone: () => done(editor, 'None'),
-    onSome: ({ cause, queued }) => {
+    onSome: ({ ticket: out, cause, queued }) => {
+      if (out !== ticket) {
+        return done(editor, 'None')
+      }
       const asked = { ...editor, locating: Option.none() }
       const plan = planOf(asked, cause)
       const landed = plan._tag === 'Ask' ? plan.land(answer) : plan.outcome

@@ -144,11 +144,11 @@ const show = (
   })
 
 const Locate = Command.define('Locate', {
-  args: { query: Editor.Query, revision: Schema.Int },
+  args: { ticket: Schema.Int, query: Editor.Query, revision: Schema.Int },
   messages: [Message.CompletedLocate],
-  execute: ({ query, revision }) =>
+  execute: ({ ticket, query, revision }) =>
     locate(query, revision).pipe(
-      Effect.map(answer => Message.CompletedLocate({ answer })),
+      Effect.map(answer => Message.CompletedLocate({ ticket, answer })),
     ),
 })
 
@@ -475,7 +475,9 @@ const respond = (model: Model, outcome: Editor.Outcome): UpdateReturn => {
     commands: [
       ...Option.match(outcome.locate, {
         onNone: () => [],
-        onSome: ({ query, revision }) => [Locate({ query, revision })],
+        onSome: ({ ticket, query, revision }) => [
+          Locate({ ticket, query, revision }),
+        ],
       }),
       ...(outcome.reveal === 'None'
         ? []
@@ -891,10 +893,10 @@ const handle = (model: Model, message: Message) =>
     ReceivedInput: ({ input }) => receiveInput(model, input),
     ClickedText: ({ x, line, yInLine }) =>
       respond(model, Editor.click(model.editor, x, line, yInLine)),
-    CompletedLocate: ({ answer }) =>
+    CompletedLocate: ({ ticket, answer }) =>
       Update.combine(model, [
         stepModel =>
-          respond(stepModel, Editor.located(stepModel.editor, answer)),
+          respond(stepModel, Editor.located(stepModel.editor, ticket, answer)),
         finishOpening,
       ]),
     ScrolledSurface: ({ top }) => ({

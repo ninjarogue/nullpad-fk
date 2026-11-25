@@ -763,12 +763,15 @@ const selectedOf = (surface: HTMLElement): Option.Option<Selected> => {
   })
 }
 
-type SelectionBox = Readonly<{
+type PlacedBox = Readonly<{
   left: number
   top: number
   width: number
   isLineBreak: boolean
 }>
+
+type SelectionBox = PlacedBox &
+  Readonly<{ seamLeft: number; seamWidth: number }>
 
 type Span = Readonly<{ left: number; right: number; top: number }>
 
@@ -798,6 +801,68 @@ const joinedWhereTouching = (
   return joined
 }
 
+const seamOverlapPx = 1
+
+const withSeams = (
+  boxes: ReadonlyArray<PlacedBox>,
+  row: number,
+): ReadonlyArray<SelectionBox> => {
+  const grouped: Array<{ top: number; boxes: Array<PlacedBox> }> = []
+  for (const box of [...boxes].sort((a, b) => a.top - b.top)) {
+    const open = grouped[grouped.length - 1]
+    if (open !== undefined && box.top - open.top < touchingPx) {
+      open.boxes.push(box)
+    } else {
+      grouped.push({ top: box.top, boxes: [box] })
+    }
+  }
+  const rows = grouped.map(({ top, boxes: inRow }) => ({
+    top,
+    boxes: inRow.map(box =>
+      !box.isLineBreak &&
+      inRow.some(
+        other =>
+          other.isLineBreak &&
+          Math.abs(box.left + box.width - other.left) < touchingPx,
+      )
+        ? { ...box, width: box.width + seamOverlapPx }
+        : box,
+    ),
+  }))
+  return rows.flatMap(({ top, boxes: above }, index) => {
+    const next = rows[index + 1]
+    const below =
+      next !== undefined && Math.abs(next.top - top - row) < touchingPx
+        ? joinedWhereTouching(
+            next.boxes.map(box => ({
+              left: box.left,
+              right: box.left + box.width,
+              top: next.top,
+            })),
+          )
+        : []
+    return above.map(box => {
+      const shared = below
+        .map(span => {
+          const left = Math.max(box.left, span.left)
+          return {
+            left,
+            width: Math.min(box.left + box.width, span.right) - left,
+          }
+        })
+        .reduce((widest, span) => (span.width > widest.width ? span : widest), {
+          left: box.left,
+          width: 0,
+        })
+      return {
+        ...box,
+        seamLeft: shared.left - box.left,
+        seamWidth: shared.width,
+      }
+    })
+  })
+}
+
 const selectionBoxes = (
   surface: HTMLElement,
   selected: Selected,
@@ -810,7 +875,7 @@ const selectionBoxes = (
   const cell = cellWidth(surface)
   const mostRight = viewRight(surface)
   const range = document.createRange()
-  const boxes: Array<SelectionBox> = []
+  const boxes: Array<PlacedBox> = []
   const lines = surface.querySelectorAll<HTMLElement>('.line')
   const textLeft = Option.match(Option.fromNullishOr(lines[0]), {
     onNone: () => 0,
@@ -870,7 +935,7 @@ const selectionBoxes = (
       }
     }
   }
-  return boxes
+  return withSeams(boxes, row)
 }
 
 const selectionPool: Array<HTMLElement> = []
@@ -893,7 +958,7 @@ const drawSelection = (surface: HTMLElement): void => {
   boxes.forEach((box, index) => {
     const element = selectionPool[index] ?? document.createElement('div')
     selectionPool[index] = element
-    element.style.cssText = `left:${box.left + shiftLeft}px;top:${box.top + shiftTop}px;width:${box.width}px`
+    element.style.cssText = `left:${box.left + shiftLeft}px;top:${box.top + shiftTop}px;width:${box.width}px;--seam-left:${box.seamLeft}px;--seam-width:${box.seamWidth}px`
     element.toggleAttribute('data-break', box.isLineBreak)
     if (element.parentNode !== layer) {
       layer?.append(element)

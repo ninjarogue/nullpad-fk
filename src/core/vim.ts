@@ -12,10 +12,13 @@ import {
   firstNonBlank,
   motionFails,
   motions,
+  motionsOn,
   positionOf,
+  spotAt,
   spotOf,
 } from './vim/motions'
 import * as Operators from './vim/operators'
+import * as Selection from './vim/selection'
 import {
   type OperatorName,
   type Range,
@@ -50,8 +53,17 @@ export const nothingKept: Kept = { registers: noRegisters, dot: Option.none() }
 export const Mode = Schema.TaggedUnion({
   Normal: {},
   Insert: { recording: Schema.Option(Repeat) },
+  Visual: { kind: Selection.Kind, anchor: Buffer.Position },
 })
 export type Mode = typeof Mode.Type
+
+type Visual = Readonly<{ kind: Selection.Kind; anchor: Buffer.Position }>
+
+const visualMode = (kind: Selection.Kind, anchor: Buffer.Position): Mode => ({
+  _tag: 'Visual',
+  kind,
+  anchor,
+})
 
 const normalMode = Mode.cases.Normal.make({})
 
@@ -145,11 +157,14 @@ export const rest = (
   buffer: Buffer.Buffer,
   atRowEnd: boolean,
 ): Buffer.Buffer => {
-  if (vim.mode._tag !== 'Normal') {
+  if (vim.mode._tag === 'Insert') {
     return buffer
   }
   const { line, column } = buffer.caret
   const text = buffer.lines[line] ?? buffer.lines[0]
+  if (vim.mode._tag === 'Visual' && column >= text.text.length) {
+    return buffer
+  }
   const cell = cellAt(text, atRowEnd ? column - 1 : column)
   const target = cellCount(text) === 0 ? 0 : cellStart(text, cell)
   return target === column
@@ -159,7 +174,34 @@ export const rest = (
 
 const idle = (vim: Vim): Vim => ({ ...vim, ...Keymap.idle })
 
-export const interrupted = (vim: Vim): Vim => ({ ...idle(vim), want: 'Unset' })
+const leaveVisual = (vim: Vim): Vim =>
+  vim.mode._tag === 'Visual' ? { ...idle(vim), mode: normalMode } : vim
+
+const interrupted = (vim: Vim): Vim => ({ ...idle(vim), want: 'Unset' })
+
+export const clicked = (vim: Vim): Vim => interrupted(leaveVisual(vim))
+
+export const reshown = (vim: Vim): Vim => interrupted(leaveVisual(vim))
+
+export const selection = (
+  vim: Vim,
+  buffer: Buffer.Buffer,
+): Option.Option<Selection.Shown> =>
+  vim.mode._tag === 'Visual'
+    ? Option.some(
+        Selection.shown(
+          buffer,
+          Selection.endsOf(buffer, vim.mode.kind, vim.mode.anchor),
+        ),
+      )
+    : Option.none()
+
+export const next = (
+  vim: Vim,
+): ReadonlyArray<Readonly<{ key: Keymap.Key; about: string }>> =>
+  vim.mode._tag === 'Visual'
+    ? Keymap.next(Keymap.visual, vim)
+    : Keymap.next(Keymap.normal, vim)
 
 const placeInsert = (
   buffer: Buffer.Buffer,
@@ -483,6 +525,70 @@ const run = (
           fate: replayOf(last, count ?? last.count, buffer.lines.length),
         }),
       }),
+    Select: ({ kind }) => ({
+      ...unchanged,
+      vim: { ...cleared, mode: visualMode(kind, buffer.caret) },
+    }),
+  })
+}
+
+const runVisual = (
+  vim: Vim,
+  buffer: Buffer.Buffer,
+  kept: Kept,
+  visual: Visual,
+  command: Keymap.VisualCommand,
+  count: number | undefined,
+): Step => {
+  const cleared = idle(vim)
+  const unchanged: Step = {
+    vim: cleared,
+    buffer,
+    kept,
+    fate: done,
+    began: Option.none(),
+    clipboard: Option.none(),
+  }
+  const left = (): Step => {
+    const normal = leaveVisual(vim)
+    return { ...unchanged, vim: normal, buffer: rest(normal, buffer, false) }
+  }
+  return Keymap.VisualCommand.match(command, {
+    Move: ({ motion }) => {
+      const from = spotAt(buffer, buffer.caret, 'LineBreak')
+      if (motionFails(motion, buffer, from, count)) {
+        return unchanged
+      }
+      const { spot, want } = motionsOn('LineBreak')[motion](
+        buffer,
+        from,
+        count,
+        vim.want,
+      )
+      return {
+        ...unchanged,
+        vim: { ...cleared, want },
+        buffer: Buffer.moveTo(buffer, positionOf(buffer, spot)),
+      }
+    },
+    Swap: (): Step => ({
+      ...unchanged,
+      vim: {
+        ...cleared,
+        mode: visualMode(visual.kind, buffer.caret),
+        want: 'Unset',
+      },
+      buffer: Buffer.moveTo(buffer, visual.anchor),
+    }),
+    Select: ({ kind }) =>
+      kind === visual.kind
+        ? left()
+        : {
+            ...unchanged,
+            vim: { ...cleared, mode: visualMode(kind, visual.anchor) },
+          },
+    Leave: left,
+    Ignore: () => unchanged,
   })
 }
 
@@ -523,6 +629,41 @@ const pressNormal = (
             advance.count,
             advance.register,
           )
+        : advance._tag === 'Wait'
+          ? { ...unchanged, vim: { ...vim, ...advance.pending } }
+          : { ...unchanged, vim: idle(vim) }
+    },
+  })
+}
+
+const pressVisual = (
+  vim: Vim,
+  buffer: Buffer.Buffer,
+  kept: Kept,
+  visual: Visual,
+  input: Input,
+): Step => {
+  const unchanged: Step = {
+    vim,
+    buffer,
+    kept,
+    fate: done,
+    began: Option.none(),
+    clipboard: Option.none(),
+  }
+  if (isPageKey(input)) {
+    return {
+      ...unchanged,
+      vim: interrupted(vim),
+      fate: { _tag: 'Plain', input },
+    }
+  }
+  return Option.match(keyOf(input), {
+    onNone: () => unchanged,
+    onSome: key => {
+      const advance = Keymap.advance(Keymap.visual, vim, key)
+      return advance._tag === 'Run'
+        ? runVisual(vim, buffer, kept, visual, advance.command, advance.count)
         : advance._tag === 'Wait'
           ? { ...unchanged, vim: { ...vim, ...advance.pending } }
           : { ...unchanged, vim: idle(vim) }
@@ -688,6 +829,7 @@ export const press = (
   Mode.match(vim.mode, {
     Normal: () => pressNormal(vim, buffer, kept, input),
     Insert: ({ recording }) => pressInsert(vim, buffer, kept, recording, input),
+    Visual: visual => pressVisual(vim, buffer, kept, visual, input),
   })
 
 export const again = (
@@ -708,6 +850,7 @@ export const again = (
     Mode.match(vim.mode, {
       Normal: () => unchanged,
       Insert: ({ recording }) => stepped(recording),
+      Visual: () => unchanged,
     })
   return Replayed.match(step, {
     Run: ({ command, count, register }) =>
@@ -736,3 +879,13 @@ export const landed = (
 }
 
 export const pendingKeys = (vim: Vim): string => Keymap.shown(vim)
+
+export type ModeName = 'Normal' | 'Insert' | 'Visual' | 'VisualLine'
+
+export const modeName = (vim: Vim): ModeName =>
+  Mode.match(vim.mode, {
+    Normal: (): ModeName => 'Normal',
+    Insert: (): ModeName => 'Insert',
+    Visual: ({ kind }): ModeName =>
+      kind === 'Lines' ? 'VisualLine' : 'Visual',
+  })

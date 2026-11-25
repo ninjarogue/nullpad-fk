@@ -996,6 +996,8 @@ const modeLabels: Readonly<Record<Mode, string>> = {
   Plain: 'EDIT',
   Normal: 'NORMAL',
   Insert: 'INSERT',
+  Visual: 'VISUAL',
+  VisualLine: 'V-LINE',
 }
 
 export const statusLine = (

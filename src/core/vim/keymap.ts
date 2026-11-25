@@ -8,6 +8,7 @@ import {
   defaultRegister,
   registerNamed,
 } from './operators'
+import { Kind as SelectionKind } from './selection'
 import { OperatorName, TargetName } from './targets'
 
 export type Key = string
@@ -30,8 +31,18 @@ export const Command = Schema.TaggedUnion({
   Cancel: {},
   Travel: { way: History.Way },
   Repeat: {},
+  Select: { kind: SelectionKind },
 })
 export type Command = typeof Command.Type
+
+export const VisualCommand = Schema.TaggedUnion({
+  Move: { motion: MotionName },
+  Swap: {},
+  Select: { kind: SelectionKind },
+  Leave: {},
+  Ignore: {},
+})
+export type VisualCommand = typeof VisualCommand.Type
 
 export type Binding<C> = Readonly<{
   keys: ReadonlyArray<Key>
@@ -179,8 +190,55 @@ export const normal: ReadonlyArray<Binding<Command>> = [
   bind('u', Command.cases.Travel.make({ way: 'Undo' }), 'undo'),
   bind('<C-r>', Command.cases.Travel.make({ way: 'Redo' }), 'redo'),
   bind('.', Command.cases.Repeat.make({}), 'repeat last change'),
+  bind('v', Command.cases.Select.make({ kind: 'Letters' }), 'select letters'),
+  bind('V', Command.cases.Select.make({ kind: 'Lines' }), 'select lines'),
   bind('<Esc>', Command.cases.Cancel.make({}), 'cancel'),
   bind('<C-[>', Command.cases.Cancel.make({}), 'cancel'),
+]
+
+const anyKey: Key = '<Any>'
+
+const keysWithAnArgument: ReadonlyArray<Key> = [
+  'r',
+  'f',
+  'F',
+  't',
+  'T',
+  'm',
+  "'",
+  '`',
+  '@',
+  'q',
+  'z',
+  '[',
+  ']',
+  '<C-w>',
+]
+
+const leave = VisualCommand.cases.Leave.make({})
+
+export const visual: ReadonlyArray<Binding<VisualCommand>> = [
+  ...Array.map(motionRows, ([notation, motion, about]) =>
+    bind(notation, VisualCommand.cases.Move.make({ motion }), about),
+  ),
+  bind('o', VisualCommand.cases.Swap.make({}), 'go to the other end'),
+  bind(
+    'v',
+    VisualCommand.cases.Select.make({ kind: 'Letters' }),
+    'select letters, or leave',
+  ),
+  bind(
+    'V',
+    VisualCommand.cases.Select.make({ kind: 'Lines' }),
+    'select lines, or leave',
+  ),
+  bind('<Esc>', leave, 'leave'),
+  bind('<C-[>', leave, 'leave'),
+  bind('<C-e>', leave, 'leave'),
+  bind('<C-p>', leave, 'leave'),
+  ...Array.map(keysWithAnArgument, key =>
+    bind(key + anyKey, VisualCommand.cases.Ignore.make({}), 'not built'),
+  ),
 ]
 
 export const Pending = Schema.Struct({
@@ -221,7 +279,8 @@ const registerPrefix = '"'
 const startsWith = (
   keys: ReadonlyArray<Key>,
   prefix: ReadonlyArray<Key>,
-): boolean => prefix.every((key, index) => keys[index] === key)
+): boolean =>
+  prefix.every((key, index) => keys[index] === key || keys[index] === anyKey)
 
 const reachable = <C>(
   bindings: ReadonlyArray<Binding<C>>,

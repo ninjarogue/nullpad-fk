@@ -26,9 +26,10 @@ export type Span = Readonly<{ start: Spot; end: Spot; reach: Reach }>
 
 export type Ends = Readonly<{ anchor: Spot; cursor: Spot }>
 
-export type Selected = Ends & Readonly<{ kind: 'Letters' | 'Lines' }>
+export type Selected = Ends & Readonly<{ kind: 'Letters' | 'Lines' | 'Block' }>
 
-export type Picked = Ends & Readonly<{ kind: 'Letters' | 'Lines' | 'Kept' }>
+export type Picked = Ends &
+  Readonly<{ kind: 'Letters' | 'LettersOrBlock' | 'Lines' | 'Kept' }>
 
 export const isBefore = (a: Spot, b: Spot): boolean =>
   a.line < b.line || (a.line === b.line && a.cell < b.cell)
@@ -619,7 +620,7 @@ const wordObject = (include: boolean, big: boolean): Object => {
         count,
         'FromSelection',
       )
-      return { anchor, cursor, kind: failed ? 'Kept' : 'Letters' }
+      return { anchor, cursor, kind: failed ? 'Kept' : 'LettersOrBlock' }
     },
   }
 }
@@ -627,6 +628,7 @@ const wordObject = (include: boolean, big: boolean): Object => {
 const isWholeLines: Readonly<Record<Selected['kind'], boolean>> = {
   Letters: false,
   Lines: true,
+  Block: false,
 }
 
 const paragraphObject = (include: boolean): Object => {
@@ -671,7 +673,7 @@ const quoteObject = (quote: string, include: boolean): Object => {
     pick: (buffer, ends, count) =>
       Option.match(find(buffer, ends, count), {
         onNone: () => kept(ends),
-        onSome: found => ({ ...found, kind: 'Letters' }),
+        onSome: found => ({ ...found, kind: 'LettersOrBlock' }),
       }),
   }
 }

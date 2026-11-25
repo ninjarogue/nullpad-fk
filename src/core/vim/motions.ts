@@ -306,13 +306,19 @@ const motionsFor = (
     free({ ...from, cell: firstNonBlank(buffer, from.line) }),
   LineEnd: (buffer, from, count = 1) => {
     const line = Math.min(lastLine(buffer), from.line + count - 1)
-    return { spot: { line, cell: endCell(buffer, line, lineEnd) }, want: 'End' }
+    return {
+      spot: { line, cell: endCell(buffer, line, lineEnd) },
+      want: 'End',
+    }
   },
   FirstLine: toLine('First'),
   LastLine: toLine('Last'),
   LastLineEnd: (buffer, _from, count) => {
     const line = lineCounted(buffer, count, 'Last')
-    return { spot: { line, cell: endCell(buffer, line, lineEnd) }, want: 'End' }
+    return {
+      spot: { line, cell: endCell(buffer, line, lineEnd) },
+      want: 'End',
+    }
   },
 })
 

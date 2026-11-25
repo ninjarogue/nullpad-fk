@@ -14,6 +14,7 @@ export const Mode = Schema.Literals([
   'Insert',
   'Visual',
   'VisualLine',
+  'VisualBlock',
 ])
 export type Mode = typeof Mode.Type
 
@@ -113,12 +114,7 @@ export type PaintedLine = Readonly<{
   parts: ReadonlyArray<Part>
 }>
 
-export type Selection = Readonly<{
-  kind: 'Letters' | 'Lines'
-  from: Buffer.Position
-  to: Buffer.Position
-  lineBreak: boolean
-}>
+export type Selection = Vim.Shown
 
 export type Frame = Readonly<{
   lines: ReadonlyArray<PaintedLine>
@@ -1249,7 +1245,9 @@ export const paint = (editor: Editor): Frame => {
       atRowEnd: editor.caretAtRowEnd,
       shape: isInInsert(editor) ? 'Bar' : 'Block',
     },
-    selection: Option.flatMap(editor.vim, vim => Vim.selection(vim, buffer)),
+    selection: Option.flatMap(editor.vim, vim =>
+      Vim.selection(vim, buffer, { first, last }),
+    ),
     surrounding: {
       text: (lines[caret.line]?.text ?? '').slice(
         near.from.column,

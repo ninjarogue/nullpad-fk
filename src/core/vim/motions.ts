@@ -387,7 +387,7 @@ export const classAt = (
   return kind === 'Empty' || kind === 'Blank' ? 'Blank' : big ? 'Filled' : kind
 }
 
-const isEmptyLineStart = (buffer: Buffer.Buffer, spot: Spot): boolean =>
+export const isEmptyLineStart = (buffer: Buffer.Buffer, spot: Spot): boolean =>
   spot.cell === 0 && cellsIn(buffer, spot.line) === 0
 
 export type Walked = Readonly<{ spot: Spot; failed: boolean }>

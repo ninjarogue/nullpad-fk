@@ -3,6 +3,7 @@ import {
   expect,
   numberedLines,
   openFresh,
+  openTab,
   settle,
   test,
 } from './nullpad'
@@ -3025,4 +3026,76 @@ test('a block over 20,000 lines, G and d finish and u brings it all back', async
     (await nullpad.text()).endsWith('line 19999\nline 20000'),
     'and the last lines',
   ).toBe(true)
+})
+
+const SAVED = 1100
+
+test('a block insert left open keeps the other lines as they were when another tab changes the note', async ({
+  nullpad,
+}) => {
+  await begin(nullpad, 'abcdef\nab\nabcdef')
+  await nullpad.page.waitForTimeout(SAVED)
+  await play(nullpad, 'll<C-v>jjI')
+  expect(await modeOf(nullpad), 'the block insert is open').toBe('INSERT')
+  const other = await openTab(nullpad.page)
+  expect(await other.text(), 'the second tab opens the same note').toBe(
+    'abcdef\nab\nabcdef',
+  )
+  await other.press('Control+Home')
+  if ((await modeOf(other)) === 'NORMAL') {
+    await other.press('i')
+  }
+  await other.type('OTHER')
+  await other.page.waitForTimeout(SAVED)
+  await nullpad.page.bringToFront()
+  await expect
+    .poll(() => nullpad.text(), {
+      message: 'the other tab save reached the first tab',
+    })
+    .toBe('OTHERabcdef\nab\nabcdef')
+  expect(
+    ['INSERT', 'NORMAL'],
+    'the re-shown note keeps a mode of the stay',
+  ).toContain(await modeOf(nullpad))
+  await play(nullpad, '<Esc>')
+  expect(await modeOf(nullpad), 'Esc leaves to NORMAL').toBe('NORMAL')
+  expect(
+    await nullpad.text(),
+    'the other tab text is not copied to the lines below',
+  ).toBe('OTHERabcdef\nab\nabcdef')
+})
+
+test('with Caps Lock on, Ctrl-V starts V-BLOCK in NORMAL and still pastes with vim off', async ({
+  nullpad,
+}) => {
+  const capsCtrlV = async () => {
+    const key = {
+      key: 'V',
+      code: 'KeyV',
+      windowsVirtualKeyCode: 86,
+      modifiers: 2,
+    }
+    await nullpad.cdp.send('Input.dispatchKeyEvent', {
+      type: 'rawKeyDown',
+      ...key,
+      commands: ['paste'],
+    })
+    await nullpad.cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', ...key })
+    await settle(nullpad.page)
+  }
+  await nullpad.paste('abc\ndef')
+  await nullpad.press('Control+Home')
+  await setClipboard(nullpad, 'PP')
+  await capsCtrlV()
+  expect(await nullpad.text(), 'Caps Lock Ctrl-V pastes with vim off').toBe(
+    'PPabc\ndef',
+  )
+  await vimOn(nullpad)
+  expect(await modeOf(nullpad), 'vim on').toBe('NORMAL')
+  await play(nullpad, '0')
+  await capsCtrlV()
+  expect(await modeOf(nullpad), 'Caps Lock Ctrl-V starts a block').toBe(
+    'V-BLOCK',
+  )
+  expect(await nullpad.text(), 'and pastes nothing').toBe('PPabc\ndef')
 })

@@ -1,0 +1,456 @@
+[
+  {
+    "paste": "alpha beta\ngamma delta\nepsilon\nzeta"
+  },
+  {
+    "press": "Control+Comma"
+  },
+  {
+    "type": "gg"
+  },
+  {
+    "expect": {
+      "mode": "NORMAL",
+      "status": "1:1 4L"
+    }
+  },
+  {
+    "type": "\"ayyj\"byiw\"ap"
+  },
+  {
+    "expect": {
+      "text": "alpha beta\ngamma delta\nalpha beta\nepsilon\nzeta",
+      "status": "3:1 5L",
+      "mode": "NORMAL",
+      "pending": ""
+    }
+  },
+  {
+    "type": "k\"bP"
+  },
+  {
+    "expect": {
+      "text": "alpha beta\ngammagamma delta\nalpha beta\nepsilon\nzeta",
+      "status": "2:5 5L",
+      "mode": "NORMAL",
+      "pending": ""
+    }
+  },
+  {
+    "type": "w\"Ayiwgg\"ap"
+  },
+  {
+    "expect": {
+      "text": "alpha beta\nalpha beta\ndelta\ngammagamma delta\nalpha beta\nepsilon\nzeta",
+      "status": "2:1 7L",
+      "mode": "NORMAL",
+      "pending": ""
+    }
+  },
+  {
+    "type": "G\"_ddp"
+  },
+  {
+    "expect": {
+      "text": "alpha beta\nalpha beta\ndelta\ngammagamma delta\nalpha beta\nepsilon\nalpha beta\ndelta",
+      "status": "7:1 8L",
+      "mode": "NORMAL",
+      "pending": ""
+    }
+  },
+  {
+    "type": "yiw\"cdd\"0P"
+  },
+  {
+    "expect": {
+      "text": "alpha beta\nalpha beta\ndelta\ngammagamma delta\nalpha beta\nepsilon\nalphadelta",
+      "status": "7:5 7L",
+      "mode": "NORMAL",
+      "pending": ""
+    }
+  },
+  {
+    "type": "\"bp."
+  },
+  {
+    "expect": {
+      "text": "alpha beta\nalpha beta\ndelta\ngammagamma delta\nalpha beta\nepsilon\nalphagammagammadelta",
+      "status": "7:15 7L",
+      "mode": "NORMAL",
+      "pending": ""
+    }
+  },
+  {
+    "type": "2\"c2P"
+  },
+  {
+    "expect": {
+      "text": "alpha beta\nalpha beta\ndelta\ngammagamma delta\nalpha beta\nepsilon\nalpha beta\nalpha beta\nalpha beta\nalpha beta\nalphagammagammadelta",
+      "status": "7:1 11L",
+      "mode": "NORMAL",
+      "pending": ""
+    }
+  },
+  {
+    "type": "u\"\"p"
+  },
+  {
+    "expect": {
+      "text": "alpha beta\nalpha beta\ndelta\ngammagamma delta\nalpha beta\nepsilon\nalphagammagammadelta\nalpha beta",
+      "status": "8:1 8L",
+      "mode": "NORMAL",
+      "pending": ""
+    }
+  },
+  {
+    "type": "d\"x"
+  },
+  {
+    "expect": {
+      "text": "alpha beta\nalpha beta\ndelta\ngammagamma delta\nalpha beta\nepsilon\nalphagammagammadelta\nlpha beta",
+      "status": "8:1 8L",
+      "mode": "NORMAL",
+      "pending": ""
+    }
+  },
+  {
+    "type": "2\"a3"
+  },
+  {
+    "expect": {
+      "pending": "2\"a3"
+    }
+  },
+  {
+    "press": "Escape"
+  },
+  {
+    "expect": {
+      "pending": ""
+    }
+  },
+  {
+    "type": "gg\"_dG"
+  },
+  {
+    "paste": "one two\nthree\nfour"
+  },
+  {
+    "type": "gg"
+  },
+  {
+    "expect": {
+      "text": "one two\nthree\nfour",
+      "status": "1:1 3L",
+      "mode": "NORMAL"
+    }
+  },
+  {
+    "type": "\"+yy"
+  },
+  {
+    "expect": {
+      "clipboard": "one two\n",
+      "notice": "",
+      "pending": ""
+    }
+  },
+  {
+    "type": "j\"+p"
+  },
+  {
+    "expect": {
+      "text": "one two\nthree\none two\nfour",
+      "status": "3:1 4L",
+      "notice": ""
+    }
+  },
+  {
+    "clipboard": {
+      "copy": "XY"
+    }
+  },
+  {
+    "type": "\"+p"
+  },
+  {
+    "expect": {
+      "text": "one two\nthree\noXYne two\nfour",
+      "status": "3:3 4L"
+    }
+  },
+  {
+    "clipboard": {
+      "copy": "Q"
+    }
+  },
+  {
+    "type": "."
+  },
+  {
+    "expect": {
+      "text": "one two\nthree\noXYQne two\nfour",
+      "status": "3:4 4L"
+    }
+  },
+  {
+    "type": "u"
+  },
+  {
+    "expect": {
+      "text": "one two\nthree\noXYne two\nfour"
+    }
+  },
+  {
+    "clipboard": {
+      "copy": "ab\r\ncd\r\n"
+    }
+  },
+  {
+    "type": "\"+P"
+  },
+  {
+    "expect": {
+      "text": "one two\nthree\nab\ncd\noXYne two\nfour",
+      "status": "3:1 6L"
+    }
+  },
+  {
+    "clipboard": {
+      "copy": "-"
+    }
+  },
+  {
+    "type": "3\"*p"
+  },
+  {
+    "expect": {
+      "text": "one two\nthree\na---b\ncd\noXYne two\nfour",
+      "status": "3:4 6L"
+    }
+  },
+  {
+    "clipboard": {
+      "allow": []
+    }
+  },
+  {
+    "type": "\"+p"
+  },
+  {
+    "expect": {
+      "text": "one two\nthree\na---b\ncd\noXYne two\nfour",
+      "status": "3:4 6L",
+      "notice": "clipboard blocked, use Ctrl-V",
+      "pending": "",
+      "mode": "NORMAL"
+    }
+  },
+  {
+    "shot": "read-refused"
+  },
+  {
+    "type": "l"
+  },
+  {
+    "expect": {
+      "notice": "",
+      "status": "3:5 6L"
+    }
+  },
+  {
+    "type": "\"+yiW"
+  },
+  {
+    "expect": {
+      "notice": "clipboard blocked, use Ctrl-V",
+      "clipboard": "-",
+      "status": "3:1 6L"
+    }
+  },
+  {
+    "type": "P"
+  },
+  {
+    "expect": {
+      "text": "one two\nthree\na---ba---b\ncd\noXYne two\nfour",
+      "notice": ""
+    }
+  },
+  {
+    "clipboard": {
+      "allow": ["read", "write"]
+    }
+  },
+  {
+    "clipboard": {
+      "copy": "XY"
+    }
+  },
+  {
+    "clipboard": {
+      "hold": true
+    }
+  },
+  {
+    "type": "gg\"+pxix"
+  },
+  {
+    "press": "Escape"
+  },
+  {
+    "expect": {
+      "text": "one two\nthree\na---ba---b\ncd\noXYne two\nfour",
+      "status": "1:1 6L",
+      "pending": "\"+",
+      "mode": "NORMAL",
+      "notice": ""
+    }
+  },
+  {
+    "clipboard": {
+      "hold": false
+    }
+  },
+  {
+    "expect": {
+      "text": "oXxne two\nthree\na---ba---b\ncd\noXYne two\nfour",
+      "status": "1:3 6L",
+      "pending": "",
+      "mode": "NORMAL",
+      "notice": ""
+    }
+  },
+  {
+    "clipboard": {
+      "hold": true
+    }
+  },
+  {
+    "type": "j\"+pdd"
+  },
+  {
+    "expect": {
+      "text": "oXxne two\nthree\na---ba---b\ncd\noXYne two\nfour",
+      "status": "2:3 6L",
+      "pending": "\"+",
+      "notice": ""
+    }
+  },
+  {
+    "wait": 2500
+  },
+  {
+    "expect": {
+      "text": "oXxne two\nthree\na---ba---b\ncd\noXYne two\nfour",
+      "status": "2:3 6L",
+      "pending": "\"+",
+      "notice": ""
+    }
+  },
+  {
+    "wait": 800
+  },
+  {
+    "expect": {
+      "text": "oXxne two\na---ba---b\ncd\noXYne two\nfour",
+      "status": "2:1 5L",
+      "pending": "",
+      "notice": "clipboard blocked, use Ctrl-V"
+    }
+  },
+  {
+    "shot": "read-timed-out"
+  },
+  {
+    "type": "k"
+  },
+  {
+    "expect": {
+      "status": "1:1 5L",
+      "notice": ""
+    }
+  },
+  {
+    "clipboard": {
+      "hold": false
+    }
+  },
+  {
+    "clipboard": {
+      "hold": true
+    }
+  },
+  {
+    "type": "\"+P"
+  },
+  {
+    "press": "Control+e"
+  },
+  {
+    "type": "x"
+  },
+  {
+    "expect": {
+      "text": "oXxne two\na---ba---b\ncd\noXYne two\nfour",
+      "mode": "NORMAL",
+      "pending": "\"+"
+    }
+  },
+  {
+    "clipboard": {
+      "hold": false
+    }
+  },
+  {
+    "expect": {
+      "mode": "READ"
+    }
+  },
+  {
+    "press": "Escape"
+  },
+  {
+    "expect": {
+      "text": "XYoXxne two\na---ba---b\ncd\noXYne two\nfour",
+      "status": "1:2 5L",
+      "mode": "NORMAL",
+      "pending": ""
+    }
+  },
+  {
+    "clipboard": {
+      "hold": true
+    }
+  },
+  {
+    "type": "\"+p"
+  },
+  {
+    "press": "Control+e"
+  },
+  {
+    "wait": 3300
+  },
+  {
+    "expect": {
+      "mode": "READ",
+      "notice": "clipboard blocked, use Ctrl-V"
+    }
+  },
+  {
+    "press": "Escape"
+  },
+  {
+    "expect": {
+      "text": "XYoXxne two\na---ba---b\ncd\noXYne two\nfour",
+      "mode": "NORMAL",
+      "notice": ""
+    }
+  },
+  {
+    "clipboard": {
+      "hold": false
+    }
+  }
+]

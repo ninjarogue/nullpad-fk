@@ -895,16 +895,32 @@ const recorded = (
     : { ...outcome, editor: { ...after, history } }
 }
 
+const passedVim = (before: Editor, outcome: Outcome): Outcome => {
+  const after = outcome.editor
+  return Option.match(after.vim, {
+    onNone: () => outcome,
+    onSome: vim => {
+      const passed = Vim.passed(vim, before.buffer, after.buffer)
+      return passed === vim
+        ? outcome
+        : { ...outcome, editor: { ...after, vim: Option.some(passed) } }
+    },
+  })
+}
+
 const tracked = (
   before: Editor,
   queued: Queued,
   outcome: Outcome,
   began: Option.Option<Buffer.Position>,
 ): Outcome =>
-  recorded(before, outcome, {
-    ...groupingOf(before, outcome.editor, queued),
-    began,
-  })
+  passedVim(
+    before,
+    recorded(before, outcome, {
+      ...groupingOf(before, outcome.editor, queued),
+      began,
+    }),
+  )
 
 const planOf = (editor: Editor, queued: Queued): Plan => {
   const plan = planFor(editor, queued)

@@ -61,6 +61,7 @@ export const BlockStay = Schema.Struct({
     kept: Schema.Int,
   }),
   lines: Schema.Int,
+  seen: Schema.NonEmptyArray(Buffer.Line),
   home: Schema.Int,
 })
 export type BlockStay = typeof BlockStay.Type
@@ -115,8 +116,29 @@ const blockStay = (
     block,
     held,
     lines: opened.lines.length,
+    seen: opened.lines,
     home: home.column,
   })
+
+export const passed = (
+  vim: Vim,
+  before: Buffer.Buffer,
+  after: Buffer.Buffer,
+): Vim => {
+  if (vim.mode._tag !== 'Insert' || Option.isNone(vim.mode.block)) {
+    return vim
+  }
+  const stay = vim.mode.block.value
+  return stay.seen !== before.lines || before.lines === after.lines
+    ? vim
+    : {
+        ...vim,
+        mode: insertMode(
+          vim.mode.recording,
+          Option.some({ ...stay, seen: after.lines }),
+        ),
+      }
+}
 
 export const Last = Schema.Struct({
   kind: Selection.Kind,
@@ -1404,6 +1426,7 @@ const copiedDown = (buffer: Buffer.Buffer, stay: BlockStay): Buffer.Buffer => {
   const first = buffer.lines[block.first]
   if (
     first === undefined ||
+    buffer.lines !== stay.seen ||
     buffer.caret.line !== block.first ||
     buffer.lines.length !== stay.lines
   ) {

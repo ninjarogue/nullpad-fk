@@ -1,8 +1,8 @@
-import { Option, Schema } from 'effect'
+import { Array, Option, Schema } from 'effect'
 
 import * as Buffer from './buffer'
 import * as History from './history'
-import { Input, type NamedKey } from './input'
+import { Input, type NamedKey, noModifiers } from './input'
 import { cellAt, cellCount, cellStart } from './vim/cells'
 import * as Keymap from './vim/keymap'
 import {
@@ -22,8 +22,36 @@ export const Registers = Operators.Registers
 export type Registers = Operators.Registers
 export const noRegisters = Operators.noRegisters
 
-export const Mode = Schema.Literals(['Normal', 'Insert'])
+export const Recorded = Schema.TaggedUnion({
+  Keys: { text: Schema.String },
+  Other: { input: Input },
+})
+export type Recorded = typeof Recorded.Type
+
+export const Repeat = Schema.Struct({
+  command: Keymap.Command,
+  count: Schema.UndefinedOr(Schema.Int),
+  typed: Schema.Array(Recorded),
+})
+export type Repeat = typeof Repeat.Type
+
+export const Kept = Schema.Struct({
+  registers: Registers,
+  dot: Schema.Option(Repeat),
+})
+export type Kept = typeof Kept.Type
+
+export const nothingKept: Kept = { registers: noRegisters, dot: Option.none() }
+
+export const Mode = Schema.TaggedUnion({
+  Normal: {},
+  Insert: { recording: Schema.Option(Repeat) },
+})
 export type Mode = typeof Mode.Type
+
+const normalMode = Mode.cases.Normal.make({})
+
+const unrecordedStay = Mode.cases.Insert.make({ recording: Option.none() })
 
 export const Vim = Schema.Struct({
   mode: Mode,
@@ -35,26 +63,32 @@ export const Vim = Schema.Struct({
 export type Vim = typeof Vim.Type
 
 export const start: Vim = {
-  mode: 'Normal',
+  mode: normalMode,
   ...Keymap.idle,
   want: 'Unset',
 }
 
+export const Replayed = Schema.TaggedUnion({
+  Run: { command: Keymap.Command, count: Schema.UndefinedOr(Schema.Int) },
+  Typed: { input: Input },
+  Leave: {},
+})
+export type Replayed = typeof Replayed.Type
+
 export const Fate = Schema.TaggedUnion({
   Done: {},
-  Plain: {},
+  Plain: { input: Input },
   Travel: { way: History.Way, count: Schema.Int },
+  Replay: { steps: Schema.Array(Replayed) },
 })
 export type Fate = typeof Fate.Type
 
 const done = Fate.cases.Done.make({})
 
-const plain = Fate.cases.Plain.make({})
-
 export type Step = Readonly<{
   vim: Vim
   buffer: Buffer.Buffer
-  registers: Registers
+  kept: Kept
   fate: Fate
   began: Option.Option<Buffer.Position>
 }>
@@ -97,7 +131,7 @@ export const rest = (
   buffer: Buffer.Buffer,
   atRowEnd: boolean,
 ): Buffer.Buffer => {
-  if (vim.mode !== 'Normal') {
+  if (vim.mode._tag !== 'Normal') {
     return buffer
   }
   const { line, column } = buffer.caret
@@ -164,10 +198,133 @@ const changeBegan = (
     : from
 }
 
+const maxReplayedInputs = 20_000
+
+const maxReplayedLineCopies = 100_000_000
+
+const maxReplayedDeletes = 120
+
+const maxRecordedInputs = 10_000
+
+const mostReplayed = (lineCount: number): number =>
+  Math.min(maxReplayedInputs, maxReplayedLineCopies / lineCount)
+
+const typedText = (recorded: Recorded): string =>
+  Recorded.match(recorded, {
+    Keys: ({ text }) => text,
+    Other: ({ input }) =>
+      Input.match(input, {
+        Key: ({ key }) => (key === 'Enter' ? '\n' : ''),
+        Chord: () => '',
+        Text: ({ text }) => text,
+        Erase: () => '',
+        Paste: ({ text }) => text,
+        Preedit: () => '',
+        Commit: ({ text }) => text,
+      }),
+  })
+
+const inputCount = (recorded: Recorded): number =>
+  recorded._tag === 'Keys' ? recorded.text.length : 1
+
+const isDeleteKey = (recorded: Recorded): boolean =>
+  recorded._tag === 'Other' &&
+  recorded.input._tag === 'Key' &&
+  recorded.input.key === 'Delete'
+
+const isKeys = (recorded: Recorded): boolean => recorded._tag === 'Keys'
+
+const typedStep = (input: Input): Replayed =>
+  Replayed.cases.Typed.make({ input })
+
+const enter = typedStep(
+  Input.cases.Key.make({ key: 'Enter', modifiers: noModifiers }),
+)
+
+const leave = Replayed.cases.Leave.make({})
+
+const runInserts =
+  /^(?<lineFeeds>\n*)(?<firstKey>[^\n]?)(?<throughFirstBreak>[^\n]*\n*)(?<keyAfterBreak>[^\n]?)(?<rest>[^]*)$/u
+
+const keySteps = (text: string): ReadonlyArray<Replayed> =>
+  Array.map(
+    Array.filter((runInserts.exec(text) ?? []).slice(1), part => part !== ''),
+    part => typedStep(Input.cases.Text.make({ text: part, byKey: true })),
+  )
+
+const stepsOf = (recorded: Recorded): ReadonlyArray<Replayed> =>
+  Recorded.match(recorded, {
+    Keys: ({ text }) => keySteps(text),
+    Other: ({ input }) => [typedStep(input)],
+  })
+
+const furtherCopies = (
+  { command, count, typed }: Repeat,
+  lineCount: number,
+): ReadonlyArray<Replayed> => {
+  if (command._tag !== 'Insert') {
+    return []
+  }
+  const opensLine = command.at === 'LineBelow' || command.at === 'LineAbove'
+  const opening = opensLine ? [enter] : []
+  const text = Array.join(Array.map(typed, typedText), '')
+  const isOneRun = Array.every(typed, isKeys)
+  const deletes = Array.filter(typed, isDeleteKey).length
+  const inputs = Array.reduce(
+    typed,
+    opening.length,
+    (sum, entry) => sum + inputCount(entry),
+  )
+  const most = isOneRun ? maxReplayedInputs : mostReplayed(lineCount)
+  const copies = Math.max(
+    1,
+    Math.min(
+      Operators.boundedCount(
+        { text: (opensLine ? '\n' : '') + text, kind: 'Charwise' },
+        count ?? 1,
+      ),
+      Math.floor(most / Math.max(1, inputs)),
+      deletes === 0 ? Infinity : Math.floor(maxReplayedDeletes / deletes),
+    ),
+  )
+  if (copies === 1) {
+    return []
+  }
+  if (!isOneRun) {
+    return Array.flatten(
+      Array.replicate(
+        [...opening, ...Array.flatMap(typed, stepsOf)],
+        copies - 1,
+      ),
+    )
+  }
+  return [
+    ...opening,
+    ...keySteps(
+      opensLine
+        ? text + `\n${text}`.repeat(copies - 2)
+        : text.repeat(copies - 1),
+    ),
+  ]
+}
+
+const replayOf = (
+  { command, typed }: Repeat,
+  count: number | undefined,
+  lineCount: number,
+): Fate => {
+  const stay = Array.flatMap(typed, stepsOf)
+  return stay.length > mostReplayed(lineCount)
+    ? done
+    : Fate.cases.Replay.make({
+        steps: [Replayed.cases.Run.make({ command, count }), ...stay, leave],
+      })
+}
+
 const run = (
   vim: Vim,
   buffer: Buffer.Buffer,
-  registers: Registers,
+  kept: Kept,
   command: Keymap.Command,
   count: number | undefined,
 ): Step => {
@@ -176,9 +333,14 @@ const run = (
   const unchanged: Step = {
     vim: cleared,
     buffer,
-    registers,
+    kept,
     fate: done,
     began: Option.none(),
+  }
+  const repeat = Option.some({ command, count, typed: [] })
+  const recordingStay: Vim = {
+    ...normal,
+    mode: { _tag: 'Insert', recording: repeat },
   }
   return Keymap.Command.match(command, {
     Cancel: () => unchanged,
@@ -212,15 +374,16 @@ const run = (
             const applied = Operators.operators[operator](
               buffer,
               range,
-              registers,
+              kept.registers,
             )
-            const after: Vim = applied.inserting
-              ? { ...normal, mode: 'Insert' }
-              : normal
+            const after = applied.inserting ? recordingStay : normal
             return {
               vim: after,
               buffer: rest(after, applied.buffer, false),
-              registers: applied.registers,
+              kept: {
+                registers: applied.registers,
+                dot: operator === 'Delete' ? repeat : kept.dot,
+              },
               fate: done,
               began: Option.some(changeBegan(buffer, operator, target, range)),
             }
@@ -228,11 +391,12 @@ const run = (
         },
       ),
     Put: ({ side }) =>
-      Option.match(registers.unnamed, {
-        onNone: () => unchanged,
+      Option.match(kept.registers.unnamed, {
+        onNone: () => ({ ...unchanged, kept: { ...kept, dot: repeat } }),
         onSome: register => ({
           ...unchanged,
           vim: normal,
+          kept: { ...kept, dot: repeat },
           buffer: rest(
             normal,
             Operators.put(buffer, register, side, count ?? 1),
@@ -242,7 +406,7 @@ const run = (
       }),
     Insert: ({ at }): Step => ({
       ...unchanged,
-      vim: { ...normal, mode: 'Insert' },
+      vim: recordingStay,
       buffer: placeInsert(buffer, at),
     }),
     Travel: ({ way }) => ({
@@ -250,6 +414,14 @@ const run = (
       vim: normal,
       fate: Fate.cases.Travel.make({ way, count: count ?? 1 }),
     }),
+    Repeat: () =>
+      Option.match(kept.dot, {
+        onNone: () => unchanged,
+        onSome: last => ({
+          ...unchanged,
+          fate: replayOf(last, count ?? last.count, buffer.lines.length),
+        }),
+      }),
   })
 }
 
@@ -259,27 +431,30 @@ const isPageKey = (input: Input): boolean =>
 const pressNormal = (
   vim: Vim,
   buffer: Buffer.Buffer,
-  registers: Registers,
+  kept: Kept,
   input: Input,
 ): Step => {
-  const kept: Step = {
+  const unchanged: Step = {
     vim,
     buffer,
-    registers,
+    kept,
     fate: done,
     began: Option.none(),
   }
   if (input._tag === 'Paste' || isPageKey(input)) {
-    return { ...kept, vim: interrupted(vim), fate: plain }
+    return {
+      ...unchanged,
+      vim: interrupted(vim),
+      fate: { _tag: 'Plain', input },
+    }
   }
   return Option.match(keyOf(input), {
-    onNone: () => kept,
+    onNone: () => unchanged,
     onSome: key =>
       Keymap.Advance.match(Keymap.advance(Keymap.normal, vim, key), {
-        Drop: () => ({ ...kept, vim: idle(vim) }),
-        Wait: ({ pending }) => ({ ...kept, vim: { ...vim, ...pending } }),
-        Run: ({ command, count }) =>
-          run(vim, buffer, registers, command, count),
+        Drop: () => ({ ...unchanged, vim: idle(vim) }),
+        Wait: ({ pending }) => ({ ...unchanged, vim: { ...vim, ...pending } }),
+        Run: ({ command, count }) => run(vim, buffer, kept, command, count),
       }),
   })
 }
@@ -287,7 +462,7 @@ const pressNormal = (
 const leavesInsert = (input: Input): boolean =>
   Option.exists(keyOf(input), key => key === '<Esc>' || key === '<C-[>')
 
-const leaveInsert = (buffer: Buffer.Buffer, registers: Registers): Step => {
+const leaveInsert = (buffer: Buffer.Buffer, kept: Kept): Step => {
   const settled = Buffer.settle(buffer)
   const back = Buffer.backspaceTarget(settled)
   return {
@@ -297,23 +472,175 @@ const leaveInsert = (buffer: Buffer.Buffer, registers: Registers): Step => {
       back.line === settled.caret.line ? Buffer.moveTo(settled, back) : settled,
       false,
     ),
-    registers,
+    kept,
     fate: done,
     began: Option.none(),
   }
 }
 
+const isAtNoteStart = ({ caret }: Buffer.Buffer): boolean =>
+  caret.line === 0 && caret.column === 0
+
+const isRecorded = (buffer: Buffer.Buffer, input: Input): boolean =>
+  Input.match(input, {
+    Key: ({ key }) =>
+      key === 'Enter' ||
+      key === 'Tab' ||
+      key === 'Delete' ||
+      (key === 'Backspace' && !isAtNoteStart(buffer)),
+    Chord: () => false,
+    Text: () => true,
+    Erase: () => true,
+    Paste: () => true,
+    Preedit: () => false,
+    Commit: () => true,
+  })
+
+const leaving = (
+  vim: Vim,
+  buffer: Buffer.Buffer,
+  kept: Kept,
+  recording: Option.Option<Repeat>,
+): Step =>
+  Option.match(recording, {
+    onNone: () => leaveInsert(buffer, kept),
+    onSome: repeat => ({
+      vim: { ...vim, mode: unrecordedStay },
+      buffer,
+      kept: { ...kept, dot: recording },
+      fate: Fate.cases.Replay.make({
+        steps: [...furtherCopies(repeat, buffer.lines.length), leave],
+      }),
+      began: Option.none(),
+    }),
+  })
+
+const printableKeys = /^[\x20-\x7e\n]+$/u
+
+const isPastLineStart = (run: string): boolean =>
+  run !== '' && !run.endsWith('\n')
+
+const runWith = (run: string, input: Input): Option.Option<string> => {
+  if (input._tag === 'Text') {
+    return input.byKey &&
+      printableKeys.test(input.text) &&
+      (input.text.length === 1 || isPastLineStart(run))
+      ? Option.some(run + input.text)
+      : Option.none()
+  }
+  if (input._tag !== 'Key' || run === '') {
+    return Option.none()
+  }
+  if (input.key === 'Enter') {
+    return Option.some(run + '\n')
+  }
+  if (input.key === 'Tab') {
+    return isPastLineStart(run) ? Option.some(run + '  ') : Option.none()
+  }
+  return input.key === 'Backspace' &&
+    run.length > 1 &&
+    !run.slice(-2).includes('\n')
+    ? Option.some(run.slice(0, -1))
+    : Option.none()
+}
+
+const typedWith = (
+  typed: ReadonlyArray<Recorded>,
+  input: Input,
+): ReadonlyArray<Recorded> => {
+  const last = typed[typed.length - 1]
+  const run = last?._tag === 'Keys' ? last.text : ''
+  return Option.match(runWith(run, input), {
+    onNone: () => [...typed, { _tag: 'Other', input }],
+    onSome: text => [
+      ...(run === '' ? typed : typed.slice(0, -1)),
+      { _tag: 'Keys', text },
+    ],
+  })
+}
+
+const stayWith = (
+  vim: Vim,
+  kept: Kept,
+  repeat: Repeat,
+  input: Input,
+): Pick<Step, 'vim' | 'kept'> => {
+  const typed = typedWith(repeat.typed, input)
+  return typed.length > maxRecordedInputs
+    ? {
+        vim: { ...vim, mode: unrecordedStay },
+        kept: { ...kept, dot: Option.none() },
+      }
+    : {
+        vim: {
+          ...vim,
+          mode: {
+            _tag: 'Insert',
+            recording: Option.some({ ...repeat, typed }),
+          },
+        },
+        kept,
+      }
+}
+
+const pressInsert = (
+  vim: Vim,
+  buffer: Buffer.Buffer,
+  kept: Kept,
+  recording: Option.Option<Repeat>,
+  input: Input,
+): Step =>
+  leavesInsert(input)
+    ? leaving(vim, buffer, kept, recording)
+    : {
+        ...Option.match(recording, {
+          onNone: () => ({ vim, kept }),
+          onSome: repeat =>
+            isRecorded(buffer, input)
+              ? stayWith(vim, kept, repeat, input)
+              : { vim, kept },
+        }),
+        buffer,
+        fate: { _tag: 'Plain', input },
+        began: Option.none(),
+      }
+
 export const press = (
   vim: Vim,
   buffer: Buffer.Buffer,
-  registers: Registers,
+  kept: Kept,
   input: Input,
 ): Step =>
-  vim.mode === 'Normal'
-    ? pressNormal(vim, buffer, registers, input)
-    : leavesInsert(input)
-      ? leaveInsert(buffer, registers)
-      : { vim, buffer, registers, fate: plain, began: Option.none() }
+  Mode.match(vim.mode, {
+    Normal: () => pressNormal(vim, buffer, kept, input),
+    Insert: ({ recording }) => pressInsert(vim, buffer, kept, recording, input),
+  })
+
+export const again = (
+  vim: Vim,
+  buffer: Buffer.Buffer,
+  kept: Kept,
+  step: Replayed,
+): Step => {
+  const unchanged: Step = {
+    vim,
+    buffer,
+    kept,
+    fate: done,
+    began: Option.none(),
+  }
+  const inStay = (stepped: (recording: Option.Option<Repeat>) => Step): Step =>
+    Mode.match(vim.mode, {
+      Normal: () => unchanged,
+      Insert: ({ recording }) => stepped(recording),
+    })
+  return Replayed.match(step, {
+    Run: ({ command, count }) => run(vim, buffer, kept, command, count),
+    Typed: ({ input }) =>
+      inStay(recording => pressInsert(vim, buffer, kept, recording, input)),
+    Leave: () => inStay(recording => leaving(vim, buffer, kept, recording)),
+  })
+}
 
 export const landed = (
   buffer: Buffer.Buffer,

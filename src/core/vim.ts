@@ -204,11 +204,12 @@ const leaveVisual = (
   if (vim.mode._tag !== 'Visual') {
     return vim
   }
-  const ends = moved({ anchor: vim.mode.anchor, cursor: before.caret })
+  const selected = { anchor: vim.mode.anchor, cursor: before.caret }
+  const ends = moved(selected)
   const last: Last = {
     kind: vim.mode.kind,
-    anchor: Selection.markAt(after, ends.anchor),
-    cursor: Selection.markAt(after, ends.cursor),
+    anchor: Selection.markAt(before, after, selected.anchor, ends.anchor),
+    cursor: Selection.markAt(before, after, selected.cursor, ends.cursor),
     want:
       vim.want === 'Unset'
         ? Selection.columnOf(

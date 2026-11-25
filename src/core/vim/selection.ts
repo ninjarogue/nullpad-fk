@@ -1,4 +1,4 @@
-import { Schema } from 'effect'
+import { Option, Schema } from 'effect'
 
 import * as Buffer from '../buffer'
 import {
@@ -146,43 +146,82 @@ export const rangeOf = (
   }
 }
 
-export const Mark = Schema.Struct({
+const Place = Schema.Struct({
   id: Buffer.LineId,
   line: Schema.Int,
   column: Schema.Int,
+})
+type Place = typeof Place.Type
+
+export const Mark = Schema.Struct({
+  ...Place.fields,
+  removed: Schema.Option(Place),
 })
 export type Mark = typeof Mark.Type
 
 const noLine = Buffer.LineId.make(-1)
 
-export const markAt = (
+const placeAt = (
   buffer: Buffer.Buffer,
   { line, column }: Buffer.Position,
-): Mark => ({ id: buffer.lines[line]?.id ?? noLine, line, column })
+): Place => ({ id: buffer.lines[line]?.id ?? noLine, line, column })
 
-const lineOf = ({ lines }: Buffer.Buffer, mark: Mark): number => {
+export const markAt = (
+  before: Buffer.Buffer,
+  after: Buffer.Buffer,
+  was: Buffer.Position,
+  now: Buffer.Position,
+): Mark => {
+  const held = placeAt(before, was)
+  return {
+    ...placeAt(after, now),
+    removed:
+      held.id === noLine || after.lines[was.line]?.id === held.id
+        ? Option.none()
+        : Option.some(held),
+  }
+}
+
+const whereIs = ({ lines }: Buffer.Buffer, place: Place): number =>
+  lines[place.line]?.id === place.id
+    ? place.line
+    : lines.findIndex(line => line.id === place.id)
+
+const lineOf = (buffer: Buffer.Buffer, mark: Mark): number => {
   if (mark.id === noLine) {
     return Number.POSITIVE_INFINITY
   }
-  if (lines[mark.line]?.id === mark.id) {
-    return mark.line
-  }
-  const moved = lines.findIndex(line => line.id === mark.id)
+  const moved = whereIs(buffer, mark)
   return moved < 0 ? mark.line : moved
 }
+
+const broughtBack = (
+  buffer: Buffer.Buffer,
+  mark: Mark,
+): Option.Option<Buffer.Position> =>
+  Option.filter(
+    Option.map(mark.removed, place => ({
+      line: whereIs(buffer, place),
+      column: place.column,
+    })),
+    ({ line }) => line >= 0,
+  )
 
 export const marked = (
   buffer: Buffer.Buffer,
   mark: Mark,
   pastEnd: 'LastLine' | 'Nowhere',
 ): Buffer.Position | undefined => {
-  const found = lineOf(buffer, mark)
+  const found = Option.getOrElse(broughtBack(buffer, mark), () => ({
+    line: lineOf(buffer, mark),
+    column: mark.column,
+  }))
   const line =
-    pastEnd === 'LastLine' ? Math.min(found, lastLine(buffer)) : found
+    pastEnd === 'LastLine' ? Math.min(found.line, lastLine(buffer)) : found.line
   const text = buffer.lines[line]
   return text === undefined
     ? undefined
-    : { line, column: Math.min(mark.column, text.text.length) }
+    : { line, column: Math.min(found.column, text.text.length) }
 }
 
 export const movedBy = (

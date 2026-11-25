@@ -365,7 +365,7 @@
   },
   {
     "caption": "Type ggve, then I, ! and Esc; then gv, A, ? and Esc",
-    "note": "I types before the selection and A after its cursor end."
+    "note": "I types at the start of the first line and A after the cursor end."
   },
   {
     "type": "ggveI"

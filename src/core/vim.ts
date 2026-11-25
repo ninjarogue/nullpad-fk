@@ -976,7 +976,10 @@ const pressVisual = (
   if (isPageKey(input)) {
     return {
       ...unchanged,
-      vim: interrupted(vim),
+      vim: {
+        ...interrupted(vim),
+        mode: visualMode(visual.kind, visual.anchor, 'AsInVisual'),
+      },
       fate: { _tag: 'Plain', input },
     }
   }

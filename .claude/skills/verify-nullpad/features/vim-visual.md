@@ -9,7 +9,7 @@ With vim on, `v` selects letters and `V` selects whole lines. Motions and text o
 - `visual-objects` selects with `iw aw iW aW ip ap i" a" i' a' i( a( i[ a[ i{ a{ i< a<` and their other spellings, and a second object grows the selection. `ip` in `v` makes whole lines, and `iw`, `i(` and `i"` in `V` make letters.
 - `visual-operators` runs `d x` and Delete, `y`, `c s`, the whole-line `X D Y C S R`, each with a register before it.
 - `visual-put` replaces the selection with `p` or `P` and a count, and with a paste (Ctrl-V), which is one undo change.
-- `visual-insert` types before the selection with `I` and after its cursor end with `A`.
+- `visual-insert` types at the start of the selection's first line with `I` and after its cursor end with `A`, as Vim does.
 - `visual-dot` repeats a VISUAL operator from the cursor on the same amount of text: the same count of lines, or on one line the same width on screen.
 - `visual-gv` selects the last selection again with `gv`, with its kind.
 - `visual-leave` returns to NORMAL with nothing selected on a click, Ctrl-E, Ctrl-P and the vim toggle. Keys that are not built (`J ~ u U r > < =`) change nothing and stay in VISUAL.

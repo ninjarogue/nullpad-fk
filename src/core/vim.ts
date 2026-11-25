@@ -204,6 +204,11 @@ const maxReplayedLineCopies = 100_000_000
 
 const maxReplayedDeletes = 120
 
+const maxRecordedInputs = 10_000
+
+const mostReplayed = (lineCount: number): number =>
+  Math.min(maxReplayedInputs, maxReplayedLineCopies / lineCount)
+
 const typedText = (recorded: Recorded): string =>
   Recorded.match(recorded, {
     Keys: ({ text }) => text,
@@ -270,9 +275,7 @@ const furtherCopies = (
     opening.length,
     (sum, entry) => sum + inputCount(entry),
   )
-  const most = isOneRun
-    ? maxReplayedInputs
-    : Math.min(maxReplayedInputs, maxReplayedLineCopies / lineCount)
+  const most = isOneRun ? maxReplayedInputs : mostReplayed(lineCount)
   const copies = Math.max(
     1,
     Math.min(
@@ -305,11 +308,18 @@ const furtherCopies = (
   ]
 }
 
-const replayOf = (repeat: Repeat): ReadonlyArray<Replayed> => [
-  Replayed.cases.Run.make({ command: repeat.command, count: repeat.count }),
-  ...Array.flatMap(repeat.typed, stepsOf),
-  leave,
-]
+const replayOf = (
+  { command, typed }: Repeat,
+  count: number | undefined,
+  lineCount: number,
+): Fate => {
+  const stay = Array.flatMap(typed, stepsOf)
+  return stay.length > mostReplayed(lineCount)
+    ? done
+    : Fate.cases.Replay.make({
+        steps: [Replayed.cases.Run.make({ command, count }), ...stay, leave],
+      })
+}
 
 const run = (
   vim: Vim,
@@ -409,9 +419,7 @@ const run = (
         onNone: () => unchanged,
         onSome: last => ({
           ...unchanged,
-          fate: Fate.cases.Replay.make({
-            steps: replayOf({ ...last, count: count ?? last.count }),
-          }),
+          fate: replayOf(last, count ?? last.count, buffer.lines.length),
         }),
       }),
   })
@@ -546,6 +554,30 @@ const typedWith = (
   })
 }
 
+const stayWith = (
+  vim: Vim,
+  kept: Kept,
+  repeat: Repeat,
+  input: Input,
+): Pick<Step, 'vim' | 'kept'> => {
+  const typed = typedWith(repeat.typed, input)
+  return typed.length > maxRecordedInputs
+    ? {
+        vim: { ...vim, mode: unrecordedStay },
+        kept: { ...kept, dot: Option.none() },
+      }
+    : {
+        vim: {
+          ...vim,
+          mode: {
+            _tag: 'Insert',
+            recording: Option.some({ ...repeat, typed }),
+          },
+        },
+        kept,
+      }
+}
+
 const pressInsert = (
   vim: Vim,
   buffer: Buffer.Buffer,
@@ -556,20 +588,14 @@ const pressInsert = (
   leavesInsert(input)
     ? leaving(vim, buffer, kept, recording)
     : {
-        vim: isRecorded(buffer, input)
-          ? {
-              ...vim,
-              mode: {
-                _tag: 'Insert',
-                recording: Option.map(recording, repeat => ({
-                  ...repeat,
-                  typed: typedWith(repeat.typed, input),
-                })),
-              },
-            }
-          : vim,
+        ...Option.match(recording, {
+          onNone: () => ({ vim, kept }),
+          onSome: repeat =>
+            isRecorded(buffer, input)
+              ? stayWith(vim, kept, repeat, input)
+              : { vim, kept },
+        }),
         buffer,
-        kept,
         fate: { _tag: 'Plain', input },
         began: Option.none(),
       }

@@ -529,6 +529,8 @@ export const play = async (
 export const stateLine = (screen: Screen, preedit: string): string =>
   `${statusText(screen)} | ${cursorText(screen)}${preedit === '' ? '' : ` | composing ${JSON.stringify(preedit)}`}`
 
+export const launchOptions = { ignoreDefaultArgs: ['--hide-scrollbars'] }
+
 export const openPage = async (
   context: BrowserContext,
   url: string,

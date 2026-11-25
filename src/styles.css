@@ -51,13 +51,18 @@ body {
   position: relative;
   flex: 1;
   min-height: 0;
-  padding: 10px 2ch 0;
   overflow-x: hidden;
   overflow-y: auto;
   overflow-anchor: auto;
   scroll-padding-top: 10px;
   scrollbar-gutter: stable;
   cursor: text;
+}
+
+.sheet {
+  box-sizing: border-box;
+  min-height: 100%;
+  padding: 10px 2ch 0;
 }
 
 .line {

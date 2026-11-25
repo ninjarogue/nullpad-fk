@@ -38,14 +38,20 @@ type Sheet = Readonly<{
 
 const sheetOf = (surface: HTMLElement): Sheet => {
   const style = getComputedStyle(surface)
+  const padding = getComputedStyle(surface.querySelector('.sheet') ?? surface)
   const box = surface.getBoundingClientRect()
   return {
     surface,
     rowHeight: pixels(style.lineHeight),
-    viewTop: box.top + pixels(style.paddingTop),
-    viewBottom: box.bottom - pixels(style.paddingBottom),
+    viewTop: box.top + pixels(padding.paddingTop),
+    viewBottom: box.bottom - pixels(padding.paddingBottom),
   }
 }
+
+export const isOnScrollbar = ({ target }: MouseEvent): boolean =>
+  target instanceof HTMLElement &&
+  target.classList.contains('surface') &&
+  target.scrollHeight > target.clientHeight
 
 const findSurface = (): Option.Option<HTMLElement> =>
   Option.fromNullishOr(document.querySelector<HTMLElement>('.surface'))
@@ -773,6 +779,19 @@ const drawnScrollRange = (
   }
 }
 
+const isAtEnd = (surface: HTMLElement): boolean =>
+  surface.scrollTop >= surface.scrollHeight - surface.clientHeight - 1
+
+export const scrollToEnd: Effect.Effect<void> = Render.afterCommit.pipe(
+  Effect.map(() =>
+    Option.map(findSurface(), surface =>
+      scrollApp(surface, () => {
+        surface.scrollTop = surface.scrollHeight
+      }),
+    ),
+  ),
+)
+
 const observe = (surface: HTMLElement): Stream.Stream<SurfaceMessage> =>
   Stream.callback<SurfaceMessage>(queue =>
     Effect.gen(function* () {
@@ -804,9 +823,10 @@ const observe = (surface: HTMLElement): Stream.Stream<SurfaceMessage> =>
               wheel.pending = 0
             }
           }
-          const report = (top: number) =>
-            Queue.offerUnsafe(queue, Message.ScrolledSurface({ top }))
-          const reportTop = () => report(topLine(surface, sheetOf(surface)))
+          const report = (top: number, atEnd: boolean) =>
+            Queue.offerUnsafe(queue, Message.ScrolledSurface({ top, atEnd }))
+          const reportTop = () =>
+            report(topLine(surface, sheetOf(surface)), isAtEnd(surface))
           /**
            * Chrome scrolls a wheel turn on its compositor, ahead of the drawn lines, and paints blank screen until they arrive;
            * scrolled here, every painted frame shows drawn lines. Chrome hands over a wheel turn at the next frame, after keys
@@ -842,6 +862,7 @@ const observe = (surface: HTMLElement): Stream.Stream<SurfaceMessage> =>
                   viewTop: sheet.viewTop + shift,
                   viewBottom: sheet.viewBottom + shift,
                 }),
+                false,
               )
             } else {
               wheel.pending = 0
@@ -882,7 +903,7 @@ const observe = (surface: HTMLElement): Stream.Stream<SurfaceMessage> =>
           surface.addEventListener(
             'pointerdown',
             event => {
-              if (event.button !== 0) {
+              if (event.button !== 0 || isOnScrollbar(event)) {
                 return
               }
               event.preventDefault()
@@ -976,18 +997,23 @@ export const surface = (
       h.OnMount(SurfacePort()),
     ],
     [
-      spacer(frame.undrawnAbove, h),
-      ...Array.map(frame.lines, line =>
-        lazyLine(line.id, lineView, [
-          line.id,
-          line.index,
-          line.number,
-          line.parts,
-          line.index === frame.caret.line,
-          h,
-        ]),
+      h.div(
+        [h.Class('sheet')],
+        [
+          spacer(frame.undrawnAbove, h),
+          ...Array.map(frame.lines, line =>
+            lazyLine(line.id, lineView, [
+              line.id,
+              line.index,
+              line.number,
+              line.parts,
+              line.index === frame.caret.line,
+              h,
+            ]),
+          ),
+          spacer(frame.undrawnBelow, h),
+        ],
       ),
-      spacer(frame.undrawnBelow, h),
       h.div([h.Id('caret'), h.Class('cur'), h.AriaHidden(true)]),
     ],
   )

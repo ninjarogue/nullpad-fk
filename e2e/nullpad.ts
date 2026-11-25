@@ -73,6 +73,7 @@ const readScreen = async (page: Page): Promise<Screen> => {
       throw new Error('nullpad is not on screen: no .surface or .pos')
     }
     const style = getComputedStyle(surface)
+    const padding = getComputedStyle(surface.querySelector('.sheet') ?? surface)
     const context = document.createElement('canvas').getContext('2d')
     if (context === null) {
       throw new Error('no 2d canvas to measure a cell')
@@ -82,10 +83,10 @@ const readScreen = async (page: Page): Promise<Screen> => {
     const rowHeight = Number.parseFloat(style.lineHeight)
     const box = surface.getBoundingClientRect()
     const area = {
-      left: box.left + Number.parseFloat(style.paddingLeft),
-      right: box.right - Number.parseFloat(style.paddingRight),
-      top: box.top + Number.parseFloat(style.paddingTop),
-      bottom: box.bottom - Number.parseFloat(style.paddingBottom),
+      left: box.left + Number.parseFloat(padding.paddingLeft),
+      right: box.right - Number.parseFloat(padding.paddingRight),
+      top: box.top + Number.parseFloat(padding.paddingTop),
+      bottom: box.bottom - Number.parseFloat(padding.paddingBottom),
     }
     const segmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' })
     const range = document.createRange()

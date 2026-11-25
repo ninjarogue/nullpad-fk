@@ -4,6 +4,7 @@ import type { Html, HtmlBuilder } from 'foldkit/html'
 
 import { Input, type Modifiers, NamedKey } from './core/input'
 import { Message } from './message'
+import { isOnScrollbar } from './surface'
 
 export const Keyboard = Schema.Literals(['Focused', 'Blurred', 'Unsupported'])
 export type Keyboard = typeof Keyboard.Type
@@ -364,8 +365,8 @@ const listen = (
           window.addEventListener('focus', keepFocus, { signal })
           port.parentElement?.addEventListener(
             'pointerdown',
-            () => {
-              if (Option.isSome(state.composition)) {
+            event => {
+              if (Option.isSome(state.composition) && !isOnScrollbar(event)) {
                 commitComposition()
               }
             },

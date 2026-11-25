@@ -2361,7 +2361,7 @@ test('the read view closes the selection, and coming back is NORMAL', async ({
   expect(await nullpad.text(), 'the text is whole').toBe('one two\nthree four')
 })
 
-test('a paste in VISUAL replaces the selection and lands in NORMAL as one change', async ({
+test('a paste in VISUAL, by Ctrl-Shift-V, replaces the selection and lands in NORMAL as one change', async ({
   nullpad,
 }) => {
   await begin(nullpad, 'one two three')
@@ -2384,15 +2384,22 @@ test('a paste in VISUAL replaces the selection and lands in NORMAL as one change
   expect(await nullpad.text(), 'the editor still works').toBe('one  three')
 })
 
-test('Ctrl-V in NORMAL still pastes', async ({ nullpad }) => {
+test('Ctrl-V in NORMAL pastes nothing, and Ctrl-Shift-V pastes', async ({
+  nullpad,
+}) => {
   await begin(nullpad, 'abc\ndef')
   await nullpad.paste('PP')
   expect(
     await nullpad.text(),
-    'Ctrl-V in NORMAL pastes the clipboard text',
+    'Ctrl-Shift-V in NORMAL pastes the clipboard text',
   ).toBe('PPabc\ndef')
-  expect(await modeOf(nullpad), 'still NORMAL after Ctrl-V').toBe('NORMAL')
-  await play(nullpad, 'gg0v<Esc>')
+  expect(await modeOf(nullpad), 'still NORMAL after the paste').toBe('NORMAL')
+  await nullpad.press('Control+v')
+  expect(
+    await nullpad.text(),
+    'Ctrl-V in NORMAL leaves the text, with PP still on the clipboard',
+  ).toBe('PPabc\ndef')
+  await play(nullpad, '<Esc>gg0v<Esc>')
   await nullpad.paste('Q')
   expect(await nullpad.text(), 'and after a v and Esc').toBe('QPPabc\ndef')
   expect(await modeOf(nullpad), 'NORMAL').toBe('NORMAL')

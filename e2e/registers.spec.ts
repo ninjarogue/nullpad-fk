@@ -3,7 +3,7 @@ import { type Nullpad, expect, openFresh, settle, test } from './nullpad'
 const SAVED = 1500
 const ROWS_PER_TEST = 10
 const CLIPBOARD_WAIT = 2500
-const BLOCKED = 'clipboard blocked, use Ctrl-V'
+const BLOCKED = 'clipboard blocked, use Ctrl-Shift-V'
 
 const toggle = 'Control+,'
 

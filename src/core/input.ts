@@ -30,7 +30,7 @@ export const Input = Schema.TaggedUnion({
   Chord: { char: Schema.String, modifiers: Modifiers },
   Text: { text: Schema.String, byKey: Schema.Boolean },
   Erase: { fromCaret: Schema.Int, toCaret: Schema.Int },
-  Paste: { text: Schema.String },
+  Paste: { text: Schema.String, byKey: Schema.Boolean },
   Preedit: { text: Schema.String },
   Commit: { text: Schema.String },
 })

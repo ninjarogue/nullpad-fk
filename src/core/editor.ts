@@ -692,7 +692,7 @@ const plainPlan = (editor: Editor, input: Input): Plan =>
     Commit: ({ text }) => now(insertText(text)({ ...editor, preedit: '' })),
   })
 
-const clipboardBlockedNotice = 'clipboard blocked, use Ctrl-V'
+const clipboardBlockedNotice = 'clipboard blocked, use Ctrl-Shift-V'
 
 const vimDone = (
   editor: Editor,

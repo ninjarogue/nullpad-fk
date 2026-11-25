@@ -71,7 +71,7 @@ Each `expect` field is an exact match:
 - `title` is the tab title, which is the open note's title.
 - `mode` is the status line's mode (`EDIT`, `NORMAL`, `INSERT`, `VISUAL`, `V-LINE` or `READ`), and `pending` the vim keys waiting there, `""` when none.
 - `selection` is the text vim's VISUAL selection covers as drawn, with `\n` for each selected line break, and `""` when nothing is selected. It reads only the lines drawn near the screen.
-- `notice` is the status line's notice, such as `clipboard blocked, use Ctrl-V`, `""` when none.
+- `notice` is the status line's notice, such as `clipboard blocked, use Ctrl-Shift-V`, `""` when none.
 - `clipboard` is what another app would paste: the system clipboard, read from a second page that has the permission.
 - `keydown` is the last keydown that reached `window`: its `key`, then `cancelled` when the page cancelled it or `passed` when the browser was left to act on it, such as `r passed`. `none` before any key.
 - `finder` is the finder as text: `prompt` and the prompt line, then one line per row with `>` on the highlighted one and cells joined by `|`, or `closed`.

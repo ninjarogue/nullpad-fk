@@ -167,10 +167,13 @@ const keyOf = (input: Input): Option.Option<Keymap.Key> =>
     Text: ({ text }) =>
       isOneGrapheme(text) ? Option.some(text) : Option.none(),
     Erase: () => Option.none(),
-    Paste: () => Option.none(),
+    Paste: ({ byKey }) => (byKey ? Option.some('<C-v>') : Option.none()),
     Preedit: () => Option.none(),
     Commit: () => Option.none(),
   })
+
+const isPasteByAnotherRoute = (input: Input): boolean =>
+  input._tag === 'Paste' && !input.byKey
 
 export const rest = (
   vim: Vim,
@@ -942,7 +945,7 @@ const pressNormal = (
     began: Option.none(),
     clipboard: Option.none(),
   }
-  if (input._tag === 'Paste' || isPageKey(input)) {
+  if (isPasteByAnotherRoute(input) || isPageKey(input)) {
     return {
       ...unchanged,
       vim: interrupted(vim),
@@ -994,7 +997,7 @@ const pressVisual = (
       fate: { _tag: 'Plain', input },
     }
   }
-  if (input._tag === 'Paste') {
+  if (isPasteByAnotherRoute(input)) {
     const range = Selection.rangeOf(
       buffer,
       Selection.endsOf(buffer, visual.kind, visual.anchor),

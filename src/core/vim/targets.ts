@@ -25,7 +25,12 @@ import {
 export const Kind = Schema.Literals(['Charwise', 'Linewise'])
 export type Kind = typeof Kind.Type
 
-export type Range = Readonly<{ from: Spot; to: Spot; kind: Kind }>
+export type Range = Readonly<{
+  from: Spot
+  to: Spot
+  kind: Kind
+  inclusive: boolean
+}>
 
 export type Target = (
   buffer: Buffer.Buffer,
@@ -52,9 +57,16 @@ const cellIn = (buffer: Buffer.Buffer, { line, cell }: Spot): string => {
 const inIndent = (buffer: Buffer.Buffer, spot: Spot, extra: number): boolean =>
   firstFilled(buffer, spot.line) >= spot.cell + extra
 
+const wholeLines = (from: Spot, to: Spot): Range => ({
+  from,
+  to,
+  kind: 'Linewise',
+  inclusive: true,
+})
+
 const rangeOf = (buffer: Buffer.Buffer, { start, end, reach }: Span): Range => {
   if (reach === 'Linewise') {
-    return { from: start, to: end, kind: 'Linewise' }
+    return wholeLines(start, end)
   }
   if (reach === 'Inclusive') {
     return {
@@ -64,18 +76,20 @@ const rangeOf = (buffer: Buffer.Buffer, { start, end, reach }: Span): Range => {
         cell: Math.min(end.cell + 1, cellsIn(buffer, end.line)),
       },
       kind: 'Charwise',
+      inclusive: true,
     }
   }
   if (end.cell > 0 || end.line === start.line) {
-    return { from: start, to: end, kind: 'Charwise' }
+    return { from: start, to: end, kind: 'Charwise', inclusive: false }
   }
   const above = end.line - 1
   return inIndent(buffer, start, 0)
-    ? { from: start, to: { line: above, cell: 0 }, kind: 'Linewise' }
+    ? wholeLines(start, { line: above, cell: 0 })
     : {
         from: start,
         to: { line: above, cell: cellsIn(buffer, above) },
         kind: 'Charwise',
+        inclusive: false,
       }
 }
 
@@ -175,14 +189,12 @@ const wordBackward: Target = (buffer, from, count = 1) => {
 const lines: Target = (buffer, from, count = 1) =>
   count > 1 && from.line === lastLine(buffer)
     ? Option.none()
-    : Option.some({
-        from,
-        to: {
+    : Option.some(
+        wholeLines(from, {
           line: Math.min(lastLine(buffer), from.line + count - 1),
           cell: 0,
-        },
-        kind: 'Linewise',
-      })
+        }),
+      )
 
 const backInLine = (buffer: Buffer.Buffer, spot: Spot, big: boolean): Spot => {
   const wordClass = classAt(buffer, spot, big)
@@ -310,11 +322,9 @@ const paragraphObject =
         start -= 1
       }
     }
-    return Option.some({
-      from: { line: start, cell: 0 },
-      to: { line: end, cell: 0 },
-      kind: 'Linewise',
-    })
+    return Option.some(
+      wholeLines({ line: start, cell: 0 }, { line: end, cell: 0 }),
+    )
   }
 
 const quoteObject =

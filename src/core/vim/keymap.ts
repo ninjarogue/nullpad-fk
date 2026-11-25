@@ -2,14 +2,8 @@ import { Array, Option, Schema } from 'effect'
 
 import * as History from '../history'
 import { MotionName } from './motions'
-import {
-  OperatorName,
-  RegisterName,
-  Side,
-  defaultRegister,
-  registerNamed,
-} from './operators'
-import { TargetName } from './targets'
+import { RegisterName, Side, defaultRegister, registerNamed } from './operators'
+import { OperatorName, TargetName } from './targets'
 
 export type Key = string
 

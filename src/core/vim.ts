@@ -16,7 +16,12 @@ import {
   spotOf,
 } from './vim/motions'
 import * as Operators from './vim/operators'
-import { type Range, type TargetName, targetFor } from './vim/targets'
+import {
+  type OperatorName,
+  type Range,
+  type TargetName,
+  targetFor,
+} from './vim/targets'
 
 export const noRegisters = Operators.noRegisters
 
@@ -162,7 +167,10 @@ const placeInsert = (
 ): Buffer.Buffer => {
   const from = spotOf(buffer)
   const moved = (position: Buffer.Position) => Buffer.moveTo(buffer, position)
-  const lineEnd = { line: from.line, column: Buffer.lineEnd(buffer, from.line) }
+  const lineEnd = {
+    line: from.line,
+    column: Buffer.lineEnd(buffer, from.line),
+  }
   const lineStart = { line: from.line, column: 0 }
   const places: Record<Keymap.InsertAt, () => Buffer.Buffer> = {
     Here: () => buffer,
@@ -190,7 +198,7 @@ const firstNonBlankOf = (
 
 const changeBegan = (
   buffer: Buffer.Buffer,
-  operator: Operators.OperatorName,
+  operator: OperatorName,
   target: TargetName,
   range: Range,
 ): Buffer.Position => {
@@ -422,12 +430,7 @@ const run = (
     },
     Operate: ({ operator, target }) =>
       Option.match(
-        targetFor(operator === 'Change', target)(
-          buffer,
-          spotOf(buffer),
-          count,
-          vim.want,
-        ),
+        targetFor(operator, target)(buffer, spotOf(buffer), count, vim.want),
         {
           onNone: () => unchanged,
           onSome: range => {

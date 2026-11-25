@@ -25,6 +25,9 @@ import {
 export const Kind = Schema.Literals(['Charwise', 'Linewise'])
 export type Kind = typeof Kind.Type
 
+export const OperatorName = Schema.Literals(['Delete', 'Change', 'Yank'])
+export type OperatorName = typeof OperatorName.Type
+
 export type Range = Readonly<{
   from: Spot
   to: Spot
@@ -555,8 +558,30 @@ const targets: Readonly<Record<TargetName, Target>> = {
   ABrace: blockObject('{', '}', true),
 }
 
-export const targetFor = (changes: boolean, name: TargetName): Target =>
-  changes && name === 'WordForward' ? wordEndStay : targets[name]
+const restIsBlank = (buffer: Buffer.Buffer, range: Range): boolean =>
+  /^[ \t]*$/u.test(
+    (buffer.lines[range.to.line] ?? buffer.lines[0]).text.slice(
+      positionOf(buffer, range.to).column,
+    ),
+  )
 
-export const isInIndent = (buffer: Buffer.Buffer, spot: Spot): boolean =>
-  inIndent(buffer, spot, 0)
+const linewiseWhenBlankAround = (buffer: Buffer.Buffer, range: Range): Range =>
+  range.kind === 'Charwise' &&
+  range.to.line > range.from.line &&
+  restIsBlank(buffer, range) &&
+  inIndent(buffer, range.from, 0)
+    ? { ...range, kind: 'Linewise' }
+    : range
+
+export const targetFor = (operator: OperatorName, name: TargetName): Target => {
+  const target =
+    operator === 'Change' && name === 'WordForward'
+      ? wordEndStay
+      : targets[name]
+  return operator === 'Delete'
+    ? (buffer, from, count, want) =>
+        Option.map(target(buffer, from, count, want), range =>
+          linewiseWhenBlankAround(buffer, range),
+        )
+    : target
+}

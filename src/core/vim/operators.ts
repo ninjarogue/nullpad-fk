@@ -3,10 +3,7 @@ import { Array, Option, Schema } from 'effect'
 import * as Buffer from '../buffer'
 import { cellAt, cellStart } from './cells'
 import { cellsIn, endOf, firstNonBlank, positionOf, spotOf } from './motions'
-import { Kind, type Range, isInIndent } from './targets'
-
-export const OperatorName = Schema.Literals(['Delete', 'Change', 'Yank'])
-export type OperatorName = typeof OperatorName.Type
+import { Kind, type OperatorName, type Range } from './targets'
 
 export const Register = Schema.Struct({ text: Schema.String, kind: Kind })
 export type Register = typeof Register.Type
@@ -187,19 +184,6 @@ const coversNothing = (buffer: Buffer.Buffer, range: Range): boolean => {
   )
 }
 
-const restIsBlank = (buffer: Buffer.Buffer, range: Range): boolean =>
-  /^[ \t]*$/u.test(
-    lineText(buffer, range.to.line).slice(positionOf(buffer, range.to).column),
-  )
-
-const linewiseWhenBlankAround = (buffer: Buffer.Buffer, range: Range): Range =>
-  range.kind === 'Charwise' &&
-  range.to.line > range.from.line &&
-  restIsBlank(buffer, range) &&
-  isInIndent(buffer, range.from)
-    ? { ...range, kind: 'Linewise' }
-    : range
-
 const atFirstNonBlank = (buffer: Buffer.Buffer, line: number): Buffer.Buffer =>
   Buffer.moveTo(
     buffer,
@@ -245,9 +229,8 @@ export const operators: Readonly<
     ) => Applied
   >
 > = {
-  Delete: (buffer, picked, registers, name) => {
-    const range = linewiseWhenBlankAround(buffer, picked)
-    return isOneEmptyLine(buffer) || coversNothing(buffer, range)
+  Delete: (buffer, range, registers, name) =>
+    isOneEmptyLine(buffer) || coversNothing(buffer, range)
       ? {
           buffer: toStart(buffer, range),
           inserting: false,
@@ -258,8 +241,7 @@ export const operators: Readonly<
           buffer: remove(buffer, range),
           inserting: false,
           ...remembered(registers, name, registerOf(buffer, range), false),
-        }
-  },
+        },
   Change: (buffer, range, registers, name) => {
     const isNothing = coversNothing(buffer, range)
     if (isOneEmptyLine(buffer) || (isNothing && !range.inclusive)) {

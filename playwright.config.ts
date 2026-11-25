@@ -16,6 +16,7 @@ export default defineConfig({
     baseURL: `http://localhost:${port}`,
     viewport: { width: 1000, height: 600 },
     trace: 'off',
+    launchOptions: { ignoreDefaultArgs: ['--hide-scrollbars'] },
   },
   webServer: {
     command:

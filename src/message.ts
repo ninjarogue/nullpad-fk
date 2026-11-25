@@ -10,7 +10,7 @@ import { Draft, NoteChange } from './storage'
 export const Message = defineMessageUnion({
   ReceivedInput: { input: Input },
   ClickedText: { x: Schema.Finite, line: Schema.Int, yInLine: Schema.Finite },
-  ScrolledSurface: { top: Schema.Int },
+  ScrolledSurface: { top: Schema.Int, atEnd: Schema.Boolean },
   ResizedScreen: { rows: Schema.Int },
   CompletedLocate: { ticket: Schema.Int, answer: Answer },
   CompletedReadClipboard: {
@@ -20,6 +20,7 @@ export const Message = defineMessageUnion({
   SucceededWriteClipboard: {},
   FailedWriteClipboard: {},
   CompletedRevealCaret: {},
+  CompletedScrollSurfaceToEnd: {},
   FocusedKeyboard: {},
   BlurredKeyboard: {},
   FoundBrowserUnsupported: {},

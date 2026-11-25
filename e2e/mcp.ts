@@ -26,6 +26,7 @@ import { type Nullpad } from './nullpad.ts'
 import {
   type Step,
   describe,
+  launchOptions,
   openPage,
   parseStep,
   picture,
@@ -100,7 +101,7 @@ const startStage = async (): Promise<Stage> => {
     preview: { host: '127.0.0.1', port: 0 },
   })
   const url = server.resolvedUrls?.local[0]
-  const browser = await chromium.launch().catch(() => null)
+  const browser = await chromium.launch(launchOptions).catch(() => null)
   if (url === undefined || browser === null) {
     await browser?.close()
     await server.close()

@@ -517,9 +517,14 @@ const leaving = (
 
 const printableKeys = /^[\x20-\x7e\n]+$/u
 
+const isPastLineStart = (run: string): boolean =>
+  run !== '' && !run.endsWith('\n')
+
 const runWith = (run: string, input: Input): Option.Option<string> => {
   if (input._tag === 'Text') {
-    return input.byKey && printableKeys.test(input.text)
+    return input.byKey &&
+      printableKeys.test(input.text) &&
+      (input.text.length === 1 || isPastLineStart(run))
       ? Option.some(run + input.text)
       : Option.none()
   }
@@ -530,7 +535,7 @@ const runWith = (run: string, input: Input): Option.Option<string> => {
     return Option.some(run + '\n')
   }
   if (input.key === 'Tab') {
-    return Option.some(run + '  ')
+    return isPastLineStart(run) ? Option.some(run + '  ') : Option.none()
   }
   return input.key === 'Backspace' &&
     run.length > 1 &&

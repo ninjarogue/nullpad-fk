@@ -700,34 +700,54 @@ export const locate = (query: Query, revision: number): Effect.Effect<Answer> =>
     ),
   )
 
-const drawCaret = (surface: HTMLElement): void => {
+type Shift = Readonly<{ left: number; top: number; scrollTop: number }>
+
+const shiftOf = (surface: HTMLElement): Shift => {
+  const frame = surface.getBoundingClientRect()
+  const { scrollTop } = surface
+  return {
+    left: surface.scrollLeft - frame.left,
+    top: scrollTop - frame.top,
+    scrollTop,
+  }
+}
+
+const caretPlace = (surface: HTMLElement): Option.Option<Box> =>
+  Option.map(
+    lineElement(surface, Number(surface.dataset['caretLine'])),
+    element => {
+      const column = Number(surface.dataset['caretColumn'])
+      const text = lineText(element)
+      return surface.dataset['selected'] !== '' && column >= text.length
+        ? lineBreakBox(
+            element,
+            text,
+            textEdges(element),
+            sheetOf(surface).rowHeight,
+            cellWidth(surface),
+            viewRight(surface),
+          )
+        : caretBox(element, column, surface.dataset['caretEnd'] === 'true')
+    },
+  )
+
+const placeCaret = (
+  surface: HTMLElement,
+  place: Option.Option<Box>,
+  shift: Shift,
+): void => {
   const caret = surface.querySelector<HTMLElement>('#caret')
   if (caret === null) {
     return
   }
-  const line = lineElement(surface, Number(surface.dataset['caretLine']))
-  Option.match(line, {
+  Option.match(place, {
     onNone: () => {
       caret.style.display = 'none'
     },
-    onSome: element => {
-      const column = Number(surface.dataset['caretColumn'])
-      const text = lineText(element)
-      const box =
-        surface.dataset['selected'] !== '' && column >= text.length
-          ? lineBreakBox(
-              element,
-              text,
-              textEdges(element),
-              sheetOf(surface).rowHeight,
-              cellWidth(surface),
-              viewRight(surface),
-            )
-          : caretBox(element, column, surface.dataset['caretEnd'] === 'true')
-      const frame = surface.getBoundingClientRect()
+    onSome: box => {
       caret.style.display = ''
-      caret.style.left = `${box.left - frame.left + surface.scrollLeft}px`
-      caret.style.top = `${box.top - frame.top + surface.scrollTop}px`
+      caret.style.left = `${box.left + shift.left}px`
+      caret.style.top = `${box.top + shift.top}px`
       caret.style.width =
         surface.dataset['caretShape'] === 'Bar' ? '2px' : `${box.width}px`
     },
@@ -942,23 +962,25 @@ const selectionPool: Array<HTMLElement> = []
 
 const drawnSelection = { scrollTop: 0 }
 
-const drawSelection = (surface: HTMLElement): void => {
+const selectionPlaces = (surface: HTMLElement): ReadonlyArray<SelectionBox> =>
+  surface.querySelector('#selection') === null
+    ? []
+    : Option.match(selectedOf(surface), {
+        onNone: () => [],
+        onSome: selected => selectionBoxes(surface, selected),
+      })
+
+const placeSelection = (
+  surface: HTMLElement,
+  boxes: ReadonlyArray<SelectionBox>,
+  shift: Shift,
+): void => {
   const layer = surface.querySelector<HTMLElement>('#selection')
-  const boxes =
-    layer === null
-      ? []
-      : Option.match(selectedOf(surface), {
-          onNone: () => [],
-          onSome: selected => selectionBoxes(surface, selected),
-        })
-  const frame = surface.getBoundingClientRect()
-  const shiftLeft = surface.scrollLeft - frame.left
-  const shiftTop = surface.scrollTop - frame.top
-  drawnSelection.scrollTop = surface.scrollTop
+  drawnSelection.scrollTop = shift.scrollTop
   boxes.forEach((box, index) => {
     const element = selectionPool[index] ?? document.createElement('div')
     selectionPool[index] = element
-    element.style.cssText = `left:${box.left + shiftLeft}px;top:${box.top + shiftTop}px;width:${box.width}px;--seam-left:${box.seamLeft}px;--seam-width:${box.seamWidth}px`
+    element.style.cssText = `left:${box.left + shift.left}px;top:${box.top + shift.top}px;width:${box.width}px;--seam-left:${box.seamLeft}px;--seam-width:${box.seamWidth}px`
     element.toggleAttribute('data-break', box.isLineBreak)
     if (element.parentNode !== layer) {
       layer?.append(element)
@@ -969,13 +991,21 @@ const drawSelection = (surface: HTMLElement): void => {
   }
 }
 
+const draw = (surface: HTMLElement): void => {
+  const boxes = selectionPlaces(surface)
+  const caret = caretPlace(surface)
+  const shift = shiftOf(surface)
+  placeSelection(surface, boxes, shift)
+  placeCaret(surface, caret, shift)
+}
+
 const redrawSelectionAfterScroll = (surface: HTMLElement): void => {
   if (
     surface.dataset['selected'] !== '' &&
     Math.abs(surface.scrollTop - drawnSelection.scrollTop) >
       surface.clientHeight / 2
   ) {
-    drawSelection(surface)
+    placeSelection(surface, selectionPlaces(surface), shiftOf(surface))
   }
 }
 
@@ -988,8 +1018,7 @@ export const revealCaret = (align: 'Nearest' | 'Top'): Effect.Effect<void> =>
     Effect.andThen(Render.afterCommit),
     Effect.map(() =>
       Option.map(findSurface(), surface => {
-        drawSelection(surface)
-        drawCaret(surface)
+        draw(surface)
         scrollApp(surface, () =>
           surface.querySelector('#caret')?.scrollIntoView({
             block: align === 'Top' ? 'start' : 'nearest',
@@ -1078,8 +1107,7 @@ const observe = (surface: HTMLElement): Stream.Stream<SurfaceMessage> =>
                 ),
               }),
             )
-            drawSelection(surface)
-            drawCaret(surface)
+            draw(surface)
           }
           const resizes = new ResizeObserver(measure)
           resizes.observe(surface)
@@ -1133,8 +1161,7 @@ const observe = (surface: HTMLElement): Stream.Stream<SurfaceMessage> =>
             }
           }
           const patches = new MutationObserver(() => {
-            drawSelection(surface)
-            drawCaret(surface)
+            draw(surface)
             scrollPending('Drop')
           })
           patches.observe(surface, {

@@ -37,6 +37,9 @@ export const endsOf = (
   cursor: spotAt(buffer, buffer.caret, 'LineBreak'),
 })
 
+const textOf = (buffer: Buffer.Buffer, line: number): Buffer.Line =>
+  buffer.lines[line] ?? buffer.lines[0]
+
 const isBefore = (a: Spot, b: Spot): boolean =>
   a.line < b.line || (a.line === b.line && a.cell < b.cell)
 
@@ -47,6 +50,20 @@ export const sorted = ({
   isBefore(cursor, anchor)
     ? { first: cursor, last: anchor }
     : { first: anchor, last: cursor }
+
+export const wantBefore = (buffer: Buffer.Buffer, want: Want): Want => {
+  const { line, cell } = spotAt(buffer, buffer.caret, 'LastLetter')
+  return want === 'Unset' ? caretColumnOf(textOf(buffer, line), cell) : want
+}
+
+export const wantOf = (
+  buffer: Buffer.Buffer,
+  { anchor, cursor }: Ends,
+  want: Want,
+): Want =>
+  want === 'Unset' && !isBefore(anchor, cursor)
+    ? screenColumnOf(textOf(buffer, cursor.line), cursor.cell)
+    : want
 
 export const isOnLineBreak = (buffer: Buffer.Buffer, spot: Spot): boolean =>
   spot.cell >= cellsIn(buffer, spot.line)
@@ -172,9 +189,6 @@ export const Amount = Schema.TaggedUnion({
   ToLineEnd: { lines: Schema.Int },
 })
 export type Amount = typeof Amount.Type
-
-const textOf = (buffer: Buffer.Buffer, line: number): Buffer.Line =>
-  buffer.lines[line] ?? buffer.lines[0]
 
 export const amountOf = (
   buffer: Buffer.Buffer,

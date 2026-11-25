@@ -26,6 +26,8 @@ export type Span = Readonly<{ start: Spot; end: Spot; reach: Reach }>
 
 export type Ends = Readonly<{ anchor: Spot; cursor: Spot }>
 
+export type Selected = Ends & Readonly<{ kind: 'Letters' | 'Lines' }>
+
 export type Picked = Ends & Readonly<{ kind: 'Letters' | 'Lines' | 'Kept' }>
 
 export const isBefore = (a: Spot, b: Spot): boolean =>
@@ -356,12 +358,19 @@ const quoted =
     let end = -1
     if (!isEmpty && isQuote(cursor)) {
       if (anchorFirst) {
-        start = nextQuote(cursor + 1)
-        end = start < 0 ? -1 : nextQuote(start + 1)
+        const next = nextQuote(cursor + 1)
+        const closing = next < 0 ? -1 : nextQuote(next + 1)
+        start = closing < 0 ? cursor : next
+        end = closing < 0 ? next : closing
       } else {
-        const closing = previousQuote(cursor)
-        start = isQuote(closing) ? previousQuote(closing) : -1
-        end = start >= 0 && isQuote(start) ? closing : -1
+        const before = previousQuote(cursor)
+        const opening = isQuote(before) ? previousQuote(before) : -1
+        start = opening >= 0 && isQuote(opening) ? opening : before
+        end = !isQuote(before)
+          ? -1
+          : opening >= 0 && isQuote(opening)
+            ? before
+            : cursor
       }
     } else if (isQuote(cursor) || !isEmpty) {
       const nearest = isEmpty
@@ -520,6 +529,9 @@ const block =
         })
       }
       const start = incl(buffer, found.open).spot
+      if (grown === 'FromSelection' && isSame(start, found.close)) {
+        return Option.none()
+      }
       let endsAtLineStart = found.close.cell === 0
       let end = decl(buffer, found.close).spot
       while (inIndent(buffer, end, 1)) {
@@ -573,7 +585,7 @@ type Object = Readonly<{
     from: Spot,
     count: number,
   ) => Option.Option<Span>
-  pick: (buffer: Buffer.Buffer, ends: Ends, count: number) => Picked
+  pick: (buffer: Buffer.Buffer, selected: Selected, count: number) => Picked
 }>
 
 const kept = (ends: Ends): Picked => ({ ...ends, kind: 'Kept' })
@@ -612,20 +624,27 @@ const paragraphObject = (include: boolean): Object => {
   const find = paragraph(include)
   return {
     find,
-    pick: (buffer, ends, count) =>
-      ends.anchor.line === ends.cursor.line
-        ? Option.match(find(buffer, ends.cursor, count), {
-            onNone: () => kept(ends),
-            onSome: ({ start, end }) => ({
-              anchor: start.line === ends.anchor.line ? ends.anchor : start,
-              cursor: end,
-              kind: 'Lines',
-            }),
+    pick: (buffer, selected, count) => {
+      const { anchor, cursor, kind } = selected
+      const more = (): Picked =>
+        kept({
+          anchor,
+          cursor: moreParagraphs(buffer, selected, count, include),
+        })
+      return anchor.line === cursor.line
+        ? Option.match(find(buffer, cursor, count), {
+            onNone: () => kept(selected),
+            onSome: ({ start, end }) =>
+              kind === 'Lines' && start.line === anchor.line
+                ? more()
+                : {
+                    anchor: start.line === anchor.line ? anchor : start,
+                    cursor: end,
+                    kind: 'Lines',
+                  },
           })
-        : kept({
-            anchor: ends.anchor,
-            cursor: moreParagraphs(buffer, ends, count, include),
-          }),
+        : more()
+    },
   }
 }
 

@@ -14,9 +14,9 @@ import {
   motions,
   motionsOn,
   positionOf,
-  spotAt,
   spotOf,
 } from './vim/motions'
+import { objects } from './vim/objects'
 import * as Operators from './vim/operators'
 import * as Selection from './vim/selection'
 import {
@@ -648,7 +648,11 @@ const run = (
       }),
     Select: ({ kind }) => ({
       ...unchanged,
-      vim: { ...cleared, mode: visualMode(kind, buffer.caret) },
+      vim: {
+        ...cleared,
+        mode: visualMode(kind, buffer.caret),
+        want: Selection.wantBefore(buffer, vim.want),
+      },
     }),
     Reselect: () => {
       const last = Option.getOrUndefined(vim.last)
@@ -783,7 +787,8 @@ const runVisual = (
           )
     },
     Move: ({ motion }) => {
-      const from = spotAt(buffer, buffer.caret, 'LineBreak')
+      const ends = Selection.endsOf(buffer, visual.kind, visual.anchor)
+      const from = ends.cursor
       if (motionFails(motion, buffer, from, count)) {
         return unchanged
       }
@@ -791,7 +796,7 @@ const runVisual = (
         buffer,
         from,
         count,
-        vim.want,
+        Selection.wantOf(buffer, ends, vim.want),
       )
       return {
         ...unchanged,
@@ -799,12 +804,35 @@ const runVisual = (
         buffer: Buffer.moveTo(buffer, positionOf(buffer, spot)),
       }
     },
+    Pick: ({ object }): Step => {
+      const picked = objects[object].pick(
+        buffer,
+        Selection.endsOf(buffer, visual.kind, visual.anchor),
+        count ?? 1,
+      )
+      return {
+        ...unchanged,
+        vim: {
+          ...cleared,
+          mode: visualMode(
+            picked.kind === 'Kept' ? visual.kind : picked.kind,
+            positionOf(buffer, picked.anchor),
+          ),
+          want: 'Unset',
+        },
+        buffer: Buffer.moveTo(buffer, positionOf(buffer, picked.cursor)),
+      }
+    },
     Swap: (): Step => ({
       ...unchanged,
       vim: {
         ...cleared,
         mode: visualMode(visual.kind, buffer.caret),
-        want: 'Unset',
+        want:
+          visual.anchor.line === buffer.caret.line &&
+          visual.anchor.column === buffer.caret.column
+            ? vim.want
+            : 'Unset',
       },
       buffer: Buffer.moveTo(buffer, visual.anchor),
     }),

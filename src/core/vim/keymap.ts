@@ -2,6 +2,7 @@ import { Array, Option, Schema } from 'effect'
 
 import * as History from '../history'
 import { MotionName } from './motions'
+import { ObjectName } from './objects'
 import {
   type RegisterName,
   Side,
@@ -45,6 +46,7 @@ export const VisualCommand = Schema.TaggedUnion({
   Operate: { operator: OperatorName, reach: Reach },
   Replace: { side: Side },
   Insert: { at: Schema.Literals(['Start', 'End']) },
+  Pick: { object: ObjectName },
   Swap: {},
   Select: { kind: SelectionKind },
   Leave: {},
@@ -116,7 +118,7 @@ const motionRows: ReadonlyArray<
 ]
 
 const objectRows: ReadonlyArray<
-  readonly [notation: string, target: TargetName, about: string]
+  readonly [notation: string, target: ObjectName, about: string]
 > = [
   ['iw', 'InnerWord', 'inner word'],
   ['aw', 'AWord', 'a word'],
@@ -144,6 +146,10 @@ const objectRows: ReadonlyArray<
   ['a}', 'ABrace', 'braces'],
   ['iB', 'InnerBrace', 'inside braces'],
   ['aB', 'ABrace', 'braces'],
+  ['i<', 'InnerAngle', 'inside angle brackets'],
+  ['a<', 'AAngle', 'angle brackets'],
+  ['i>', 'InnerAngle', 'inside angle brackets'],
+  ['a>', 'AAngle', 'angle brackets'],
 ]
 
 const operatorKeys: Readonly<Record<OperatorName, Key>> = {
@@ -240,6 +246,13 @@ const operateOn = (
 export const visual: ReadonlyArray<Binding<VisualCommand>> = [
   ...Array.map(motionRows, ([notation, motion, about]) =>
     bind(notation, VisualCommand.cases.Move.make({ motion }), about),
+  ),
+  ...Array.map(objectRows, ([notation, object, about]) =>
+    bind(
+      notation,
+      VisualCommand.cases.Pick.make({ object }),
+      `select ${about}`,
+    ),
   ),
   bind('o', VisualCommand.cases.Swap.make({}), 'go to the other end'),
   bind(

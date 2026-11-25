@@ -2,7 +2,7 @@ import { Array, Option, Schema } from 'effect'
 
 import * as Buffer from './buffer'
 import * as History from './history'
-import { Input, type NamedKey } from './input'
+import { Input, type NamedKey, noModifiers } from './input'
 import { cellAt, cellCount, cellStart } from './vim/cells'
 import * as Keymap from './vim/keymap'
 import {
@@ -65,7 +65,6 @@ export const start: Vim = {
 export const Replayed = Schema.TaggedUnion({
   Run: { command: Keymap.Command, count: Schema.UndefinedOr(Schema.Int) },
   Typed: { input: Input },
-  OpenLine: {},
   Leave: {},
 })
 export type Replayed = typeof Replayed.Type
@@ -219,7 +218,9 @@ const isTypedAscii = (input: Input): boolean =>
 const typedStep = (input: Input): Replayed =>
   Replayed.cases.Typed.make({ input })
 
-const openLine = Replayed.cases.OpenLine.make({})
+const enter = typedStep(
+  Input.cases.Key.make({ key: 'Enter', modifiers: noModifiers }),
+)
 
 const leave = Replayed.cases.Leave.make({})
 
@@ -231,10 +232,8 @@ const furtherCopies = (
     return []
   }
   const opensLine = command.at === 'LineBelow' || command.at === 'LineAbove'
-  const copy = [
-    ...(opensLine ? [openLine] : []),
-    ...Array.map(typed, typedStep),
-  ]
+  const opening = opensLine ? [enter] : []
+  const copy = [...opening, ...Array.map(typed, typedStep)]
   const text = Array.join(Array.map(typed, typedText), '')
   const isOneInsert = Array.every(typed, isTypedAscii)
   const deletes = Array.filter(typed, isDeleteKey).length
@@ -262,7 +261,7 @@ const furtherCopies = (
     ? text + `\n${text}`.repeat(copies - 2)
     : text.repeat(copies - 1)
   return [
-    ...(opensLine ? [openLine] : []),
+    ...opening,
     ...(rest === ''
       ? []
       : [typedStep(Input.cases.Text.make({ text: rest, byKey: true }))]),
@@ -531,11 +530,6 @@ export const again = (
     Run: ({ command, count }) => run(vim, buffer, kept, command, count),
     Typed: ({ input }) =>
       inStay(recording => pressInsert(vim, buffer, kept, recording, input)),
-    OpenLine: () =>
-      inStay(() => ({
-        ...unchanged,
-        buffer: placeInsert(buffer, 'LineBelow'),
-      })),
     Leave: () => inStay(recording => leaving(vim, buffer, kept, recording)),
   })
 }

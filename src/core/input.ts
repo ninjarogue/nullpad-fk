@@ -36,7 +36,7 @@ export const Input = Schema.TaggedUnion({
 })
 export type Input = typeof Input.Type
 
-const noModifiers: Modifiers = {
+export const noModifiers: Modifiers = {
   ctrl: false,
   alt: false,
   meta: false,

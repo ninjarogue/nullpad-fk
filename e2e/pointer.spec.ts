@@ -769,3 +769,39 @@ test('a click on the text next to the scrollbar still puts the cursor on that li
     'line 6Z',
   )
 })
+
+test('dragging the scrollbar thumb to the bottom of a long wrapped note shows its last line and leaves the cursor where it was', async ({
+  nullpad,
+}) => {
+  await nullpad.page.setViewportSize({ width: 1000, height: 600 })
+  const note = Array.from(
+    { length: 3000 },
+    (_, i) => `line ${i + 1} ${'lorem ipsum dolor sit amet '.repeat(7)}`,
+  ).join('\n')
+  await nullpad.paste(note)
+  await nullpad.press('Control+Home')
+  const before = await nullpad.status()
+  const bar = await scrollbarOf(nullpad)
+  expect(
+    bar.width,
+    'the surface has a scrollbar taking layout width',
+  ).toBeGreaterThan(0)
+  const grab = { x: bar.x, y: bar.top + bar.width + 5 }
+  await nullpad.page.mouse.move(grab.x, grab.y)
+  await nullpad.page.mouse.down()
+  for (let i = 1; i <= 40; i++) {
+    await nullpad.page.mouse.move(grab.x, grab.y + 15 * i)
+    await nullpad.page.waitForTimeout(12)
+  }
+  await nullpad.page.waitForTimeout(800)
+  await nullpad.page.mouse.up()
+  const after = await settleScroll(nullpad)
+  expect(
+    linesOf(after).at(-1)?.startsWith('line 3000 '),
+    `the last line on screen after dragging the thumb to the bottom (rows ${after.rows[0]?.number}-${after.rows.at(-1)?.number})`,
+  ).toBe(true)
+  expect(
+    await nullpad.status(),
+    'the cursor is on the line and column it had before the drag',
+  ).toEqual(before)
+})

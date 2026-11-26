@@ -35,15 +35,21 @@ export const largestProgram = 5000
 
 export const tooLarge = 'not supported in a search: a pattern this large'
 
+export const blankClass = 0
+export const punctuationClass = 1
+export const wordClass = 2
+
+export const isWordClass = (kind: number): boolean => kind >= wordClass
+
 const asciiClasses = Uint8Array.from({ length: 128 }, (_, code) =>
   code === 32 || code === 9
-    ? 0
+    ? blankClass
     : (code >= 48 && code <= 57) ||
         (code >= 65 && code <= 90) ||
         (code >= 97 && code <= 122) ||
         code === 95
-      ? 2
-      : 1,
+      ? wordClass
+      : punctuationClass,
 )
 
 const firstBefore = (code: number): number => {
@@ -62,31 +68,42 @@ const firstBefore = (code: number): number => {
 
 export const classOfCodePoint = (code: number): number =>
   code < 0
-    ? 0
+    ? blankClass
     : code < 128
-      ? (asciiClasses[code] ?? 1)
-      : (classValues[firstBefore(code)] ?? 2)
+      ? (asciiClasses[code] ?? punctuationClass)
+      : (classValues[firstBefore(code)] ?? wordClass)
 
-export const isWordCodePoint = (code: number): boolean =>
-  classOfCodePoint(code) >= 2
+type CaseMap = Readonly<{
+  first: number
+  last: number
+  shift: number
+  method: 'toLowerCase' | 'toUpperCase'
+}>
 
-const lowerOf = (code: number): number => {
-  if (code < 128) {
-    return code >= 65 && code <= 90 ? code + 32 : code
+const caseMapped =
+  ({ first, last, shift, method }: CaseMap) =>
+  (code: number): number => {
+    if (code < 128) {
+      return code >= first && code <= last ? code + shift : code
+    }
+    const mapped = String.fromCodePoint(code)[method]()
+    const head = mapped.codePointAt(0) ?? code
+    return mapped.length === (head > 0xffff ? 2 : 1) ? head : code
   }
-  const lowered = String.fromCodePoint(code).toLowerCase()
-  const first = lowered.codePointAt(0) ?? code
-  return lowered.length === (first > 0xffff ? 2 : 1) ? first : code
-}
 
-const upperOf = (code: number): number => {
-  if (code < 128) {
-    return code >= 97 && code <= 122 ? code - 32 : code
-  }
-  const raised = String.fromCodePoint(code).toUpperCase()
-  const first = raised.codePointAt(0) ?? code
-  return raised.length === (first > 0xffff ? 2 : 1) ? first : code
-}
+const lowerOf = caseMapped({
+  first: 65,
+  last: 90,
+  shift: 32,
+  method: 'toLowerCase',
+})
+
+const upperOf = caseMapped({
+  first: 97,
+  last: 122,
+  shift: -32,
+  method: 'toUpperCase',
+})
 
 const sizeOf = (node: Node): number =>
   Match.value(node).pipe(
@@ -431,26 +448,25 @@ const codePointBefore = (text: string, at: number): number => {
     : low
 }
 
+const classAt = (text: string, at: number): number =>
+  classOfCodePoint(at < text.length ? (text.codePointAt(at) ?? -1) : -1)
+
 const holds = (kind: number, text: string, at: number): boolean => {
   switch (kind) {
-    case 0:
+    case assertionCodes.LineStart:
       return at === 0
-    case 1:
+    case assertionCodes.LineEnd:
       return at === text.length
-    case 2: {
-      const here = classOfCodePoint(
-        at < text.length ? (text.codePointAt(at) ?? -1) : -1,
+    case assertionCodes.WordStart: {
+      const here = classAt(text, at)
+      return (
+        isWordClass(here) &&
+        classOfCodePoint(codePointBefore(text, at)) !== here
       )
-      return here >= 2 && classOfCodePoint(codePointBefore(text, at)) !== here
     }
     default: {
       const before = classOfCodePoint(codePointBefore(text, at))
-      return (
-        before >= 2 &&
-        classOfCodePoint(
-          at < text.length ? (text.codePointAt(at) ?? -1) : -1,
-        ) !== before
-      )
+      return isWordClass(before) && classAt(text, at) !== before
     }
   }
 }

@@ -746,15 +746,16 @@ type Watch = {
   holds: Array<Hold>
   frame: number
   counting: boolean
+  cancelled: boolean
 }
 
 declare global {
   var nullpadBurst: Watch | undefined
 }
 
-const holdUrl = 'http://burst.nullpad.invalid/hold'
+const holdRequestUrl = 'http://burst.nullpad.invalid/hold'
 
-const leastHold = 50
+const leastHoldMs = 50
 
 const gate = () => {
   const opened = { open: () => {} }
@@ -842,13 +843,84 @@ const landingMisses = (
   ]
 }
 
-/**
- * Chrome dispatches a key the moment it reaches the main thread, so keys sent back to back over CDP split across frames
- * on a loaded machine. A synchronous XMLHttpRequest blocks the main thread without spinning the CPU, and every input
- * sent meanwhile queues and is dispatched in one frame after it. Chrome hands a wheel turn to the page at the next frame.
- * After a long task Chrome may draw two frames before a timer runs, so the hold for the next frame starts in an animation
- * frame callback, and the inputs it queues are dispatched once that frame is drawn.
- */
+function installWatch() {
+  const watch: Watch = globalThis.nullpadBurst ?? {
+    landings: [],
+    holds: [],
+    frame: 0,
+    counting: false,
+    cancelled: false,
+  }
+  if (globalThis.nullpadBurst === undefined) {
+    for (const type of ['keydown', 'pointerdown', 'wheel']) {
+      addEventListener(
+        type,
+        event =>
+          watch.landings.push({
+            type: event.type,
+            frame: watch.frame,
+            timeStamp: event.timeStamp,
+            at: performance.now(),
+          }),
+        { capture: true, passive: true },
+      )
+    }
+    globalThis.nullpadBurst = watch
+  }
+  watch.landings = []
+  watch.holds = []
+  watch.cancelled = false
+  if (!watch.counting) {
+    watch.counting = true
+    const tick = () => {
+      if (watch.counting) {
+        watch.frame += 1
+        requestAnimationFrame(tick)
+      }
+    }
+    requestAnimationFrame(tick)
+  }
+}
+
+function holdMainThreadInNextFrame({
+  url,
+  left,
+}: Readonly<{ url: string; left: number }>) {
+  const watch = globalThis.nullpadBurst
+  if (watch === undefined || watch.cancelled) {
+    return
+  }
+  const from = performance.now()
+  if (left > 1) {
+    // a timer set after a long task may run two frames later, an animation frame callback runs in the next
+    requestAnimationFrame(() =>
+      holdMainThreadInNextFrame({ url, left: left - 1 }),
+    )
+  }
+  const request = new XMLHttpRequest()
+  request.open('GET', url, false)
+  try {
+    request.send()
+  } finally {
+    watch.holds.push({ from, until: performance.now() })
+  }
+}
+
+function stopWatching() {
+  const watch = globalThis.nullpadBurst
+  if (watch !== undefined) {
+    watch.counting = false
+  }
+  return { landings: watch?.landings ?? [], holds: watch?.holds ?? [] }
+}
+
+function cancelHolds() {
+  const watch = globalThis.nullpadBurst
+  if (watch !== undefined) {
+    watch.cancelled = true
+  }
+}
+
 export const burst = async (
   page: Page,
   cdp: CDPSession,
@@ -871,7 +943,7 @@ export const burst = async (
   const sent = frames.map(inputs => sentOf(inputs, centre))
   const gates = frames.map(() => ({ held: gate(), released: gate() }))
   const reached = { holds: 0 }
-  await page.route(holdUrl, async route => {
+  await page.route(holdRequestUrl, async route => {
     const reachedGate = gates[reached.holds]
     reached.holds += 1
     reachedGate?.held.open()
@@ -881,82 +953,36 @@ export const burst = async (
       headers: { 'access-control-allow-origin': '*' },
     })
   })
-  await page.evaluate(
-    ({ url, count }) => {
-      const watch: Watch = globalThis.nullpadBurst ?? {
-        landings: [],
-        holds: [],
-        frame: 0,
-        counting: false,
-      }
-      if (globalThis.nullpadBurst === undefined) {
-        for (const type of ['keydown', 'pointerdown', 'wheel']) {
-          addEventListener(
-            type,
-            event =>
-              watch.landings.push({
-                type: event.type,
-                frame: watch.frame,
-                timeStamp: event.timeStamp,
-                at: performance.now(),
-              }),
-            { capture: true, passive: true },
-          )
-        }
-        globalThis.nullpadBurst = watch
-      }
-      watch.landings = []
-      watch.holds = []
-      if (!watch.counting) {
-        watch.counting = true
-        const tick = () => {
-          if (watch.counting) {
-            watch.frame += 1
-            requestAnimationFrame(tick)
-          }
-        }
-        requestAnimationFrame(tick)
-      }
-      const hold = (left: number) => {
-        const from = performance.now()
-        if (left > 1) {
-          requestAnimationFrame(() => hold(left - 1))
-        }
-        const request = new XMLHttpRequest()
-        request.open('GET', url, false)
-        try {
-          request.send()
-        } finally {
-          watch.holds.push({ from, until: performance.now() })
-        }
-      }
-      setTimeout(() => hold(count))
-    },
-    { url: holdUrl, count: frames.length },
-  )
-  const acks: Array<Promise<unknown>> = []
-  for (const [index, { held, released }] of gates.entries()) {
-    await within(
-      held.done,
-      `the page never held its main thread for frame ${index + 1}`,
-    )
-    acks.push(...(sent[index] ?? []).map(each => send(cdp, each)))
-    await new Promise(resolve =>
-      setTimeout(resolve, Math.max(stall, leastHold)),
-    )
-    released.open()
-  }
-  await Promise.all(acks)
-  await page.unroute(holdUrl)
-  await settle(page)
-  await settle(page)
-  const { landings, holds } = await page.evaluate(() => {
-    const watch = globalThis.nullpadBurst
-    if (watch !== undefined) {
-      watch.counting = false
-    }
-    return { landings: watch?.landings ?? [], holds: watch?.holds ?? [] }
+  await page.evaluate(installWatch)
+  const holding = page.evaluate(holdMainThreadInNextFrame, {
+    url: holdRequestUrl,
+    left: frames.length,
   })
+  try {
+    const acks: Array<Promise<unknown>> = []
+    for (const [index, { held, released }] of gates.entries()) {
+      await within(
+        held.done,
+        `the page never held its main thread for frame ${index + 1}`,
+      )
+      acks.push(...(sent[index] ?? []).map(each => send(cdp, each)))
+      await new Promise(resolve =>
+        setTimeout(resolve, Math.max(stall, leastHoldMs)),
+      )
+      released.open()
+    }
+    await Promise.all(acks)
+  } finally {
+    for (const { released } of gates) {
+      released.open()
+    }
+    await page.evaluate(cancelHolds)
+    await page.unroute(holdRequestUrl)
+    await holding.catch(() => undefined)
+  }
+  await settle(page)
+  await settle(page)
+  const { landings, holds } = await page.evaluate(stopWatching)
   const misses = landingMisses(sent, landings, holds)
   if (misses.length > 0) {
     throw new Error(

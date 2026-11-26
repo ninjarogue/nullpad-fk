@@ -85,26 +85,27 @@ const inputKinds = [
   'wheel',
 ] as const
 
-const isInputStep = (step: Step): step is InputStep =>
-  inputKinds.some(kind => kind in step)
-
 const captionLimit = 60
 const noteLimit = 90
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value)
 
-export const parseStep = (value: unknown, index: number): Step => {
+export const parseStep = (
+  value: unknown,
+  index: number,
+  accepted: ReadonlyArray<(typeof stepKeys)[number]> = stepKeys,
+): Step => {
   const fail = (why: string): never => {
     throw new Error(`step ${index + 1} ${JSON.stringify(value)}: ${why}`)
   }
   if (!isRecord(value)) {
     return fail('is not an object')
   }
-  const kinds = stepKeys.filter(key => key in value)
+  const kinds = accepted.filter(key => key in value)
   const [kind] = kinds
   if (kinds.length !== 1 || kind === undefined) {
-    return fail(`needs exactly one of ${stepKeys.join(', ')}`)
+    return fail(`needs exactly one of ${accepted.join(', ')}`)
   }
   const allowed: ReadonlyArray<string> = [
     kind,
@@ -218,26 +219,20 @@ export const parseStep = (value: unknown, index: number): Step => {
       const frames = Array.isArray(body)
         ? body.map((frame: unknown) =>
             Array.isArray(frame) && frame.length > 0
-              ? frame.map((each: unknown) => parseStep(each, index))
+              ? frame.map((each: unknown) => parseInputStep(each, index))
               : fail(shape),
           )
         : []
       if (frames.length === 0) {
         return fail(shape)
       }
-      const burst = frames.map(frame =>
-        frame.map(each =>
-          isInputStep(each)
-            ? each
-            : fail(`burst takes only ${inputKinds.join(', ')} steps`),
-        ),
-      )
       const stall = value['stall']
       if (stall === undefined) {
-        return { burst }
+        return { burst: frames }
       }
-      return number(stall, 'stall') > 0 && number(stall, 'stall') <= 10_000
-        ? { burst, stall: number(stall, 'stall') }
+      const milliseconds = number(stall, 'stall')
+      return milliseconds > 0 && milliseconds <= 10_000
+        ? { burst: frames, stall: milliseconds }
         : fail('stall takes milliseconds from 1 to 10000')
     }
     case 'drag': {
@@ -347,6 +342,9 @@ export const parseStep = (value: unknown, index: number): Step => {
     }
   }
 }
+
+const parseInputStep = (value: unknown, index: number) =>
+  parseStep(value, index, inputKinds) as InputStep
 
 export const parseSteps = (json: string): ReadonlyArray<Step> => {
   const value: unknown = JSON.parse(json)

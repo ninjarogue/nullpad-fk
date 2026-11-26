@@ -24,7 +24,7 @@ export type OracleRow = Readonly<{
   clipboard?: string
   checkpoints: ReadonlyArray<Checkpoint>
   selectionUnchecked: boolean
-  differs?: VimDifference
+  differs?: VimDifference | undefined
 }>
 
 type State = Readonly<{
@@ -47,7 +47,7 @@ type Plain = Readonly<{
   after: string
   line: number
   column: number
-  differs?: VimDifference
+  differs?: VimDifference | undefined
 }>
 
 const plain = (
@@ -64,7 +64,7 @@ const plain = (
     checkpoint(row.keys, { ...row, text: row.after, mode: 'NORMAL' }),
   ],
   selectionUnchecked: false,
-  ...(row.differs === undefined ? {} : { differs: row.differs }),
+  differs: row.differs,
 })
 
 const grouped = <R>(
@@ -120,7 +120,7 @@ export const oracleRows: ReadonlyArray<OracleRow> = [
         ...(afterP === null ? [] : [{ keys: 'P', text: afterP }]),
       ],
       selectionUnchecked: selection !== null,
-      ...(differs === undefined ? {} : { differs }),
+      differs,
     }),
   ),
   ...grouped(vimReplace.groups).map(([, row]): OracleRow => ({
@@ -130,7 +130,7 @@ export const oracleRows: ReadonlyArray<OracleRow> = [
     at: row.at,
     checkpoints: [checkpoint(row.keys, row)],
     selectionUnchecked: row.selection !== undefined,
-    ...(row.differs === undefined ? {} : { differs: row.differs }),
+    differs: row.differs,
   })),
   ...grouped(visualBlock.groups).map(([id, row]): OracleRow => ({
     spec: 'visual-block',
@@ -146,7 +146,7 @@ export const oracleRows: ReadonlyArray<OracleRow> = [
     selectionUnchecked:
       row.state.selection !== undefined ||
       row.readback?.state.selection !== undefined,
-    ...(row.differs === undefined ? {} : { differs: row.differs }),
+    differs: row.differs,
   })),
   ...visualBlockStay.stayRows.map((row, index): OracleRow => ({
     spec: 'visual-block-stay',
@@ -155,6 +155,6 @@ export const oracleRows: ReadonlyArray<OracleRow> = [
     at: row.at,
     checkpoints: [checkpoint(row.keys, row.state)],
     selectionUnchecked: false,
-    ...(row.differs === undefined ? {} : { differs: row.differs }),
+    differs: row.differs,
   })),
 ]

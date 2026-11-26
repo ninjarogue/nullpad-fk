@@ -66,8 +66,13 @@ const letterColumnOf = (line: string, byteColumn: number): number =>
       .toString(),
   ).length + 1
 
-const vimKeys = (keys: string): string =>
-  keys
+const vimKeys = (keys: string): string => {
+  if (keys.includes(`"${clipboardStandIn}`)) {
+    throw new Error(
+      `the keys ${keys} name register ${clipboardStandIn}, which stands in for the clipboard`,
+    )
+  }
+  return keys
     .replaceAll(/"[+*]/gu, `"${clipboardStandIn}`)
     .split(namedKey)
     .map(part =>
@@ -76,6 +81,7 @@ const vimKeys = (keys: string): string =>
         : part.replaceAll('\\', '\\\\').replaceAll('"', '\\"'),
     )
     .join('')
+}
 
 const vimString = (value: string): string => `'${value.replaceAll("'", "''")}'`
 

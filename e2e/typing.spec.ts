@@ -974,23 +974,24 @@ test('Ctrl+Home in the frame after Backspace took out the last line shows the cu
     true,
     'known bug: the scroll Chrome reports after the note got shorter takes back the reveal of a key in the next frame',
   )
-  const lastLine = 'line 30'
   await nullpad.paste(numberedLines(30))
-  await nullpad.press('Control+End')
-  await nullpad.burst([
-    [{ press: 'Backspace', times: lastLine.length + 1 }],
-    [{ press: 'Control+Home' }],
-  ])
-  const screen = await nullpad.screen()
-  expect(screen.status, 'the cursor at the start of 29 lines').toEqual({
-    line: 1,
-    column: 1,
-    lineCount: 29,
-  })
-  expect(
-    { top: screen.rows[0]?.number, cursorOnScreen: screen.cursor?.inside },
-    'line 1 at the top with the cursor on it',
-  ).toEqual({ top: '1', cursorOnScreen: true })
+  for (const lineCount of [29, 28, 27]) {
+    const lastLine = `line ${lineCount + 1}`
+    await nullpad.press('Control+End')
+    await nullpad.burst([
+      [{ press: 'Backspace', times: lastLine.length + 1 }],
+      [{ press: 'Control+Home' }],
+    ])
+    const screen = await nullpad.screen()
+    expect(
+      screen.status,
+      `the cursor at the start of ${lineCount} lines`,
+    ).toEqual({ line: 1, column: 1, lineCount })
+    expect(
+      { top: screen.rows[0]?.number, cursorOnScreen: screen.cursor?.inside },
+      `line 1 at the top with the cursor on it, ${lineCount} lines`,
+    ).toEqual({ top: '1', cursorOnScreen: true })
+  }
 })
 
 test('a key sent with no gap after a big paste and Ctrl+Home is never lost', async ({

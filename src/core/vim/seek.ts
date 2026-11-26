@@ -2,7 +2,8 @@ import { Option, Result, Schema } from 'effect'
 
 import type * as Buffer from '../buffer'
 import { cellAt, cellCount, cellEnd, cellStart } from './cells'
-import type { Spot } from './motions'
+import type { Matcher } from './matcher'
+import type { LineEnd, Spot } from './motions'
 import * as Pattern from './pattern'
 import * as Search from './search'
 
@@ -48,13 +49,22 @@ export type Landing = Readonly<{
   reach: 'Inclusive' | 'Exclusive' | 'Linewise'
 }>
 
-export type Sought = Readonly<{
+export type Landed = Readonly<{
+  _tag: 'Landed'
   memory: Memory
-  landing: Option.Option<Landing>
   notice: Option.Option<string>
-  cursorOnFailure: Option.Option<Spot>
+  landing: Landing
+}>
+
+export type Failed = Readonly<{
+  _tag: 'Failed'
+  memory: Memory
+  notice: Option.Option<string>
+  cursor: Option.Option<Spot>
   resetsColumn: boolean
 }>
+
+export type Sought = Landed | Failed
 
 const cellMatching = (
   line: Buffer.Line,
@@ -132,39 +142,32 @@ const wrapNotice = (way: Way): string =>
     ? 'search hit BOTTOM, continuing at TOP'
     : 'search hit TOP, continuing at BOTTOM'
 
-const outcome = (memory: Memory, overrides: Partial<Sought> = {}): Sought => ({
-  memory,
-  landing: Option.none(),
-  notice: Option.none(),
-  cursorOnFailure: Option.none(),
-  resetsColumn: false,
-  ...overrides,
-})
+const landed = (
+  memory: Memory,
+  landing: Landing,
+  notice: Option.Option<string> = Option.none(),
+): Sought => ({ _tag: 'Landed', memory, notice, landing })
 
 const failed = (
   memory: Memory,
-  notice: string,
-  resetsColumn: boolean = true,
-): Sought => outcome(memory, { notice: Option.some(notice), resetsColumn })
+  notice: Option.Option<string>,
+  resetsColumn: boolean,
+  cursor: Option.Option<Spot> = Option.none(),
+): Sought => ({ _tag: 'Failed', memory, notice, cursor, resetsColumn })
 
-type Run = Readonly<{
-  buffer: Buffer.Buffer
-  from: Spot
-  memory: Memory
-  request: Searched
-  count: number
-  remembers: boolean
-  cursorOnFailure: Option.Option<Spot>
-  repeatsOnSpot: Option.Option<'Clamped' | 'Open'>
-}>
+const soughtFrom = (memory: Memory, landing: Option.Option<Landing>): Sought =>
+  Option.match(landing, {
+    onNone: () => failed(memory, Option.none(), false),
+    onSome: spot => landed(memory, spot),
+  })
 
 const spotAfterCheck = (
   buffer: Buffer.Buffer,
   { line, cell }: Spot,
-  how: 'Clamped' | 'Open',
+  lineEnd: LineEnd,
 ): Spot => {
   const row = buffer.lines[line]
-  return how === 'Clamped' && row !== undefined
+  return lineEnd === 'LastLetter' && row !== undefined
     ? { line, cell: Math.max(0, Math.min(cell, cellCount(row) - 1)) }
     : { line, cell }
 }
@@ -172,83 +175,45 @@ const spotAfterCheck = (
 const repeated = (
   buffer: Buffer.Buffer,
   from: Spot,
-  how: Option.Option<'Clamped' | 'Open'>,
+  lineEnd: LineEnd,
   count: number,
-  first: () => Option.Option<Search.Found>,
-  again: (count: number) => Option.Option<Search.Found>,
+  search: (count: number) => Option.Option<Search.Found>,
 ): Option.Option<Search.Found> =>
-  Option.flatMap(first(), found => {
-    const stuck = Option.exists(how, kind => {
-      const landed = spotAfterCheck(buffer, found.spot, kind)
-      return (
-        !found.wrapped &&
-        found.reach !== 'Linewise' &&
-        landed.line === from.line &&
-        landed.cell === from.cell
-      )
-    })
-    return stuck ? again(count + 1) : Option.some(found)
+  Option.flatMap(search(count), found => {
+    const spot = spotAfterCheck(buffer, found.spot, lineEnd)
+    const stuck =
+      !found.wrapped &&
+      found.reach !== 'Linewise' &&
+      spot.line === from.line &&
+      spot.cell === from.cell
+    return stuck ? search(count + 1) : Option.some(found)
   })
 
-const ranSearch = ({
-  buffer,
-  from,
-  memory,
-  request,
-  count,
-  remembers,
-  cursorOnFailure,
-  repeatsOnSpot,
-}: Run): Sought => {
-  const kept: Memory = remembers
-    ? { ...memory, search: Option.some(request) }
-    : memory
-  return Result.match(Pattern.compile(request.pattern), {
-    onFailure: notice => failed(kept, notice),
+const searching =
+  (buffer: Buffer.Buffer, from: Spot, { way, offset }: Searched) =>
+  (matcher: Matcher, count: number): Option.Option<Search.Found> =>
+    Search.find(buffer, from, matcher, way, count, offset)
+
+const ranSearch = (
+  kept: Memory,
+  request: Searched,
+  cursor: Option.Option<Spot>,
+  search: (matcher: Matcher) => Option.Option<Search.Found>,
+): Sought =>
+  Result.match(Pattern.compile(request.pattern), {
+    onFailure: notice => failed(kept, Option.some(notice), true),
     onSuccess: matcher =>
-      Option.match(
-        repeated(
-          buffer,
-          from,
-          repeatsOnSpot,
-          count,
-          () =>
-            Search.find(
-              buffer,
-              from,
-              matcher,
-              request.way,
-              count,
-              request.offset,
-            ),
-          extra =>
-            Search.find(
-              buffer,
-              from,
-              matcher,
-              request.way,
-              extra,
-              request.offset,
-            ),
-        ),
-        {
-          onNone: () =>
-            outcome(kept, {
-              notice: Option.some(notFound(request.pattern)),
-              cursorOnFailure,
-              resetsColumn: true,
-            }),
-          onSome: ({ spot, reach, wrapped }) =>
-            outcome(kept, {
-              landing: Option.some({ spot, reach }),
-              notice: wrapped
-                ? Option.some(wrapNotice(request.way))
-                : Option.none(),
-            }),
-        },
-      ),
+      Option.match(search(matcher), {
+        onNone: () =>
+          failed(kept, Option.some(notFound(request.pattern)), true, cursor),
+        onSome: ({ spot, reach, wrapped }) =>
+          landed(
+            kept,
+            { spot, reach },
+            wrapped ? Option.some(wrapNotice(request.way)) : Option.none(),
+          ),
+      }),
   })
-}
 
 const requestFrom = (
   text: string,
@@ -288,71 +253,70 @@ export const sought = (
   seek: Seek,
   count: number | undefined,
   memory: Memory,
-  clamps: boolean,
-): Sought =>
-  Seek.match(seek, {
+  lineEnd: LineEnd,
+): Sought => {
+  const times = count ?? 1
+  return Seek.match(seek, {
     Find: ({ way, till, letter }): Sought => {
       const find = { way, till, letter }
-      return outcome(
+      return soughtFrom(
         { ...memory, find: Option.some(find) },
-        { landing: landingOf(buffer, from, find, count ?? 1, false) },
+        landingOf(buffer, from, find, times, false),
       )
     },
     Again: ({ reverse }): Sought =>
-      outcome(memory, {
-        landing: Option.flatMap(memory.find, last =>
+      soughtFrom(
+        memory,
+        Option.flatMap(memory.find, last =>
           landingOf(
             buffer,
             from,
             reversed(last, reverse),
-            count ?? 1,
-            last.till && (count ?? 1) === 1,
+            times,
+            last.till && times === 1,
           ),
         ),
-      }),
+      ),
     Search: ({ way, text }): Sought =>
       Result.match(requestFrom(text, way, memory.search), {
-        onFailure: notice => failed(memory, notice),
-        onSuccess: request =>
-          ranSearch({
-            buffer,
-            from,
-            memory,
+        onFailure: notice => failed(memory, Option.some(notice), true),
+        onSuccess: request => {
+          const probe = searching(buffer, from, request)
+          return ranSearch(
+            { ...memory, search: Option.some(request) },
             request,
-            count: count ?? 1,
-            remembers: true,
-            cursorOnFailure: Option.none(),
-            repeatsOnSpot: Option.none(),
-          }),
+            Option.none(),
+            matcher => probe(matcher, times),
+          )
+        },
       }),
     Next: ({ reverse }): Sought =>
       Option.match(memory.search, {
-        onNone: () => failed(memory, Pattern.noPrevious),
-        onSome: last =>
-          ranSearch({
-            buffer,
-            from,
-            memory,
-            request: reverse ? { ...last, way: flipped(last.way) } : last,
-            count: count ?? 1,
-            remembers: false,
-            cursorOnFailure: Option.none(),
-            repeatsOnSpot: Option.some(clamps ? 'Clamped' : 'Open'),
-          }),
+        onNone: () => failed(memory, Option.some(Pattern.noPrevious), true),
+        onSome: last => {
+          const request = reverse ? { ...last, way: flipped(last.way) } : last
+          const probe = searching(buffer, from, request)
+          return ranSearch(memory, request, Option.none(), matcher =>
+            repeated(buffer, from, lineEnd, times, extra =>
+              probe(matcher, extra),
+            ),
+          )
+        },
       }),
     Word: ({ way }): Sought =>
       Option.match(Search.wordUnder(buffer, from), {
-        onNone: () => failed(memory, 'E348: No string under cursor', false),
-        onSome: ({ start, pattern }) =>
-          ranSearch({
-            buffer,
-            from: start,
-            memory,
-            request: { pattern, offset: Search.noOffset, way },
-            count: count ?? 1,
-            remembers: true,
-            cursorOnFailure: Option.some(start),
-            repeatsOnSpot: Option.none(),
-          }),
+        onNone: () =>
+          failed(memory, Option.some('E348: No string under cursor'), false),
+        onSome: ({ start, pattern }) => {
+          const request = { pattern, offset: Search.noOffset, way }
+          const probe = searching(buffer, start, request)
+          return ranSearch(
+            { ...memory, search: Option.some(request) },
+            request,
+            Option.some(start),
+            matcher => probe(matcher, times),
+          )
+        },
       }),
   })
+}

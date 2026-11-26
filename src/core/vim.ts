@@ -1,4 +1,4 @@
-import { Array, Option, Schema } from 'effect'
+import { Array, Match, Option, Schema } from 'effect'
 
 import * as Buffer from './buffer'
 import * as History from './history'
@@ -809,6 +809,21 @@ const blockRules: Readonly<
 const keepsItsCount = ({ _tag }: Keymap.Command): boolean =>
   _tag === 'InsertAsSelected' || _tag === 'InsertInBlock'
 
+const soughtStep = (
+  unchanged: Step,
+  kept: Kept,
+  cleared: Vim,
+  sought: Seek.Sought,
+): Step => ({
+  ...unchanged,
+  vim:
+    sought._tag === 'Failed' && sought.resetsColumn
+      ? { ...cleared, want: 'Unset' }
+      : cleared,
+  kept: { ...kept, seek: sought.memory },
+  notice: sought.notice,
+})
+
 const opening = (unchanged: Step, vim: Vim, resume: Resume): Step => ({
   ...unchanged,
   vim,
@@ -884,53 +899,56 @@ const run = (
     OpenSearch: ({ way, operator }) =>
       opening(unchanged, vim, { way, operator, count, register }),
     Seek: ({ seek }) => {
-      const { memory, landing, notice, cursorOnFailure, resetsColumn } =
-        Seek.sought(buffer, spotOf(buffer), seek, count, kept.seek, true)
-      const remembered: Step = {
-        ...unchanged,
-        vim: resetsColumn ? { ...cleared, want: 'Unset' } : cleared,
-        kept: { ...kept, seek: memory },
-        notice,
-      }
-      return Option.match(landing, {
-        onNone: () =>
-          Option.match(cursorOnFailure, {
-            onNone: () => remembered,
-            onSome: spot => ({
-              ...remembered,
-              buffer: Buffer.moveTo(buffer, positionOf(buffer, spot)),
-            }),
+      const sought = Seek.sought(
+        buffer,
+        spotOf(buffer),
+        seek,
+        count,
+        kept.seek,
+        'LastLetter',
+      )
+      const remembered = soughtStep(unchanged, kept, cleared, sought)
+      return Match.value(sought).pipe(
+        Match.tagsExhaustive({
+          Landed: ({ landing }): Step => ({
+            ...remembered,
+            vim: normal,
+            buffer: Buffer.moveTo(buffer, positionOf(buffer, landing.spot)),
           }),
-        onSome: ({ spot }): Step => ({
-          ...remembered,
-          vim: normal,
-          buffer: Buffer.moveTo(buffer, positionOf(buffer, spot)),
+          Failed: ({ cursor }): Step =>
+            Option.match(cursor, {
+              onNone: () => remembered,
+              onSome: spot => ({
+                ...remembered,
+                buffer: Buffer.moveTo(buffer, positionOf(buffer, spot)),
+              }),
+            }),
         }),
-      })
+      )
     },
     OperateSeek: ({ operator, seek }) => {
       const from = spotOf(buffer)
-      const { memory, landing, notice, resetsColumn } = Seek.sought(
+      const sought = Seek.sought(
         buffer,
         from,
         seek,
         count,
         kept.seek,
-        true,
+        'LastLetter',
       )
-      const step = Option.match(landing, {
-        onNone: (): Step =>
-          resetsColumn
-            ? { ...unchanged, vim: { ...cleared, want: 'Unset' } }
-            : unchanged,
-        onSome: found =>
-          operated(
-            operator,
-            'Selection',
-            rangeToLanding(operator, buffer, from, found),
-          ),
-      })
-      return { ...step, kept: { ...step.kept, seek: memory }, notice }
+      if (sought._tag === 'Failed') {
+        return soughtStep(unchanged, kept, cleared, sought)
+      }
+      const step = operated(
+        operator,
+        'Selection',
+        rangeToLanding(operator, buffer, from, sought.landing),
+      )
+      return {
+        ...step,
+        kept: { ...step.kept, seek: sought.memory },
+        notice: sought.notice,
+      }
     },
     Operate: ({ operator, target }) =>
       Option.match(
@@ -1425,14 +1443,15 @@ const runVisual = (
         register,
       }),
     Seek: ({ seek }): Step => {
-      const { memory, landing, notice, cursorOnFailure, resetsColumn } =
-        Seek.sought(buffer, ends.cursor, seek, count, kept.seek, false)
-      const remembered: Step = {
-        ...unchanged,
-        vim: resetsColumn ? { ...cleared, want: 'Unset' } : cleared,
-        kept: { ...kept, seek: memory },
-        notice,
-      }
+      const sought = Seek.sought(
+        buffer,
+        ends.cursor,
+        seek,
+        count,
+        kept.seek,
+        'LineBreak',
+      )
+      const remembered = soughtStep(unchanged, kept, cleared, sought)
       const moved = (spot: Spot): Step => {
         const caret = positionOf(buffer, spot)
         return {
@@ -1445,14 +1464,16 @@ const runVisual = (
           buffer: Buffer.moveTo(buffer, caret),
         }
       }
-      return Option.match(landing, {
-        onNone: () =>
-          Option.match(cursorOnFailure, {
-            onNone: () => remembered,
-            onSome: moved,
-          }),
-        onSome: ({ spot }) => moved(spot),
-      })
+      return Match.value(sought).pipe(
+        Match.tagsExhaustive({
+          Landed: ({ landing }) => moved(landing.spot),
+          Failed: ({ cursor }) =>
+            Option.match(cursor, {
+              onNone: () => remembered,
+              onSome: moved,
+            }),
+        }),
+      )
     },
     Pick: ({ object }): Step => {
       const picked = objects[object].pick(buffer, ends, count ?? 1)

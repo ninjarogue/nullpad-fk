@@ -43,6 +43,24 @@ test('a cancelled IME composition leaves the text as it was', async ({
   expect(await nullpad.text(), 'typing works after a cancel').toBe('abc')
 })
 
+test('a composition an IME ends by committing no text leaves the text as it was, and the next key runs', async ({
+  nullpad,
+}) => {
+  await nullpad.type('ab')
+  await nullpad.compose('かな')
+  await nullpad.commit('')
+  await nullpad.type('c')
+  expect(await nullpad.text(), 'typing works after an empty commit').toBe('abc')
+  await nullpad.press('Control+,')
+  await nullpad.press('Home')
+  await nullpad.compose('か')
+  await nullpad.commit('')
+  expect(await nullpad.text(), 'IME text in NORMAL changes nothing').toBe('abc')
+  await nullpad.type('x')
+  expect(await nullpad.text(), 'x in NORMAL deletes the letter').toBe('bc')
+  expect(await nullpad.status()).toEqual({ line: 1, column: 1, lineCount: 1 })
+})
+
 test('an IME composition at the start of a line and on an empty line commits in place', async ({
   nullpad,
 }) => {

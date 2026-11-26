@@ -2447,7 +2447,7 @@ test('keys that are not built do nothing and stay in VISUAL', async ({
     selection: 'el',
   }
   await expectState(nullpad, 'vl', selected)
-  for (const key of ['J', '~', 'u', 'U', 'r', '>', '<', '=', ':', '/']) {
+  for (const key of ['J', '~', 'u', 'U', '>', '<', '=', ':', '/']) {
     await nullpad.page.keyboard.press(key)
     await settle(nullpad.page)
     await expectState(nullpad, `the key ${key}`, selected)

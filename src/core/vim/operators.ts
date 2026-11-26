@@ -1389,32 +1389,56 @@ const filled = (letter: string, columns: number, isShort: boolean): string =>
       (columns % 2 === 1 && !isShort ? ' ' : '')
     : letter.repeat(columns)
 
+const isTouched = (cut: Cut): boolean => cut.reaches && cut.end > cut.start
+
+const splitsOf = (
+  block: Block,
+  cuts: ReadonlyArray<Cut>,
+): ReadonlyArray<Buffer.Split> => {
+  const splits: Array<Buffer.Split> = []
+  cuts.forEach((cut, index) => {
+    if (isTouched(cut)) {
+      splits.push({
+        line: block.first + index,
+        from: cut.start,
+        to: cut.end,
+        head: ' '.repeat(cut.left?.outside ?? 0),
+        tail: '',
+      })
+    }
+  })
+  return splits
+}
+
+export const lineAfterSplits = (
+  buffer: Buffer.Buffer,
+  block: Block,
+  line: number,
+): number =>
+  Array.reduce(
+    splitsOf(block, cutsOf(buffer, block)),
+    line,
+    (moved, split, index) =>
+      moved >= split.line + index + 2 ? moved + 1 : moved,
+  )
+
 export const blockReplaced = (
   buffer: Buffer.Buffer,
   block: Block,
   letter: string,
 ): Buffer.Buffer => {
   const cuts = cutsOf(buffer, block)
-  const touched = (cut: Cut): boolean => cut.reaches && cut.end > cut.start
   if (letter === '\n') {
-    const splits: Array<Buffer.Split> = []
-    cuts.forEach((cut, index) => {
-      if (touched(cut)) {
-        splits.push({
-          line: block.first + index,
-          from: cut.start,
-          to: cut.end,
-          head: ' '.repeat(cut.left?.outside ?? 0),
-          tail: '',
-        })
-      }
-    })
-    return Buffer.split(buffer, splits)
+    const splits = splitsOf(block, cuts)
+    const split = Buffer.split(buffer, splits)
+    return splits[0] === undefined || splits[0].line === block.first
+      ? split
+      : Buffer.rewrite(split, [{ line: block.first, from: 0, to: 0, text: '' }])
   }
   const rewrites: Array<Buffer.Rewrite> = []
   const added: Array<number> = []
   cuts.forEach((cut, index) => {
-    if (touched(cut)) {
+    if (isTouched(cut)) {
       const text =
         ' '.repeat(cut.left?.outside ?? 0) +
         filled(letter, block.right - block.left + 1 - cut.pad, cut.ends) +

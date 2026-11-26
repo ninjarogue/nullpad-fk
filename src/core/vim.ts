@@ -741,6 +741,30 @@ export const putClipboard = (
       }
 }
 
+const lastAfterSplits = (
+  last: Option.Option<Last>,
+  buffer: Buffer.Buffer,
+  after: Buffer.Buffer,
+  block: Selection.Block,
+): Option.Option<Last> => {
+  const moved = (mark: Selection.Mark): Selection.Mark => {
+    const at = Selection.marked(buffer, mark, 'Nowhere')
+    if (at === undefined) {
+      return mark
+    }
+    const position = {
+      line: Operators.lineAfterSplits(buffer, block, at.line),
+      column: at.column,
+    }
+    return Selection.markAt(after, after, position, position)
+  }
+  return Option.map(last, kept => ({
+    ...kept,
+    anchor: moved(kept.anchor),
+    cursor: moved(kept.cursor),
+  }))
+}
+
 const startOf = (buffer: Buffer.Buffer, range: Range): Buffer.Position =>
   byKind(range, {
     Charwise: () => positionOf(buffer, range.from),
@@ -920,10 +944,12 @@ const run = (
     },
     ReplaceAmount: ({ letter, amount }) => {
       const range = Selection.rangeFrom(buffer, spotOf(buffer), amount)
-      const start = startOf(buffer, range)
       return replacedStep(
-        Buffer.moveTo(Operators.replaced(buffer, range, letter), start),
-        start,
+        Buffer.moveTo(
+          Operators.replaced(buffer, range, letter),
+          startOf(buffer, range),
+        ),
+        positionOf(buffer, range.from),
       )
     },
     ReplaceBlock: ({ letter, amount }) => {
@@ -934,10 +960,17 @@ const run = (
         vim.want,
       )
       const home = Operators.homeOf(buffer, block)
-      return replacedStep(
-        Buffer.moveTo(Operators.blockReplaced(buffer, block, letter), home),
-        home,
-      )
+      const after = Operators.blockReplaced(buffer, block, letter)
+      const step = replacedStep(Buffer.moveTo(after, home), home)
+      return letter === '\n'
+        ? {
+            ...step,
+            vim: {
+              ...step.vim,
+              last: lastAfterSplits(vim.last, buffer, after, block),
+            },
+          }
+        : step
     },
     Put: ({ side }) => {
       const source = Operators.registerFor(kept.registers, register)
@@ -1376,20 +1409,15 @@ const runVisual = (
       const replacedOver = (
         after: Buffer.Buffer,
         start: Buffer.Position,
+        began: Buffer.Position,
         command: Keymap.Command,
-        keepsCells: boolean,
+        moved: (mark: Buffer.Position) => Buffer.Position,
       ): Step => {
-        const sameCell = (mark: Buffer.Position): Buffer.Position =>
-          positionOf(after, spotAt(buffer, mark, 'LineBreak'))
         const normal: Vim = {
-          ...leaveVisual(vim, buffer, after, marks =>
-            keepsCells
-              ? {
-                  anchor: sameCell(marks.anchor),
-                  cursor: sameCell(marks.cursor),
-                }
-              : marks,
-          ),
+          ...leaveVisual(vim, buffer, after, marks => ({
+            anchor: moved(marks.anchor),
+            cursor: moved(marks.cursor),
+          })),
           want: 'Unset',
         }
         return {
@@ -1405,19 +1433,25 @@ const runVisual = (
             }),
           },
           fate: done,
-          began: Option.some(start),
+          began: Option.some(began),
           clipboard: Option.none(),
         }
       }
+      const sameCell =
+        (after: Buffer.Buffer) =>
+        (mark: Buffer.Position): Buffer.Position =>
+          positionOf(after, spotAt(buffer, mark, 'LineBreak'))
       return Selection.byShape(ends, {
         Stretch: (stretch): Step => {
           if (letter === '\n') {
             return unchanged
           }
           const range = Selection.rangeOf(buffer, stretch, 'AsSelected')
+          const after = Operators.replaced(buffer, range, letter)
           return replacedOver(
-            Operators.replaced(buffer, range, letter),
+            after,
             startOf(buffer, range),
+            positionOf(buffer, range.from),
             Keymap.Command.cases.ReplaceAmount.make({
               letter,
               amount: Selection.amountOf(
@@ -1427,19 +1461,27 @@ const runVisual = (
                 vim.want,
               ),
             }),
-            true,
+            sameCell(after),
           )
         },
         Block: (corners): Step => {
           const block = Selection.blockOf(buffer, corners, vim.want === 'End')
+          const home = Operators.homeOf(buffer, block)
+          const after = Operators.blockReplaced(buffer, block, letter)
           return replacedOver(
-            Operators.blockReplaced(buffer, block, letter),
-            Operators.homeOf(buffer, block),
+            after,
+            home,
+            home,
             Keymap.Command.cases.ReplaceBlock.make({
               letter,
               amount: Selection.blockAmountOf(block),
             }),
-            letter !== '\n',
+            letter === '\n'
+              ? mark => ({
+                  ...mark,
+                  line: Operators.lineAfterSplits(buffer, block, mark.line),
+                })
+              : sameCell(after),
           )
         },
       })

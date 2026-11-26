@@ -128,12 +128,11 @@ const keys: Readonly<
   PageDown: stay,
 }
 
-const chord = (prompt: Prompt, char: string): Outcome =>
-  char.toLowerCase() === 'u'
-    ? erase(prompt, -prompt.line.caret, 0)
-    : char.toLowerCase() === 'c' || char === '['
-      ? closed(prompt)
-      : stay(prompt)
+const chords: Readonly<Record<string, (prompt: Prompt) => Outcome>> = {
+  u: prompt => erase(prompt, -prompt.line.caret, 0),
+  c: closed,
+  '[': closed,
+}
 
 export const feed = (
   prompt: Prompt,
@@ -143,7 +142,9 @@ export const feed = (
   Input.match(input, {
     Key: ({ key }) => keys[key](prompt, history),
     Chord: ({ char, modifiers }) =>
-      isControlAlone(modifiers) ? chord(prompt, char) : stay(prompt),
+      isControlAlone(modifiers)
+        ? (chords[char.toLowerCase()] ?? stay)(prompt)
+        : stay(prompt),
     Text: ({ text }) => typeText(prompt, text),
     Paste: ({ text }) => typeText(prompt, text),
     Commit: ({ text }) =>

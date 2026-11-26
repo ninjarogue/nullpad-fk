@@ -820,19 +820,16 @@ const promptPlan = (editor: Editor, asking: Asking, input: Input): Plan => {
           ...editor,
           prompt: Option.none(),
           kept: remembering(),
-          vim: Option.map(editor.vim, Vim.abandoned),
+          vim: Option.map(editor.vim, Vim.idle),
         },
         'None',
       ),
     Run: () => {
       const kept = remembering()
       const closed = { ...editor, prompt: Option.none(), kept }
-      return Option.match(editor.vim, {
-        onNone: () => now(closed, 'None'),
-        onSome: vim =>
-          vimPlan(
-            closed,
-            vim,
+      return Option.match(
+        Option.flatMap(editor.vim, vim =>
+          Option.map(
             Vim.searched(
               vim,
               editor.buffer,
@@ -840,9 +837,15 @@ const promptPlan = (editor: Editor, asking: Asking, input: Input): Plan => {
               asking.resume,
               prompt.line.text,
             ),
-            0,
+            step => ({ vim, step }),
           ),
-      })
+        ),
+        {
+          onNone: () =>
+            now({ ...closed, vim: Option.map(editor.vim, Vim.idle) }, 'None'),
+          onSome: ({ vim, step }) => vimPlan(closed, vim, step, 0),
+        },
+      )
     },
   })
 }

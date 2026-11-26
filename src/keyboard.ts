@@ -71,13 +71,20 @@ const modifiersOf = (event: KeyboardEvent): Modifiers => ({
   shift: event.shiftKey,
 })
 
-const takesReload = (event: KeyboardEvent, chords: string): boolean =>
-  chords === 'vim' &&
-  event.key === 'r' &&
+const isControlAlone = (event: KeyboardEvent, key: string): boolean =>
+  event.key.toLowerCase() === key &&
   event.ctrlKey &&
   !event.shiftKey &&
   !event.altKey &&
   !event.metaKey
+
+const takesReload = (event: KeyboardEvent, chords: string): boolean =>
+  chords === 'vim' && isControlAlone(event, 'r')
+
+const controlVPastes = !/Mac|iPhone|iPad/u.test(navigator.platform)
+
+const isControlVWithNoPaste = (event: KeyboardEvent): boolean =>
+  !controlVPastes && isControlAlone(event, 'v')
 
 /** Windows reports AltGr as Ctrl+Alt, so a character typed with both arrives as text. */
 const fromKeyDown = (
@@ -103,7 +110,9 @@ const fromKeyDown = (
   const isChord =
     isOneCodePoint(key) && (event.ctrlKey || event.metaKey) && !isAltGraph
   return isChord &&
-    (!browserChords.has(key.toLowerCase()) || takesReload(event, chords))
+    (!browserChords.has(key.toLowerCase()) ||
+      takesReload(event, chords) ||
+      isControlVWithNoPaste(event))
     ? Option.some(
         Input.cases.Chord.make({ char: key, modifiers: modifiersOf(event) }),
       )
@@ -214,10 +223,12 @@ const listen = (
           }
           const state: {
             lastKey: Option.Option<string>
+            isControlVDown: boolean
             selection: Span
             composition: Option.Option<Span>
           } = {
             lastKey: Option.none(),
+            isControlVDown: false,
             selection: { start: 0, end: 0 },
             composition: Option.none(),
           }
@@ -253,6 +264,7 @@ const listen = (
             'keydown',
             event => {
               state.lastKey = Option.some(event.key)
+              state.isControlVDown = isControlAlone(event, 'v')
               Option.map(
                 fromKeyDown(event, port.dataset['chords'] ?? ''),
                 input => {
@@ -341,14 +353,23 @@ const listen = (
             { signal },
           )
           port.addEventListener(
+            'keyup',
+            () => {
+              state.isControlVDown = false
+            },
+            { signal },
+          )
+          port.addEventListener(
             'paste',
             event => {
               event.preventDefault()
               offerInput(
                 Input.cases.Paste.make({
                   text: event.clipboardData?.getData('text/plain') ?? '',
+                  byKey: state.isControlVDown,
                 }),
               )
+              state.isControlVDown = false
             },
             { signal },
           )

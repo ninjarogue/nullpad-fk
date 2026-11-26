@@ -261,7 +261,7 @@ test('a line of exactly 76 cells, a tab and the pieces Backspace joined, stays o
   const pieces = [
     '\tn',
     'otes: the quick brown fox j',
-    'umps over the lazy dog while the cat watches',
+    'umps over the lazy dog as the cats watch',
   ]
   await nullpad.paste(pieces.join('\n'))
   await nullpad.press('Home')

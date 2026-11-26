@@ -241,7 +241,7 @@
     "expect": {
       "text": "one two\nthree\na---b\ncd\noXYne two\nfour",
       "status": "3:4 6L",
-      "notice": "clipboard blocked, use Ctrl-V",
+      "notice": "clipboard blocked, use Ctrl-Shift-V",
       "pending": "",
       "mode": "NORMAL"
     }
@@ -263,7 +263,7 @@
   },
   {
     "expect": {
-      "notice": "clipboard blocked, use Ctrl-V",
+      "notice": "clipboard blocked, use Ctrl-Shift-V",
       "clipboard": "-",
       "status": "3:1 6L"
     }
@@ -356,7 +356,7 @@
       "text": "oXxne two\na---ba---b\ncd\noXYne two\nfour",
       "status": "2:1 5L",
       "pending": "",
-      "notice": "clipboard blocked, use Ctrl-V"
+      "notice": "clipboard blocked, use Ctrl-Shift-V"
     }
   },
   {
@@ -435,7 +435,7 @@
   {
     "expect": {
       "mode": "READ",
-      "notice": "clipboard blocked, use Ctrl-V"
+      "notice": "clipboard blocked, use Ctrl-Shift-V"
     }
   },
   {

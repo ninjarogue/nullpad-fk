@@ -2361,7 +2361,7 @@ test('the read view closes the selection, and coming back is NORMAL', async ({
   expect(await nullpad.text(), 'the text is whole').toBe('one two\nthree four')
 })
 
-test('a paste in VISUAL replaces the selection and lands in NORMAL as one change', async ({
+test('a paste in VISUAL, by Ctrl-Shift-V, replaces the selection and lands in NORMAL as one change', async ({
   nullpad,
 }) => {
   await begin(nullpad, 'one two three')
@@ -2384,14 +2384,26 @@ test('a paste in VISUAL replaces the selection and lands in NORMAL as one change
   expect(await nullpad.text(), 'the editor still works').toBe('one  three')
 })
 
-test('Ctrl-V in NORMAL still pastes', async ({ nullpad }) => {
+test('Ctrl-V in NORMAL starts V-BLOCK and pastes nothing, and Ctrl-Shift-V pastes', async ({
+  nullpad,
+}) => {
   await begin(nullpad, 'abc\ndef')
   await nullpad.paste('PP')
   expect(
     await nullpad.text(),
-    'Ctrl-V in NORMAL pastes the clipboard text',
+    'Ctrl-Shift-V in NORMAL pastes the clipboard text',
   ).toBe('PPabc\ndef')
-  expect(await modeOf(nullpad), 'still NORMAL after Ctrl-V').toBe('NORMAL')
+  expect(await modeOf(nullpad), 'still NORMAL after the paste').toBe('NORMAL')
+  await nullpad.press('Control+v')
+  expect(
+    await nullpad.text(),
+    'Ctrl-V in NORMAL leaves the text, with PP still on the clipboard',
+  ).toBe('PPabc\ndef')
+  expect(await modeOf(nullpad), 'Ctrl-V in NORMAL starts V-BLOCK').toBe(
+    'V-BLOCK',
+  )
+  await nullpad.press('Control+v')
+  expect(await modeOf(nullpad), 'a second Ctrl-V leaves it').toBe('NORMAL')
   await play(nullpad, 'gg0v<Esc>')
   await nullpad.paste('Q')
   expect(await nullpad.text(), 'and after a v and Esc').toBe('QPPabc\ndef')
@@ -2824,6 +2836,26 @@ test('Ctrl-C leaves VISUAL as in Vim', async ({ nullpad }) => {
     await nullpad.status(),
     'the cursor stays on its letter',
   ).toMatchObject({ line: 1, column: 5 })
+})
+
+test('P of whole lines over a selection on an emptied note leaves no empty last line, as in Vim', async ({
+  nullpad,
+}) => {
+  await begin(nullpad, 'a\nb')
+  await play(nullpad, 'dGvP')
+  expect(
+    await nullpad.text(),
+    'dG then vP: the lines go under the empty line, and nothing follows them',
+  ).toBe('\na\nb')
+  await play(nullpad, 'u')
+  expect(await nullpad.text(), 'u empties the note again').toBe('')
+  await nullpad.press('Control+v')
+  await play(nullpad, 'P')
+  expect(
+    await nullpad.text(),
+    'Ctrl-V then P: the lines replace the empty line',
+  ).toBe('a\nb')
+  expect(await modeOf(nullpad), 'the put lands in NORMAL').toBe('NORMAL')
 })
 
 for (const scale of [1.25, 1.75]) {

@@ -14,6 +14,7 @@ export const Mode = Schema.Literals([
   'Insert',
   'Visual',
   'VisualLine',
+  'VisualBlock',
 ])
 export type Mode = typeof Mode.Type
 
@@ -113,12 +114,7 @@ export type PaintedLine = Readonly<{
   parts: ReadonlyArray<Part>
 }>
 
-export type Selection = Readonly<{
-  kind: 'Letters' | 'Lines'
-  from: Buffer.Position
-  to: Buffer.Position
-  lineBreak: boolean
-}>
+export type Selection = Vim.Shown
 
 export type Frame = Readonly<{
   lines: ReadonlyArray<PaintedLine>
@@ -182,6 +178,9 @@ const rested = (editor: Editor): Editor => {
 export const isVimOn = (editor: Editor): boolean => Option.isSome(editor.vim)
 
 export const text = (editor: Editor): string => Buffer.toText(editor.buffer)
+
+export const isSavable = (editor: Editor): boolean =>
+  Buffer.textLength(editor.buffer) <= Buffer.mostUnitsInOneText
 
 const queuedToggles = (editor: Editor): number =>
   Option.match(editor.locating, {
@@ -318,6 +317,8 @@ type Settled = Readonly<{
   recordsItself: boolean
 }>
 
+type Landed = Pick<Settled, 'outcome' | 'began'>
+
 type Plan =
   | Settled
   | Readonly<{
@@ -327,7 +328,7 @@ type Plan =
     }>
   | Readonly<{
       _tag: 'ReadClipboard'
-      land: (text: Option.Option<string>) => Outcome
+      land: (text: Option.Option<string>) => Landed
     }>
 
 const now = (
@@ -692,7 +693,7 @@ const plainPlan = (editor: Editor, input: Input): Plan =>
     Commit: ({ text }) => now(insertText(text)({ ...editor, preedit: '' })),
   })
 
-const clipboardBlockedNotice = 'clipboard blocked, use Ctrl-V'
+const clipboardBlockedNotice = 'clipboard blocked, use Ctrl-Shift-V'
 
 const vimDone = (
   editor: Editor,
@@ -756,14 +757,17 @@ const vimPlan = (
     ReadClipboard: ({ put }): Plan => ({
       _tag: 'ReadClipboard',
       land: text => {
-        const { outcome } = vimDone(
+        const { outcome, began } = vimDone(
           editor,
           Vim.putClipboard(vim, editor.buffer, editor.kept, put, text),
           swallowed,
         )
-        return Option.isSome(text)
-          ? outcome
-          : { ...outcome, editor: clipboardBlocked(outcome.editor) }
+        return {
+          began,
+          outcome: Option.isSome(text)
+            ? outcome
+            : { ...outcome, editor: clipboardBlocked(outcome.editor) },
+        }
       },
     }),
     Done: () => vimDone(editor, step, swallowed),
@@ -899,16 +903,32 @@ const recorded = (
     : { ...outcome, editor: { ...after, history } }
 }
 
+const passedVim = (before: Editor, outcome: Outcome): Outcome => {
+  const after = outcome.editor
+  return Option.match(after.vim, {
+    onNone: () => outcome,
+    onSome: vim => {
+      const passed = Vim.passed(vim, before.buffer, after.buffer)
+      return passed === vim
+        ? outcome
+        : { ...outcome, editor: { ...after, vim: Option.some(passed) } }
+    },
+  })
+}
+
 const tracked = (
   before: Editor,
   queued: Queued,
   outcome: Outcome,
   began: Option.Option<Buffer.Position>,
 ): Outcome =>
-  recorded(before, outcome, {
-    ...groupingOf(before, outcome.editor, queued),
-    began,
-  })
+  passedVim(
+    before,
+    recorded(before, outcome, {
+      ...groupingOf(before, outcome.editor, queued),
+      began,
+    }),
+  )
 
 const planOf = (editor: Editor, queued: Queued): Plan => {
   const plan = planFor(editor, queued)
@@ -920,7 +940,10 @@ const planOf = (editor: Editor, queued: Queued): Plan => {
   if (plan._tag === 'ReadClipboard') {
     return {
       ...plan,
-      land: (text: Option.Option<string>) => landed(plan.land(text)),
+      land: (text: Option.Option<string>) => {
+        const { outcome, began } = plan.land(text)
+        return { outcome: tracked(editor, queued, outcome, began), began }
+      },
     }
   }
   return plan.recordsItself
@@ -1109,7 +1132,7 @@ export const clipboardRead = (
 ): Outcome =>
   answered(editor, ticket, plan =>
     plan._tag === 'ReadClipboard'
-      ? Option.some(plan.land(text))
+      ? Option.some(plan.land(text).outcome)
       : Option.none(),
   )
 
@@ -1249,7 +1272,9 @@ export const paint = (editor: Editor): Frame => {
       atRowEnd: editor.caretAtRowEnd,
       shape: isInInsert(editor) ? 'Bar' : 'Block',
     },
-    selection: Option.flatMap(editor.vim, vim => Vim.selection(vim, buffer)),
+    selection: Option.flatMap(editor.vim, vim =>
+      Vim.selection(vim, buffer, { first, last }),
+    ),
     surrounding: {
       text: (lines[caret.line]?.text ?? '').slice(
         near.from.column,

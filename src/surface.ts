@@ -9,6 +9,7 @@ import {
   type Mode,
   type PaintedLine,
   Query,
+  type Selection,
   graphemeReach,
 } from './core/editor'
 import type { Keyboard } from './keyboard'
@@ -764,19 +765,18 @@ const placeCaret = (
   })
 }
 
-type Selected = Readonly<{
-  firstLine: number
-  firstColumn: number
-  lastLine: number
-  endColumn: number
+type Covered = Readonly<{
+  from: number
+  to: number
   lineBreak: boolean
+  marksEmptyLine: boolean
 }>
 
-const selectedOf = (surface: HTMLElement): Option.Option<Selected> => {
-  const written = surface.dataset['selected'] ?? ''
-  if (written === '') {
-    return Option.none()
-  }
+type Selected = (index: number, length: number) => Option.Option<Covered>
+
+const blockMark = 'block:'
+
+const stretchOf = (written: string): Selected => {
   const [
     firstLine = 0,
     firstColumn = 0,
@@ -784,13 +784,40 @@ const selectedOf = (surface: HTMLElement): Option.Option<Selected> => {
     endColumn = 0,
     lineBreak,
   ] = Array.map(written.split(','), Number)
-  return Option.some({
-    firstLine,
-    firstColumn,
-    lastLine,
-    endColumn,
-    lineBreak: lineBreak === 1,
-  })
+  return (index, length) =>
+    index < firstLine || index > lastLine
+      ? Option.none()
+      : Option.some({
+          from: index === firstLine ? firstColumn : 0,
+          to: index === lastLine ? Math.min(endColumn, length) : length,
+          lineBreak: index < lastLine || lineBreak === 1,
+          marksEmptyLine: false,
+        })
+}
+
+const blockOf = (written: string): Selected => {
+  const spans = new Map(
+    Array.map(written.split(';'), span => {
+      const [line = 0, from = 0, to = 0] = Array.map(span.split(','), Number)
+      return [
+        line,
+        { from, to, lineBreak: false, marksEmptyLine: true },
+      ] as const
+    }),
+  )
+  return index => Option.fromUndefinedOr(spans.get(index))
+}
+
+const selectedOf = (surface: HTMLElement): Option.Option<Selected> => {
+  const written = surface.dataset['selected'] ?? ''
+  if (written === '') {
+    return Option.none()
+  }
+  return Option.some(
+    written.startsWith(blockMark)
+      ? blockOf(written.slice(blockMark.length))
+      : stretchOf(written),
+  )
 }
 
 type PlacedBox = Readonly<{
@@ -912,8 +939,9 @@ const selectionBoxes = (
     onSome: first => textEdges(first).left - first.getBoundingClientRect().left,
   })
   for (const line of lines) {
-    const index = indexOf(line)
-    if (index < selected.firstLine || index > selected.lastLine) {
+    const text = lineText(line)
+    const covered = Option.getOrUndefined(selected(indexOf(line), text.length))
+    if (covered === undefined) {
       continue
     }
     const box = line.getBoundingClientRect()
@@ -922,12 +950,7 @@ const selectionBoxes = (
     }
     const rowTop = (top: number): number =>
       box.top + Math.floor((top - box.top + row / 2) / row) * row
-    const text = lineText(line)
-    const from = index === selected.firstLine ? selected.firstColumn : 0
-    const to =
-      index === selected.lastLine
-        ? Math.min(selected.endColumn, text.length)
-        : text.length
+    const { from, to } = covered
     if (to > from) {
       const start = domPoint(line, from, 'After')
       const stop = domPoint(line, to)
@@ -950,8 +973,15 @@ const selectionBoxes = (
       for (const { left, right, top } of drawn) {
         boxes.push({ left, top, width: right - left, isLineBreak: false })
       }
+    } else if (covered.marksEmptyLine) {
+      boxes.push({
+        left: box.left + textLeft,
+        top: box.top,
+        width: 0,
+        isLineBreak: false,
+      })
     }
-    if (index < selected.lastLine || selected.lineBreak) {
+    if (covered.lineBreak) {
       const end = lineBreakBox(
         line,
         text,
@@ -1299,6 +1329,24 @@ export const SurfacePort = Mount.defineStream('SurfacePort', {
       : Stream.never,
 })
 
+const selectionKinds: Readonly<Record<Selection['kind'], string>> = {
+  Letters: 'letters',
+  Lines: 'lines',
+  Block: 'block',
+}
+
+const writtenSelection = (selection: Selection): string =>
+  selection.kind === 'Block'
+    ? blockMark +
+      Array.join(
+        Array.map(
+          selection.spans,
+          ({ line, from, to }) => `${line},${from},${to}`,
+        ),
+        ';',
+      )
+    : `${selection.from.line},${selection.from.column},${selection.to.line},${selection.to.column},${selection.lineBreak ? 1 : 0}`
+
 const lineView = (
   id: PaintedLine['id'],
   index: number,
@@ -1346,8 +1394,7 @@ export const surface = (
         'selected',
         Option.match(frame.selection, {
           onNone: () => '',
-          onSome: ({ from, to, lineBreak }) =>
-            `${from.line},${from.column},${to.line},${to.column},${lineBreak ? 1 : 0}`,
+          onSome: writtenSelection,
         }),
       ),
       h.OnMount(SurfacePort()),
@@ -1358,7 +1405,7 @@ export const surface = (
         onSome: ({ kind }) => [
           h.keyed('div')('selection', [
             h.Id('selection'),
-            h.DataAttribute('kind', kind === 'Lines' ? 'lines' : 'letters'),
+            h.DataAttribute('kind', selectionKinds[kind]),
             h.AriaHidden(true),
           ]),
         ],
@@ -1397,6 +1444,7 @@ const modeLabels: Readonly<Record<Mode, string>> = {
   Insert: 'INSERT',
   Visual: 'VISUAL',
   VisualLine: 'V-LINE',
+  VisualBlock: 'V-BLOCK',
 }
 
 export const statusLine = (

@@ -343,9 +343,16 @@ const removeBlank = (model: Model): UpdateReturn => {
   }
 }
 
+const notSaved = (model: Model): UpdateReturn => ({
+  model: modifyFields(model, { store: () => 'Unavailable' }),
+})
+
 const saveNow = (model: Model): UpdateReturn => {
   if (model.note.save._tag === 'Saving') {
     return { model }
+  }
+  if (!Editor.isSavable(model.editor)) {
+    return notSaved(model)
   }
   if (Editor.isBlank(model.editor)) {
     return removeBlank(model)
@@ -378,6 +385,9 @@ const saveIfDirty = (model: Model): UpdateReturn =>
 
 const leave = (model: Model): UpdateReturn => {
   const { id, save } = model.note
+  if (!Editor.isSavable(model.editor)) {
+    return notSaved(model)
+  }
   if (isDirty(model) && save._tag === 'Saving') {
     return {
       model: modifyFields(model, {
@@ -408,14 +418,16 @@ const backToEditor = (model: Model): Model =>
   modifyFields(model, { screen: () => Screen.cases.Edit.make({}) })
 
 const conflictCopy = (model: Model): UpdateReturn =>
-  saveNow(
-    show(
-      modifyFields(model, { created: Number.increment }),
-      { id: newNoteId(model), folder: model.note.folder, revision: 0 },
-      Notes.conflictCopy(Editor.text(model.editor)),
-      'Start',
-    ),
-  )
+  Editor.isSavable(model.editor)
+    ? saveNow(
+        show(
+          modifyFields(model, { created: Number.increment }),
+          { id: newNoteId(model), folder: model.note.folder, revision: 0 },
+          Notes.conflictCopy(Editor.text(model.editor)),
+          'Start',
+        ),
+      )
+    : notSaved(model)
 
 const openStored = (model: Model, id: Notes.NoteId): UpdateReturn =>
   id === model.note.id
@@ -1105,7 +1117,8 @@ const unsaved = ({
     Saving: ({ sentText }) => Option.some(sentText),
   })
   const open =
-    edits !== note.savedEdits || Option.isSome(maybeSentText)
+    (edits !== note.savedEdits || Option.isSome(maybeSentText)) &&
+    Editor.isSavable(editor)
       ? [
           {
             id: note.id,

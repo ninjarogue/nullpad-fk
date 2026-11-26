@@ -37,6 +37,11 @@ export type Range = Readonly<{
   inclusive: boolean
 }>
 
+export const byKind = <A>(
+  range: Range,
+  cases: Readonly<Record<Kind, () => A>>,
+): A => cases[range.kind]()
+
 export type Target = (
   buffer: Buffer.Buffer,
   from: Spot,
@@ -94,6 +99,7 @@ const reachOf: Readonly<Record<MotionName, Reach>> = {
   WordBackward: 'Exclusive',
   WordEnd: 'Inclusive',
   LineStart: 'Exclusive',
+  FirstColumn: 'Exclusive',
   FirstNonBlank: 'Exclusive',
   LineEnd: 'Inclusive',
   FirstLine: 'Linewise',
@@ -213,6 +219,7 @@ const targets: Readonly<Record<Exclude<TargetName, ObjectName>, Target>> = {
   WordBackward: wordBackward,
   WordEnd: toWordEnd(false),
   LineStart: ofMotion('LineStart'),
+  FirstColumn: ofMotion('FirstColumn'),
   FirstNonBlank: ofMotion('FirstNonBlank'),
   LineEnd: ofMotion('LineEnd'),
   FirstLine: ofMotion('FirstLine'),
@@ -229,12 +236,15 @@ const restIsBlank = (buffer: Buffer.Buffer, range: Range): boolean =>
   )
 
 const linewiseWhenBlankAround = (buffer: Buffer.Buffer, range: Range): Range =>
-  range.kind === 'Charwise' &&
-  range.to.line > range.from.line &&
-  restIsBlank(buffer, range) &&
-  inIndent(buffer, range.from, 0)
-    ? { ...range, kind: 'Linewise' }
-    : range
+  byKind(range, {
+    Charwise: () =>
+      range.to.line > range.from.line &&
+      restIsBlank(buffer, range) &&
+      inIndent(buffer, range.from, 0)
+        ? { ...range, kind: 'Linewise' }
+        : range,
+    Linewise: () => range,
+  })
 
 export const targetFor = (operator: OperatorName, name: TargetName): Target => {
   const target =

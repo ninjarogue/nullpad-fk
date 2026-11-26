@@ -130,6 +130,15 @@ export const toText = (buffer: Buffer): string =>
     '\n',
   )
 
+export const mostUnitsInOneText = 500_000_000
+
+export const textLength = (buffer: Buffer): number =>
+  Array.reduce(
+    buffer.lines,
+    buffer.lines.length - 1,
+    (units, line) => units + line.text.length,
+  )
+
 export const overwrite = (
   buffer: Buffer,
   { line, column }: Position,
@@ -252,6 +261,58 @@ export const spliceAll = (
     onEmpty: () => removeLines(buffer, 0, buffer.lines.length - 1),
     onNonEmpty: spliced => ({ ...buffer, lines: spliced }),
   })
+
+export type Rewrite = Readonly<{
+  line: number
+  from: number
+  to: number
+  text: string
+}>
+
+const rewritten = (line: Line, { from, to, text }: Rewrite): Line =>
+  makeLine(
+    line.id,
+    line.text.slice(0, from) + text + line.text.slice(to),
+    Array.map(
+      Array.filter(line.joins, join => join <= from || join >= to),
+      join =>
+        join < from
+          ? join
+          : join < to
+            ? from + text.length
+            : join - to + from + text.length,
+    ),
+  )
+
+export const rewrite = (
+  buffer: Buffer,
+  rewrites: ReadonlyArray<Rewrite>,
+  appended: ReadonlyArray<string> = [],
+): Buffer => {
+  if (rewrites.length === 0 && appended.length === 0) {
+    return buffer
+  }
+  const lines = [
+    ...buffer.lines,
+    ...Array.map(appended, (text, index) =>
+      makeLine(LineId.make(buffer.nextLineId + index), text, []),
+    ),
+  ]
+  for (const edit of rewrites) {
+    const line = lines[edit.line]
+    if (line !== undefined) {
+      lines[edit.line] = rewritten(line, edit)
+    }
+  }
+  return Array.match(lines, {
+    onEmpty: () => buffer,
+    onNonEmpty: all => ({
+      ...buffer,
+      lines: all,
+      nextLineId: buffer.nextLineId + appended.length,
+    }),
+  })
+}
 
 export const isBefore = (a: Position, b: Position): boolean =>
   a.line < b.line || (a.line === b.line && a.column < b.column)

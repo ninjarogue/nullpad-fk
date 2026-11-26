@@ -86,6 +86,7 @@ body {
   padding-left: calc(var(--gutter) * 1ch);
   white-space: pre-wrap;
   overflow-wrap: break-word;
+  tab-size: 8;
 }
 
 .line::before {

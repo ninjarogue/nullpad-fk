@@ -84,6 +84,8 @@ const tabStop = 8
 const widthAt = (text: string, screenColumn: number): number =>
   text === '\t' ? tabStop - (screenColumn % tabStop) : wide.test(text) ? 2 : 1
 
+export const widthOfLetter = (text: string): number => widthAt(text, 0)
+
 export const screenColumnOf = (line: Buffer.Line, cell: number): number => {
   let column = 0
   for (let index = 0; index < Math.min(cell, cellCount(line)); index += 1) {
@@ -122,6 +124,50 @@ export const cellAtScreenColumn = (
   }
   return cell
 }
+
+const oneColumnEach = /^[^\t\r\u{80}-\u{10FFFF}]*$/u
+
+const columnsByLine = new WeakMap<Buffer.Line, boolean>()
+
+const isOneColumnEach = (line: Buffer.Line): boolean => {
+  const known = columnsByLine.get(line)
+  if (known !== undefined) {
+    return known
+  }
+  const plain = oneColumnEach.test(line.text)
+  columnsByLine.set(line, plain)
+  return plain
+}
+
+export type Stop = Readonly<{ cell: number; column: number; stepped: number }>
+
+export const lineStart: Stop = { cell: 0, column: 0, stepped: 0 }
+
+export const stopAtScreenColumn = (
+  line: Buffer.Line,
+  wanted: number,
+  from: Stop = lineStart,
+): Stop => {
+  if (isOneColumnEach(line)) {
+    const cell = Math.max(from.cell, Math.min(wanted, line.text.length))
+    return {
+      cell,
+      column: cell,
+      stepped: cell > from.cell ? 1 : from.stepped,
+    }
+  }
+  const cells = cellCount(line)
+  let { cell, column, stepped } = from
+  while (column < wanted && cell < cells) {
+    stepped = widthAt(cellText(line, cell), column)
+    column += stepped
+    cell += 1
+  }
+  return { cell, column, stepped }
+}
+
+export const screenWidthOf = (line: Buffer.Line): number =>
+  stopAtScreenColumn(line, Number.POSITIVE_INFINITY).column
 
 export type Kind =
   | 'Blank'

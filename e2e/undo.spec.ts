@@ -1425,6 +1425,42 @@ test('Ctrl-R keydown is cancelled with vim on and left to the browser with vim o
   ).toBe(false)
 })
 
+test('with Caps Lock on, Ctrl-R redoes in NORMAL and its keydown is cancelled', async ({
+  nullpad,
+}) => {
+  await nullpad.type('abc')
+  await nullpad.page.keyboard.press(toggle)
+  await settle(nullpad.page)
+  await nullpad.press('u')
+  expect(await nullpad.text(), 'u took the typing back').toBe('')
+  const seen = await nullpad.page.evaluateHandle(() => {
+    const box: { cancelled: boolean | null } = { cancelled: null }
+    window.addEventListener(
+      'keydown',
+      event => (box.cancelled = event.defaultPrevented),
+      { once: true },
+    )
+    return box
+  })
+  const key = {
+    key: 'R',
+    code: 'KeyR',
+    windowsVirtualKeyCode: 82,
+    modifiers: 2,
+  }
+  await nullpad.cdp.send('Input.dispatchKeyEvent', {
+    type: 'rawKeyDown',
+    ...key,
+  })
+  await nullpad.cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', ...key })
+  await settle(nullpad.page)
+  expect(
+    await seen.evaluate(box => box.cancelled),
+    'the keydown was cancelled, so the page does not reload',
+  ).toBe(true)
+  expect(await nullpad.text(), 'Ctrl-R put the typing back').toBe('abc')
+})
+
 test('history runs across the vim toggle both ways', async ({ nullpad }) => {
   await nullpad.type('abc')
   await nullpad.page.keyboard.press(toggle)

@@ -16,13 +16,14 @@ import {
   positionOf,
   spotOf,
 } from './vim/motions'
-import { objects } from './vim/objects'
+import { type Picked, objects } from './vim/objects'
 import * as Operators from './vim/operators'
 import * as Selection from './vim/selection'
 import {
   type OperatorName,
   type Range,
   type TargetName,
+  byKind,
   isObject,
   targetFor,
 } from './vim/targets'
@@ -51,9 +52,35 @@ export type Kept = typeof Kept.Type
 
 export const nothingKept: Kept = { registers: noRegisters, dot: Option.none() }
 
+export const BlockStay = Schema.Struct({
+  rule: Operators.BlockRule,
+  block: Selection.Block,
+  held: Schema.Struct({
+    column: Schema.Int,
+    length: Schema.Int,
+    kept: Schema.Int,
+    indent: Schema.Struct({ letters: Schema.Int, columns: Schema.Int }),
+  }),
+  lines: Schema.Int,
+  seen: Schema.NonEmptyArray(Buffer.Line),
+  home: Schema.Int,
+  entered: Schema.Int,
+  run: Schema.Struct({
+    at: Buffer.Position,
+    origin: Buffer.Position,
+    hasMoved: Schema.Boolean,
+    originFollows: Schema.Boolean,
+    isUntouched: Schema.Boolean,
+  }),
+})
+export type BlockStay = typeof BlockStay.Type
+
 export const Mode = Schema.TaggedUnion({
   Normal: {},
-  Insert: { recording: Schema.Option(Repeat) },
+  Insert: {
+    recording: Schema.Option(Repeat),
+    block: Schema.Option(BlockStay),
+  },
   Visual: {
     kind: Selection.Kind,
     anchor: Buffer.Position,
@@ -76,7 +103,57 @@ const visualMode = (
 
 const normalMode = Mode.cases.Normal.make({})
 
-const unrecordedStay = Mode.cases.Insert.make({ recording: Option.none() })
+type Stay = Readonly<{
+  recording: Option.Option<Repeat>
+  block: Option.Option<BlockStay>
+}>
+
+const insertMode = (
+  recording: Option.Option<Repeat>,
+  block: Option.Option<BlockStay> = Option.none(),
+): Mode => ({ _tag: 'Insert', recording, block })
+
+const blockStay = (
+  rule: Operators.BlockRule,
+  block: Selection.Block,
+  held: Operators.Held,
+  opened: Buffer.Buffer,
+  home: Buffer.Position,
+): Option.Option<BlockStay> =>
+  Option.some({
+    rule,
+    block,
+    held,
+    lines: opened.lines.length,
+    seen: opened.lines,
+    home: home.column,
+    entered: opened.caret.column,
+    run: Operators.runFrom(opened.caret),
+  })
+
+export const passed = (
+  vim: Vim,
+  before: Buffer.Buffer,
+  after: Buffer.Buffer,
+): Vim => {
+  if (vim.mode._tag !== 'Insert' || Option.isNone(vim.mode.block)) {
+    return vim
+  }
+  const stay = vim.mode.block.value
+  if (stay.seen !== before.lines) {
+    return vim
+  }
+  const run = Operators.runAfter(stay.run, before, after)
+  return run === stay.run && before.lines === after.lines
+    ? vim
+    : {
+        ...vim,
+        mode: insertMode(
+          vim.mode.recording,
+          Option.some({ ...stay, seen: after.lines, run }),
+        ),
+      }
+}
 
 export const Last = Schema.Struct({
   kind: Selection.Kind,
@@ -166,10 +243,13 @@ const keyOf = (input: Input): Option.Option<Keymap.Key> =>
     Text: ({ text }) =>
       isOneGrapheme(text) ? Option.some(text) : Option.none(),
     Erase: () => Option.none(),
-    Paste: () => Option.none(),
+    Paste: ({ byKey }) => (byKey ? Option.some('<C-v>') : Option.none()),
     Preedit: () => Option.none(),
     Commit: () => Option.none(),
   })
+
+const isPasteByAnotherRoute = (input: Input): boolean =>
+  input._tag === 'Paste' && !input.byKey
 
 export const rest = (
   vim: Vim,
@@ -193,13 +273,13 @@ export const rest = (
 
 const idle = (vim: Vim): Vim => ({ ...vim, ...Keymap.idle })
 
-type Ends = Readonly<{ anchor: Buffer.Position; cursor: Buffer.Position }>
+type Marks = Readonly<{ anchor: Buffer.Position; cursor: Buffer.Position }>
 
 const leaveVisual = (
   vim: Vim,
   before: Buffer.Buffer,
   after: Buffer.Buffer = before,
-  moved: (ends: Ends) => Ends = ends => ends,
+  moved: (marks: Marks) => Marks = marks => marks,
 ): Vim => {
   if (vim.mode._tag !== 'Visual') {
     return vim
@@ -235,15 +315,31 @@ export const reshown = (vim: Vim): Vim => ({
   last: Option.none(),
 })
 
+export type Shown =
+  | Selection.Shown
+  | Readonly<{ kind: 'Block'; spans: ReadonlyArray<Selection.Span> }>
+
 export const selection = (
   vim: Vim,
   buffer: Buffer.Buffer,
-): Option.Option<Selection.Shown> =>
+  drawn: Readonly<{ first: number; last: number }>,
+): Option.Option<Shown> =>
   vim.mode._tag === 'Visual'
     ? Option.some(
-        Selection.shown(
-          buffer,
+        Selection.byShape(
           Selection.endsOf(buffer, vim.mode.kind, vim.mode.anchor),
+          {
+            Stretch: (stretch): Shown => Selection.shown(buffer, stretch),
+            Block: (corners): Shown => ({
+              kind: 'Block',
+              spans: Selection.spansOf(
+                buffer,
+                corners,
+                vim.want === 'End',
+                drawn,
+              ),
+            }),
+          },
         ),
       )
     : Option.none()
@@ -297,16 +393,20 @@ const changeBegan = (
   range: Range,
 ): Buffer.Position => {
   const from = positionOf(buffer, range.from)
-  if (range.kind === 'Charwise') {
-    return from
-  }
-  if (target === 'Lines' && range.from.line === range.to.line) {
-    const lineStart = firstNonBlankOf(buffer, range.from.line)
-    return Buffer.isBefore(buffer.caret, lineStart) ? buffer.caret : lineStart
-  }
-  return operator === 'Change' && range.to.line > range.from.line
-    ? { line: from.line + 1, column: from.column }
-    : from
+  return byKind(range, {
+    Charwise: () => from,
+    Linewise: () => {
+      if (target === 'Lines' && range.from.line === range.to.line) {
+        const lineStart = firstNonBlankOf(buffer, range.from.line)
+        return Buffer.isBefore(buffer.caret, lineStart)
+          ? buffer.caret
+          : lineStart
+      }
+      return operator === 'Change' && range.to.line > range.from.line
+        ? { line: from.line + 1, column: from.column }
+        : from
+    },
+  })
 }
 
 const maxReplayedInputs = 20_000
@@ -373,7 +473,11 @@ const furtherCopies = (
   { command, count, typed }: Repeat,
   lineCount: number,
 ): ReadonlyArray<Replayed> => {
-  if (command._tag !== 'Insert' && command._tag !== 'InsertAsSelected') {
+  if (
+    command._tag !== 'Insert' &&
+    command._tag !== 'InsertAsSelected' &&
+    command._tag !== 'InsertInBlock'
+  ) {
     return []
   }
   const opensLine = command.at === 'LineBelow' || command.at === 'LineAbove'
@@ -391,7 +495,7 @@ const furtherCopies = (
     1,
     Math.min(
       Operators.boundedCount(
-        { text: (opensLine ? '\n' : '') + text, kind: 'Charwise' },
+        Operators.letters((opensLine ? '\n' : '') + text),
         count ?? 1,
       ),
       Math.floor(most / Math.max(1, inputs)),
@@ -476,6 +580,28 @@ const repeatOf = (
   typed: [],
 })
 
+const blockRepeatOf = (
+  operator: OperatorName,
+  block: Selection.Block,
+  register: Operators.RegisterName,
+): Repeat => ({
+  command: {
+    _tag: 'OperateBlock',
+    operator,
+    amount: Selection.blockAmountOf(block),
+  },
+  count: undefined,
+  register,
+  typed: [],
+})
+
+type Replaced = Readonly<{
+  deleted: Operators.Applied
+  put: Option.Option<Operators.Placed>
+  began: Buffer.Position
+  dot: Repeat
+}>
+
 const putOverStep = (
   vim: Vim,
   buffer: Buffer.Buffer,
@@ -484,26 +610,81 @@ const putOverStep = (
   { side, count }: Put,
   held: Option.Option<Operators.Register>,
 ): Step => {
-  const ends = Selection.endsOf(buffer, visual.kind, visual.anchor)
-  const range = Selection.rangeOf(buffer, ends, 'AsSelected')
   const deletesInto =
     side === 'After' ? Operators.defaultRegister : Operators.blackHole
-  const deleted = Operators.operators.Delete(
-    buffer,
-    range,
-    kept.registers,
-    deletesInto,
-  )
-  const put = Option.map(held, register =>
-    Operators.putOver(buffer, deleted.buffer, range, register, count ?? 1),
+  const { deleted, put, began, dot } = Selection.byShape(
+    Selection.endsOf(buffer, visual.kind, visual.anchor),
+    {
+      Stretch: (ends): Replaced => {
+        const range = Selection.rangeOf(buffer, ends, 'AsSelected')
+        const removed = Operators.operators.Delete(
+          buffer,
+          range,
+          kept.registers,
+          deletesInto,
+        )
+        return {
+          deleted: removed,
+          put: Option.map(held, register =>
+            Operators.putOver(
+              buffer,
+              removed.buffer,
+              range,
+              register,
+              count ?? 1,
+            ),
+          ),
+          began: positionOf(buffer, range.from),
+          dot: repeatOf(
+            'Delete',
+            Selection.amountOf(buffer, ends, 'AsSelected', vim.want),
+            deletesInto,
+          ),
+        }
+      },
+      Block: (corners): Replaced => {
+        const block = Selection.blockOf(buffer, corners, vim.want === 'End')
+        const removed = Operators.blockOperators.Delete(
+          buffer,
+          block,
+          kept.registers,
+          deletesInto,
+        )
+        return {
+          deleted: removed,
+          put: Option.map(held, register =>
+            Operators.putOverBlock(
+              buffer,
+              removed.buffer,
+              block,
+              visual.anchor,
+              register,
+              side,
+              count ?? 1,
+            ),
+          ),
+          began: Operators.homeOf(buffer, block),
+          dot: blockRepeatOf('Delete', block, deletesInto),
+        }
+      },
+    },
   )
   const normal: Vim = {
     ...Option.match(put, {
-      onNone: () =>
-        leaveVisual(vim, buffer, deleted.buffer, () => ({
-          anchor: positionOf(buffer, range.from),
-          cursor: positionOf(buffer, range.from),
-        })),
+      onNone: () => {
+        const landed =
+          began.line < deleted.buffer.lines.length
+            ? rest(
+                { ...vim, mode: normalMode },
+                Buffer.moveTo(deleted.buffer, began),
+                false,
+              ).caret
+            : began
+        return leaveVisual(vim, buffer, deleted.buffer, () => ({
+          anchor: landed,
+          cursor: landed,
+        }))
+      },
       onSome: ({ buffer: after, first, last }) =>
         leaveVisual(vim, buffer, after, () => ({
           anchor: first,
@@ -522,18 +703,9 @@ const putOverStep = (
       }),
       false,
     ),
-    kept: {
-      registers: deleted.registers,
-      dot: Option.some(
-        repeatOf(
-          'Delete',
-          Selection.amountOf(buffer, ends, 'AsSelected', vim.want),
-          deletesInto,
-        ),
-      ),
-    },
+    kept: { registers: deleted.registers, dot: Option.some(dot) },
     fate: done,
-    began: Option.some(positionOf(buffer, range.from)),
+    began: Option.some(began),
     clipboard: Option.none(),
   }
 }
@@ -561,6 +733,13 @@ export const putClipboard = (
       }
 }
 
+const blockRules: Readonly<
+  Record<Keymap.SelectionEdge, Exclude<Operators.BlockRule, 'Change'>>
+> = { Start: 'Insert', End: 'Append' }
+
+const keepsItsCount = ({ _tag }: Keymap.Command): boolean =>
+  _tag === 'InsertAsSelected' || _tag === 'InsertInBlock'
+
 const run = (
   vim: Vim,
   buffer: Buffer.Buffer,
@@ -580,10 +759,7 @@ const run = (
     clipboard: Option.none(),
   }
   const repeat = Option.some({ command, count, register, typed: [] })
-  const recordingStay: Vim = {
-    ...normal,
-    mode: { _tag: 'Insert', recording: repeat },
-  }
+  const recordingStay: Vim = { ...normal, mode: insertMode(repeat) }
   const operated = (
     operator: OperatorName,
     target: TargetName | 'Selection',
@@ -645,6 +821,47 @@ const run = (
         'Selection',
         Selection.rangeFrom(buffer, spotOf(buffer), amount),
       ),
+    OperateBlock: ({ operator, amount }) => {
+      const block = Selection.blockFrom(
+        buffer,
+        spotOf(buffer),
+        amount,
+        vim.want,
+      )
+      const home = Operators.homeOf(buffer, block)
+      const applied = Operators.blockOperators[operator](
+        buffer,
+        block,
+        kept.registers,
+        register,
+      )
+      const after: Vim = applied.inserting
+        ? {
+            ...normal,
+            mode: insertMode(
+              repeat,
+              blockStay(
+                'Change',
+                block,
+                Operators.changeHeld(applied.buffer),
+                applied.buffer,
+                home,
+              ),
+            ),
+          }
+        : normal
+      return {
+        vim: after,
+        buffer: rest(after, applied.buffer, false),
+        kept: {
+          registers: applied.registers,
+          dot: operator === 'Delete' ? repeat : kept.dot,
+        },
+        fate: done,
+        began: Option.some(home),
+        clipboard: applied.clipboard,
+      }
+    },
     Put: ({ side }) => {
       const source = Operators.registerFor(kept.registers, register)
       return source._tag === 'Clipboard'
@@ -665,6 +882,34 @@ const run = (
       vim: recordingStay,
       buffer: placeInsert(buffer, at === 'Start' ? 'Here' : 'After'),
     }),
+    InsertInBlock: ({ at, amount }): Step => {
+      const block = Selection.blockFrom(
+        buffer,
+        spotOf(buffer),
+        amount,
+        vim.want,
+      )
+      const rule = blockRules[at]
+      const opened = Operators.blockOpened(buffer, block, rule)
+      return {
+        ...unchanged,
+        vim: {
+          ...normal,
+          mode: insertMode(
+            repeat,
+            blockStay(
+              rule,
+              block,
+              opened.held,
+              opened.buffer,
+              Operators.homeOf(buffer, block),
+            ),
+          ),
+        },
+        buffer: opened.buffer,
+        began: Option.some(opened.began),
+      }
+    },
     Travel: ({ way }) => ({
       ...unchanged,
       vim: normal,
@@ -677,9 +922,7 @@ const run = (
           ...unchanged,
           fate: replayOf(
             last,
-            last.command._tag === 'InsertAsSelected'
-              ? last.count
-              : (count ?? last.count),
+            keepsItsCount(last.command) ? last.count : (count ?? last.count),
             buffer.lines.length,
           ),
         }),
@@ -717,6 +960,37 @@ const run = (
   })
 }
 
+type Operated = Readonly<{
+  applied: Operators.Applied
+  repeat: Repeat
+  normal: Vim
+  began: Buffer.Position
+  block: Option.Option<BlockStay>
+  yanked: (caret: Buffer.Position) => Want
+}>
+
+const stretchReaches: Readonly<Record<Keymap.Reach, Selection.Reach>> = {
+  AsSelected: 'AsSelected',
+  WholeLines: 'WholeLines',
+  LinesOrBlock: 'WholeLines',
+  LinesOrBlockToLineEnds: 'WholeLines',
+}
+
+const keptKind: Readonly<Record<Selection.Kind, Selection.Kind>> = {
+  Letters: 'Letters',
+  Lines: 'Lines',
+  Block: 'Block',
+}
+
+const pickedKinds: Readonly<
+  Record<Picked['kind'], Readonly<Record<Selection.Kind, Selection.Kind>>>
+> = {
+  Kept: keptKind,
+  Letters: { Letters: 'Letters', Lines: 'Letters', Block: 'Letters' },
+  LettersOrBlock: { Letters: 'Letters', Lines: 'Letters', Block: 'Block' },
+  Lines: { Letters: 'Lines', Lines: 'Lines', Block: 'Lines' },
+}
+
 const runVisual = (
   vim: Vim,
   buffer: Buffer.Buffer,
@@ -751,75 +1025,177 @@ const runVisual = (
     const normal = leaveVisual(vim, buffer)
     return { ...unchanged, vim: normal, buffer: rest(normal, buffer, false) }
   }
+  const ends = Selection.endsOf(buffer, visual.kind, visual.anchor)
+  const swapped = (): Step => ({
+    ...unchanged,
+    vim: {
+      ...cleared,
+      mode: visualMode(visual.kind, buffer.caret, columnAfter(visual.anchor)),
+      want: wantWhere(visual.anchor),
+    },
+    buffer: Buffer.moveTo(buffer, visual.anchor),
+  })
   return Keymap.VisualCommand.match(command, {
     Operate: ({ operator, reach }) => {
-      const ends = Selection.endsOf(buffer, visual.kind, visual.anchor)
-      const range = Selection.rangeOf(buffer, ends, reach)
-      const repeat = Option.some(
-        repeatOf(
-          operator,
-          Selection.amountOf(buffer, ends, reach, vim.want),
+      const overStretch = (
+        stretch: Selection.Stretch,
+        over: Selection.Reach,
+      ): Operated => {
+        const range = Selection.rangeOf(buffer, stretch, over)
+        const applied = Operators.operators[operator](
+          buffer,
+          range,
+          kept.registers,
           register,
-        ),
-      )
-      const applied = Operators.operators[operator](
-        buffer,
-        range,
-        kept.registers,
-        register,
-      )
-      const moved = (mark: Buffer.Position) =>
-        Selection.movedBy(operator, range, positionOf(buffer, range.from), mark)
-      const normal = leaveVisual(vim, buffer, applied.buffer, ends => ({
-        anchor: moved(ends.anchor),
-        cursor: moved(ends.cursor),
-      }))
+        )
+        const moved = (mark: Buffer.Position) =>
+          Selection.movedBy(
+            operator,
+            range,
+            positionOf(buffer, range.from),
+            mark,
+          )
+        return {
+          applied,
+          repeat: repeatOf(
+            operator,
+            Selection.amountOf(buffer, stretch, over, vim.want),
+            register,
+          ),
+          normal: leaveVisual(vim, buffer, applied.buffer, marks => ({
+            anchor: moved(marks.anchor),
+            cursor: moved(marks.cursor),
+          })),
+          began: changeBegan(buffer, operator, 'Selection', range),
+          block: Option.none(),
+          yanked: wantWhere,
+        }
+      }
+      const overBlock = (
+        corners: Selection.Corners,
+        toLineEnds: boolean,
+      ): Operated => {
+        const block = Selection.blockOf(buffer, corners, toLineEnds)
+        const home = Operators.homeOf(buffer, block)
+        const applied = Operators.blockOperators[operator](
+          buffer,
+          block,
+          kept.registers,
+          register,
+        )
+        return {
+          applied,
+          repeat: blockRepeatOf(operator, block, register),
+          normal: leaveVisual(
+            toLineEnds ? toLineEnd(vim) : vim,
+            buffer,
+            applied.buffer,
+          ),
+          began: home,
+          block: blockStay(
+            'Change',
+            block,
+            Operators.changeHeld(applied.buffer),
+            applied.buffer,
+            home,
+          ),
+          yanked: caret =>
+            stays(caret)
+              ? Selection.wantAfterYank(buffer, block, wantWhere(caret))
+              : 'Unset',
+        }
+      }
+      const overCorners: Readonly<
+        Record<Keymap.Reach, (corners: Selection.Corners) => Operated>
+      > = {
+        AsSelected: corners => overBlock(corners, vim.want === 'End'),
+        WholeLines: corners =>
+          overStretch(Selection.asLines(corners), 'WholeLines'),
+        LinesOrBlock: corners => overBlock(corners, vim.want === 'End'),
+        LinesOrBlockToLineEnds: corners => overBlock(corners, true),
+      }
+      const { applied, repeat, normal, began, block, yanked } =
+        Selection.byShape(ends, {
+          Stretch: stretch => overStretch(stretch, stretchReaches[reach]),
+          Block: overCorners[reach],
+        })
+      const dot = Option.some(repeat)
       const after: Vim = applied.inserting
-        ? {
-            ...normal,
-            mode: { _tag: 'Insert', recording: repeat },
-            want: 'Unset',
-          }
+        ? { ...normal, mode: insertMode(dot, block), want: 'Unset' }
         : { ...normal, want: 'Unset' }
       const rested = rest(after, applied.buffer, false)
       return {
         vim:
           operator === 'Yank'
-            ? { ...after, want: wantWhere(rested.caret) }
+            ? { ...after, want: yanked(rested.caret) }
             : after,
         buffer: rested,
         kept: {
           registers: applied.registers,
-          dot: operator === 'Delete' ? repeat : kept.dot,
+          dot: operator === 'Delete' ? dot : kept.dot,
         },
         fate: done,
-        began: Option.some(changeBegan(buffer, operator, 'Selection', range)),
+        began: Option.some(began),
         clipboard: applied.clipboard,
       }
     },
-    Insert: ({ at }): Step => {
-      const ends = Selection.endsOf(buffer, visual.kind, visual.anchor)
-      const stay: Repeat = {
-        command: { _tag: 'InsertAsSelected', at },
-        count,
-        register: Operators.defaultRegister,
-        typed: [],
-      }
-      return {
-        ...unchanged,
-        vim: {
-          ...leaveVisual(vim, buffer),
-          mode: { _tag: 'Insert', recording: Option.some(stay) },
-          want: 'Unset',
+    Insert: ({ at }): Step =>
+      Selection.byShape(ends, {
+        Stretch: (stretch): Step => ({
+          ...unchanged,
+          vim: {
+            ...leaveVisual(vim, buffer),
+            mode: insertMode(
+              Option.some({
+                command: { _tag: 'InsertAsSelected', at },
+                count,
+                register: Operators.defaultRegister,
+                typed: [],
+              }),
+            ),
+            want: 'Unset',
+          },
+          buffer: Buffer.moveTo(
+            buffer,
+            at === 'Start'
+              ? Selection.insertAt(buffer, stretch)
+              : Selection.appendAt(buffer, stretch),
+          ),
+        }),
+        Block: (corners): Step => {
+          const block = Selection.blockOf(buffer, corners, vim.want === 'End')
+          const rule = blockRules[at]
+          const opened = Operators.blockOpened(buffer, block, rule)
+          return {
+            ...unchanged,
+            vim: {
+              ...leaveVisual(vim, buffer, opened.buffer),
+              mode: insertMode(
+                Option.some({
+                  command: {
+                    _tag: 'InsertInBlock',
+                    at,
+                    amount: Selection.blockAmountOf(block),
+                  },
+                  count,
+                  register: Operators.defaultRegister,
+                  typed: [],
+                }),
+                blockStay(
+                  rule,
+                  block,
+                  opened.held,
+                  opened.buffer,
+                  Operators.homeOf(buffer, block),
+                ),
+              ),
+              want: 'Unset',
+            },
+            buffer: opened.buffer,
+            began: Option.some(opened.began),
+          }
         },
-        buffer: Buffer.moveTo(
-          buffer,
-          at === 'Start'
-            ? Selection.insertAt(buffer, ends)
-            : Selection.appendAt(buffer, ends),
-        ),
-      }
-    },
+      }),
     Replace: ({ side }) => {
       const source = Operators.registerFor(kept.registers, register)
       return source._tag === 'Clipboard'
@@ -834,13 +1210,12 @@ const runVisual = (
             kept,
             visual,
             { side, count },
-            visual.kind === 'Lines' && register._tag === 'BlackHole'
-              ? Option.some({ text: '\n', kind: 'Linewise' })
+            emptyLineFrom[visual.kind] && register._tag === 'BlackHole'
+              ? Option.some(Operators.wholeLines('\n'))
               : source.register,
           )
     },
     Move: ({ motion }) => {
-      const ends = Selection.endsOf(buffer, visual.kind, visual.anchor)
       const from = ends.cursor
       if (motionFails(motion, buffer, from, count)) {
         return motion === 'LineEnd'
@@ -851,7 +1226,7 @@ const runVisual = (
         buffer,
         from,
         count,
-        Selection.wantOf(buffer, ends, vim.want),
+        Selection.wantOf(buffer, ends, vim.want, visual.column),
       )
       const caret = positionOf(buffer, spot)
       return {
@@ -865,18 +1240,14 @@ const runVisual = (
       }
     },
     Pick: ({ object }): Step => {
-      const picked = objects[object].pick(
-        buffer,
-        Selection.endsOf(buffer, visual.kind, visual.anchor),
-        count ?? 1,
-      )
+      const picked = objects[object].pick(buffer, ends, count ?? 1)
       const caret = positionOf(buffer, picked.cursor)
       return {
         ...unchanged,
         vim: {
           ...cleared,
           mode: visualMode(
-            picked.kind === 'Kept' ? visual.kind : picked.kind,
+            pickedKinds[picked.kind][visual.kind],
             positionOf(buffer, picked.anchor),
             columnAfter(caret),
           ),
@@ -885,15 +1256,28 @@ const runVisual = (
         buffer: Buffer.moveTo(buffer, caret),
       }
     },
-    Swap: (): Step => ({
-      ...unchanged,
-      vim: {
-        ...cleared,
-        mode: visualMode(visual.kind, buffer.caret, columnAfter(visual.anchor)),
-        want: wantWhere(visual.anchor),
-      },
-      buffer: Buffer.moveTo(buffer, visual.anchor),
-    }),
+    Swap: swapped,
+    SwapColumns: (): Step =>
+      Selection.byShape(ends, {
+        Stretch: swapped,
+        Block: (corners): Step => {
+          const other = Selection.otherColumns(buffer, corners)
+          const caret = positionOf(buffer, other.cursor)
+          return {
+            ...unchanged,
+            vim: {
+              ...cleared,
+              mode: visualMode(
+                visual.kind,
+                positionOf(buffer, other.anchor),
+                'AsInVisual',
+              ),
+              want: other.want,
+            },
+            buffer: Buffer.moveTo(buffer, caret),
+          }
+        },
+      }),
     Select: ({ kind }) =>
       kind === visual.kind
         ? left()
@@ -915,6 +1299,12 @@ const runVisual = (
   })
 }
 
+const emptyLineFrom: Readonly<Record<Selection.Kind, boolean>> = {
+  Letters: false,
+  Lines: true,
+  Block: false,
+}
+
 const isPageKey = (input: Input): boolean =>
   input._tag === 'Key' && (input.key === 'PageUp' || input.key === 'PageDown')
 
@@ -932,7 +1322,7 @@ const pressNormal = (
     began: Option.none(),
     clipboard: Option.none(),
   }
-  if (input._tag === 'Paste' || isPageKey(input)) {
+  if (isPasteByAnotherRoute(input) || isPageKey(input)) {
     return {
       ...unchanged,
       vim: interrupted(vim),
@@ -984,24 +1374,42 @@ const pressVisual = (
       fate: { _tag: 'Plain', input },
     }
   }
-  if (input._tag === 'Paste') {
-    const range = Selection.rangeOf(
-      buffer,
+  if (isPasteByAnotherRoute(input)) {
+    const erased = Selection.byShape(
       Selection.endsOf(buffer, visual.kind, visual.anchor),
-      'AsSelected',
-    )
-    const erased = Operators.operators.Change(
-      buffer,
-      range,
-      kept.registers,
-      Operators.blackHole,
+      {
+        Stretch: stretch => {
+          const range = Selection.rangeOf(buffer, stretch, 'AsSelected')
+          return {
+            buffer: Operators.operators.Change(
+              buffer,
+              range,
+              kept.registers,
+              Operators.blackHole,
+            ).buffer,
+            began: changeBegan(buffer, 'Change', 'Selection', range),
+          }
+        },
+        Block: corners => {
+          const block = Selection.blockOf(buffer, corners, vim.want === 'End')
+          return {
+            buffer: Operators.blockOperators.Delete(
+              buffer,
+              block,
+              kept.registers,
+              Operators.blackHole,
+            ).buffer,
+            began: Operators.homeOf(buffer, block),
+          }
+        },
+      },
     )
     return {
       ...unchanged,
       vim: interrupted(leaveVisual(vim, buffer)),
       buffer: erased.buffer,
       fate: { _tag: 'Plain', input },
-      began: Option.some(changeBegan(buffer, 'Change', 'Selection', range)),
+      began: Option.some(erased.began),
     }
   }
   return Option.match(keyOf(input), {
@@ -1028,14 +1436,47 @@ const pressVisual = (
 const leavesInsert = (input: Input): boolean =>
   Option.exists(keyOf(input), key => key === '<Esc>' || key === '<C-[>')
 
-const leaveInsert = (vim: Vim, buffer: Buffer.Buffer, kept: Kept): Step => {
+const copiedDown = (buffer: Buffer.Buffer, stay: BlockStay): Buffer.Buffer => {
+  const first = buffer.lines[stay.block.first]
+  if (
+    first === undefined ||
+    buffer.lines !== stay.seen ||
+    buffer.lines.length !== stay.lines ||
+    (stay.rule !== 'Change' && buffer.caret.line !== stay.block.first)
+  ) {
+    return buffer
+  }
+  return Option.match(Operators.gained(first, stay), {
+    onNone: () => buffer,
+    onSome: copy => {
+      const copied = Operators.copiedDown(buffer, copy)
+      return Option.match(copy.column, {
+        onNone: () => copied,
+        onSome: column =>
+          Buffer.moveTo(copied, { line: stay.block.first, column }),
+      })
+    },
+  })
+}
+
+const leaveInsert = (
+  vim: Vim,
+  buffer: Buffer.Buffer,
+  kept: Kept,
+  block: Option.Option<BlockStay>,
+): Step => {
   const settled = Buffer.settle(buffer)
   const back = Buffer.backspaceTarget(settled)
+  const left =
+    back.line === settled.caret.line ? Buffer.moveTo(settled, back) : settled
   return {
     vim: { ...start, last: vim.last },
     buffer: rest(
       start,
-      back.line === settled.caret.line ? Buffer.moveTo(settled, back) : settled,
+      Option.match(block, {
+        onNone: () => left,
+        onSome: stay => copiedDown(left, stay),
+      }),
       false,
     ),
     kept,
@@ -1067,12 +1508,12 @@ const leaving = (
   vim: Vim,
   buffer: Buffer.Buffer,
   kept: Kept,
-  recording: Option.Option<Repeat>,
+  { recording, block }: Stay,
 ): Step =>
   Option.match(recording, {
-    onNone: () => leaveInsert(vim, buffer, kept),
+    onNone: () => leaveInsert(vim, buffer, kept, block),
     onSome: repeat => ({
-      vim: { ...vim, mode: unrecordedStay },
+      vim: { ...vim, mode: insertMode(Option.none(), block) },
       buffer,
       kept: { ...kept, dot: recording },
       fate: Fate.cases.Replay.make({
@@ -1131,21 +1572,19 @@ const stayWith = (
   vim: Vim,
   kept: Kept,
   repeat: Repeat,
+  block: Option.Option<BlockStay>,
   input: Input,
 ): Pick<Step, 'vim' | 'kept'> => {
   const typed = typedWith(repeat.typed, input)
   return typed.length > maxRecordedInputs
     ? {
-        vim: { ...vim, mode: unrecordedStay },
+        vim: { ...vim, mode: insertMode(Option.none(), block) },
         kept: { ...kept, dot: Option.none() },
       }
     : {
         vim: {
           ...vim,
-          mode: {
-            _tag: 'Insert',
-            recording: Option.some({ ...repeat, typed }),
-          },
+          mode: insertMode(Option.some({ ...repeat, typed }), block),
         },
         kept,
       }
@@ -1155,17 +1594,17 @@ const pressInsert = (
   vim: Vim,
   buffer: Buffer.Buffer,
   kept: Kept,
-  recording: Option.Option<Repeat>,
+  stay: Stay,
   input: Input,
 ): Step =>
   leavesInsert(input)
-    ? leaving(vim, buffer, kept, recording)
+    ? leaving(vim, buffer, kept, stay)
     : {
-        ...Option.match(recording, {
+        ...Option.match(stay.recording, {
           onNone: () => ({ vim, kept }),
           onSome: repeat =>
             isRecorded(buffer, input)
-              ? stayWith(vim, kept, repeat, input)
+              ? stayWith(vim, kept, repeat, stay.block, input)
               : { vim, kept },
         }),
         buffer,
@@ -1182,7 +1621,7 @@ export const press = (
 ): Step =>
   Mode.match(vim.mode, {
     Normal: () => pressNormal(vim, buffer, kept, input),
-    Insert: ({ recording }) => pressInsert(vim, buffer, kept, recording, input),
+    Insert: stay => pressInsert(vim, buffer, kept, stay, input),
     Visual: visual => pressVisual(vim, buffer, kept, visual, input),
   })
 
@@ -1200,18 +1639,18 @@ export const again = (
     began: Option.none(),
     clipboard: Option.none(),
   }
-  const inStay = (stepped: (recording: Option.Option<Repeat>) => Step): Step =>
+  const inStay = (stepped: (stay: Stay) => Step): Step =>
     Mode.match(vim.mode, {
       Normal: () => unchanged,
-      Insert: ({ recording }) => stepped(recording),
+      Insert: stepped,
       Visual: () => unchanged,
     })
   return Replayed.match(step, {
     Run: ({ command, count, register }) =>
       run(vim, buffer, kept, command, count, register),
     Typed: ({ input }) =>
-      inStay(recording => pressInsert(vim, buffer, kept, recording, input)),
-    Leave: () => inStay(recording => leaving(vim, buffer, kept, recording)),
+      inStay(stay => pressInsert(vim, buffer, kept, stay, input)),
+    Leave: () => inStay(stay => leaving(vim, buffer, kept, stay)),
   })
 }
 
@@ -1234,12 +1673,22 @@ export const landed = (
 
 export const pendingKeys = (vim: Vim): string => Keymap.shown(vim)
 
-export type ModeName = 'Normal' | 'Insert' | 'Visual' | 'VisualLine'
+export type ModeName =
+  | 'Normal'
+  | 'Insert'
+  | 'Visual'
+  | 'VisualLine'
+  | 'VisualBlock'
+
+const visualModeNames: Readonly<Record<Selection.Kind, ModeName>> = {
+  Letters: 'Visual',
+  Lines: 'VisualLine',
+  Block: 'VisualBlock',
+}
 
 export const modeName = (vim: Vim): ModeName =>
   Mode.match(vim.mode, {
     Normal: (): ModeName => 'Normal',
     Insert: (): ModeName => 'Insert',
-    Visual: ({ kind }): ModeName =>
-      kind === 'Lines' ? 'VisualLine' : 'Visual',
+    Visual: ({ kind }): ModeName => visualModeNames[kind],
   })

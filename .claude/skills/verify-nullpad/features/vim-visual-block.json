@@ -1,0 +1,550 @@
+[
+  {
+    "paste": "one two three\nfour five six\nseven eight nine\nab\n\tx\ty\nab字cd"
+  },
+  {
+    "press": "Control+Home"
+  },
+  {
+    "press": "Control+,"
+  },
+  {
+    "expect": {
+      "mode": "NORMAL",
+      "status": "1:1 6L",
+      "selection": ""
+    }
+  },
+  {
+    "caption": "Press l, then Ctrl-V",
+    "note": "V-BLOCK: a block starts on the letter under the cursor."
+  },
+  {
+    "type": "l"
+  },
+  {
+    "press": "Control+v"
+  },
+  {
+    "expect": {
+      "mode": "V-BLOCK",
+      "selection": "n",
+      "status": "1:2 6L",
+      "text": "one two three\nfour five six\nseven eight nine\nab\n\tx\ty\nab字cd"
+    }
+  },
+  {
+    "caption": "Press j twice, then l",
+    "note": "The block is two columns wide on three lines."
+  },
+  {
+    "type": "jjl"
+  },
+  {
+    "expect": {
+      "mode": "V-BLOCK",
+      "selection": "ne\nou\nev",
+      "status": "3:3 6L"
+    }
+  },
+  {
+    "caption": "Press o, then O",
+    "note": "o goes to the other corner, O to the other corner of the same line. The block stays."
+  },
+  {
+    "type": "o"
+  },
+  {
+    "expect": {
+      "selection": "ne\nou\nev",
+      "status": "1:2 6L"
+    }
+  },
+  {
+    "type": "O"
+  },
+  {
+    "expect": {
+      "selection": "ne\nou\nev",
+      "status": "1:3 6L"
+    }
+  },
+  {
+    "caption": "Press d",
+    "note": "The block is deleted from each line, and the cursor is on its top left."
+  },
+  {
+    "type": "d"
+  },
+  {
+    "expect": {
+      "mode": "NORMAL",
+      "selection": "",
+      "status": "1:2 6L",
+      "text": "o two three\nfr five six\nsen eight nine\nab\n\tx\ty\nab字cd"
+    }
+  },
+  {
+    "caption": "Press u, then .",
+    "note": "u brings the block back, and . deletes the same block again from the cursor."
+  },
+  {
+    "type": "u"
+  },
+  {
+    "expect": {
+      "text": "one two three\nfour five six\nseven eight nine\nab\n\tx\ty\nab字cd",
+      "status": "1:2 6L"
+    }
+  },
+  {
+    "type": "."
+  },
+  {
+    "expect": {
+      "text": "o two three\nfr five six\nsen eight nine\nab\n\tx\ty\nab字cd",
+      "status": "1:2 6L"
+    }
+  },
+  {
+    "type": "u"
+  },
+  {
+    "expect": {
+      "text": "one two three\nfour five six\nseven eight nine\nab\n\tx\ty\nab字cd",
+      "status": "1:2 6L"
+    }
+  },
+  {
+    "caption": "Press Ctrl-V, 3j, $ and then A, type ! and press Esc",
+    "note": "After $ the block runs to the end of each line, so the ! goes at the end of all four."
+  },
+  {
+    "press": "Control+v"
+  },
+  {
+    "type": "3j$"
+  },
+  {
+    "expect": {
+      "mode": "V-BLOCK",
+      "selection": "ne two three\nour five six\neven eight nine\nb",
+      "status": "4:3 6L"
+    }
+  },
+  {
+    "shot": "block-to-line-ends"
+  },
+  {
+    "type": "A!"
+  },
+  {
+    "expect": {
+      "mode": "INSERT",
+      "text": "one two three!\nfour five six\nseven eight nine\nab\n\tx\ty\nab字cd"
+    }
+  },
+  {
+    "press": "Escape"
+  },
+  {
+    "expect": {
+      "mode": "NORMAL",
+      "status": "1:2 6L",
+      "text": "one two three!\nfour five six!\nseven eight nine!\nab!\n\tx\ty\nab字cd"
+    }
+  },
+  {
+    "type": "u"
+  },
+  {
+    "expect": {
+      "text": "one two three\nfour five six\nseven eight nine\nab\n\tx\ty\nab字cd",
+      "status": "1:13 6L"
+    }
+  },
+  {
+    "caption": "Press Ctrl-V, 3j and I, type - and a space and press Esc",
+    "note": "The text goes in at the block's left edge on each of the four lines."
+  },
+  {
+    "press": "Control+v"
+  },
+  {
+    "type": "3j"
+  },
+  {
+    "expect": {
+      "mode": "V-BLOCK",
+      "selection": "e two three\nur five six\nven eight n\n",
+      "status": "4:3 6L"
+    }
+  },
+  {
+    "type": "I- "
+  },
+  {
+    "press": "Escape"
+  },
+  {
+    "expect": {
+      "mode": "NORMAL",
+      "status": "1:3 6L",
+      "text": "on- e two three\nfo- ur five six\nse- ven eight nine\nab- \n\tx\ty\nab字cd"
+    }
+  },
+  {
+    "caption": "Press j, then .",
+    "note": "The insert repeats on the same size of block. A tab the edge cuts becomes spaces."
+  },
+  {
+    "type": "j."
+  },
+  {
+    "expect": {
+      "status": "2:3 6L",
+      "text": "on- e two three\nfo- - ur five six\nse- - ven eight nine\nab- - \n  -       x\ty\nab字cd"
+    }
+  },
+  {
+    "type": "uu"
+  },
+  {
+    "expect": {
+      "text": "one two three\nfour five six\nseven eight nine\nab\n\tx\ty\nab字cd",
+      "status": "1:3 6L"
+    }
+  },
+  {
+    "caption": "Press gg, Ctrl-V, jje and y, then $ and p",
+    "note": "The block is yanked as a rectangle, and p puts it after the cursor, one row a line."
+  },
+  {
+    "type": "gg"
+  },
+  {
+    "press": "Control+v"
+  },
+  {
+    "type": "jje"
+  },
+  {
+    "expect": {
+      "mode": "V-BLOCK",
+      "selection": "one t\nfour \nseven",
+      "status": "3:5 6L"
+    }
+  },
+  {
+    "type": "y"
+  },
+  {
+    "expect": {
+      "mode": "NORMAL",
+      "status": "1:1 6L",
+      "selection": ""
+    }
+  },
+  {
+    "type": "$p"
+  },
+  {
+    "expect": {
+      "status": "1:14 6L",
+      "text": "one two threeone t\nfour five sixfour \nseven eight nsevenine\nab\n\tx\ty\nab字cd"
+    }
+  },
+  {
+    "type": "u"
+  },
+  {
+    "expect": {
+      "text": "one two three\nfour five six\nseven eight nine\nab\n\tx\ty\nab字cd"
+    }
+  },
+  {
+    "caption": "Press 4G, Ctrl-V, j and l",
+    "note": "The block cuts a tab: it is highlighted whole, and d leaves its other columns."
+  },
+  {
+    "type": "4G"
+  },
+  {
+    "press": "Control+v"
+  },
+  {
+    "type": "jl"
+  },
+  {
+    "expect": {
+      "mode": "V-BLOCK",
+      "selection": "ab\n\tx",
+      "status": "5:2 6L"
+    }
+  },
+  {
+    "shot": "block-through-a-tab"
+  },
+  {
+    "type": "d"
+  },
+  {
+    "expect": {
+      "mode": "NORMAL",
+      "status": "4:1 6L",
+      "text": "one two three\nfour five six\nseven eight nine\n\n\ty\nab字cd"
+    }
+  },
+  {
+    "type": "u"
+  },
+  {
+    "expect": {
+      "text": "one two three\nfour five six\nseven eight nine\nab\n\tx\ty\nab字cd",
+      "status": "4:1 6L"
+    }
+  },
+  {
+    "caption": "Press gv, then v, V and Ctrl-V",
+    "note": "gv brings the block back. v and V change the kind and keep both ends."
+  },
+  {
+    "type": "gv"
+  },
+  {
+    "expect": {
+      "mode": "V-BLOCK",
+      "selection": "ab\n\tx",
+      "status": "5:2 6L"
+    }
+  },
+  {
+    "type": "v"
+  },
+  {
+    "expect": {
+      "mode": "VISUAL",
+      "selection": "ab\n\tx"
+    }
+  },
+  {
+    "type": "V"
+  },
+  {
+    "expect": {
+      "mode": "V-LINE",
+      "selection": "ab\n\tx\ty\n"
+    }
+  },
+  {
+    "press": "Control+v"
+  },
+  {
+    "expect": {
+      "mode": "V-BLOCK",
+      "selection": "ab\n\tx"
+    }
+  },
+  {
+    "caption": "Press Ctrl-V again",
+    "note": "Ctrl-V in V-BLOCK leaves it."
+  },
+  {
+    "press": "Control+v"
+  },
+  {
+    "expect": {
+      "mode": "NORMAL",
+      "selection": "",
+      "status": "5:2 6L",
+      "text": "one two three\nfour five six\nseven eight nine\nab\n\tx\ty\nab字cd"
+    }
+  },
+  {
+    "caption": "Press G, 0, Ctrl-V, gg and l twice, then d",
+    "note": "The edge cuts a tab and a wide letter. d leaves their other columns as spaces."
+  },
+  {
+    "type": "G0"
+  },
+  {
+    "press": "Control+v"
+  },
+  {
+    "type": "ggll"
+  },
+  {
+    "expect": {
+      "mode": "V-BLOCK",
+      "status": "1:3 6L",
+      "selection": "one\nfou\nsev\nab\n\t\nab字"
+    }
+  },
+  {
+    "type": "d"
+  },
+  {
+    "expect": {
+      "mode": "NORMAL",
+      "status": "1:1 6L",
+      "selection": "",
+      "text": " two three\nr five six\nen eight nine\n\n     x\ty\n cd"
+    }
+  },
+  {
+    "type": "u"
+  },
+  {
+    "expect": {
+      "text": "one two three\nfour five six\nseven eight nine\nab\n\tx\ty\nab字cd",
+      "status": "1:1 6L"
+    }
+  },
+  {
+    "caption": "Press gg, Ctrl-V and j, then paste X with Ctrl-Shift-V",
+    "note": "A paste over a block erases it and pastes once at its top left."
+  },
+  {
+    "type": "gg"
+  },
+  {
+    "press": "Control+v"
+  },
+  {
+    "type": "j"
+  },
+  {
+    "expect": {
+      "mode": "V-BLOCK",
+      "selection": "o\nf"
+    }
+  },
+  {
+    "paste": "X"
+  },
+  {
+    "expect": {
+      "mode": "NORMAL",
+      "selection": "",
+      "text": "Xne two three\nour five six\nseven eight nine\nab\n\tx\ty\nab字cd",
+      "status": "1:2 6L"
+    }
+  },
+  {
+    "type": "u"
+  },
+  {
+    "expect": {
+      "text": "one two three\nfour five six\nseven eight nine\nab\n\tx\ty\nab字cd"
+    }
+  },
+  {
+    "caption": "Press i, then Ctrl-V",
+    "note": "In INSERT Ctrl-V still pastes."
+  },
+  {
+    "type": "i"
+  },
+  {
+    "expect": {
+      "mode": "INSERT"
+    }
+  },
+  {
+    "paste": "X"
+  },
+  {
+    "expect": {
+      "mode": "INSERT",
+      "text": "Xone two three\nfour five six\nseven eight nine\nab\n\tx\ty\nab字cd"
+    }
+  },
+  {
+    "press": "Escape"
+  },
+  {
+    "expect": {
+      "mode": "NORMAL"
+    }
+  },
+  {
+    "type": "u"
+  },
+  {
+    "expect": {
+      "text": "one two three\nfour five six\nseven eight nine\nab\n\tx\ty\nab字cd"
+    }
+  },
+  {
+    "caption": "Press gg, Ctrl-V, jj, c, Delete, then Esc",
+    "note": "A Delete in the stay shortens the first line, so nothing is copied, as in Vim."
+  },
+  {
+    "type": "gg"
+  },
+  {
+    "press": "Control+v"
+  },
+  {
+    "type": "jjc"
+  },
+  {
+    "press": "Delete"
+  },
+  {
+    "press": "Escape"
+  },
+  {
+    "expect": {
+      "mode": "NORMAL",
+      "text": "e two three\nour five six\neven eight nine\nab\n\tx\ty\nab字cd",
+      "status": "1:1 6L"
+    }
+  },
+  {
+    "type": "u"
+  },
+  {
+    "expect": {
+      "text": "one two three\nfour five six\nseven eight nine\nab\n\tx\ty\nab字cd",
+      "status": "1:1 6L"
+    }
+  },
+  {
+    "caption": "Copy Z outside, then $, Ctrl-V, jl, \"+p and u",
+    "note": "u after a clipboard put over a block goes to the first changed line."
+  },
+  {
+    "clipboard": {
+      "copy": "Z"
+    }
+  },
+  {
+    "type": "$"
+  },
+  {
+    "press": "Control+v"
+  },
+  {
+    "type": "jl\"+p"
+  },
+  {
+    "wait": 300
+  },
+  {
+    "expect": {
+      "mode": "NORMAL",
+      "text": "one two threZ\nfour five siZ\nseven eight nine\nab\n\tx\ty\nab字cd",
+      "pending": ""
+    }
+  },
+  {
+    "type": "u"
+  },
+  {
+    "expect": {
+      "text": "one two three\nfour five six\nseven eight nine\nab\n\tx\ty\nab字cd",
+      "status": "1:13 6L"
+    }
+  }
+]

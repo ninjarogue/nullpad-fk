@@ -9,7 +9,7 @@ import {
   defaultRegister,
   registerNamed,
 } from './operators'
-import { Amount, Kind as SelectionKind } from './selection'
+import { Amount, BlockAmount, Kind as SelectionKind } from './selection'
 import { OperatorName, TargetName } from './targets'
 
 export type Key = string
@@ -31,9 +31,11 @@ export const Command = Schema.TaggedUnion({
   Move: { motion: MotionName },
   Operate: { operator: OperatorName, target: TargetName },
   OperateAmount: { operator: OperatorName, amount: Amount },
+  OperateBlock: { operator: OperatorName, amount: BlockAmount },
   Put: { side: Side },
   Insert: { at: InsertAt },
   InsertAsSelected: { at: SelectionEdge },
+  InsertInBlock: { at: SelectionEdge, amount: BlockAmount },
   Cancel: {},
   Travel: { way: History.Way },
   Repeat: {},
@@ -42,7 +44,12 @@ export const Command = Schema.TaggedUnion({
 })
 export type Command = typeof Command.Type
 
-export const Reach = Schema.Literals(['AsSelected', 'WholeLines'])
+export const Reach = Schema.Literals([
+  'AsSelected',
+  'WholeLines',
+  'LinesOrBlock',
+  'LinesOrBlockToLineEnds',
+])
 export type Reach = typeof Reach.Type
 
 export const VisualCommand = Schema.TaggedUnion({
@@ -52,6 +59,7 @@ export const VisualCommand = Schema.TaggedUnion({
   Insert: { at: SelectionEdge },
   Pick: { object: ObjectName },
   Swap: {},
+  SwapColumns: {},
   Select: { kind: SelectionKind },
   Leave: {},
   Ignore: {},
@@ -111,7 +119,7 @@ const motionRows: ReadonlyArray<
   ['b', 'WordBackward', 'previous word'],
   ['e', 'WordEnd', 'end of word'],
   ['0', 'LineStart', 'line start'],
-  ['<Home>', 'LineStart', 'line start'],
+  ['<Home>', 'FirstColumn', 'line start'],
   ['^', 'FirstNonBlank', 'first non-blank'],
   ['$', 'LineEnd', 'line end'],
   ['<End>', 'LineEnd', 'line end'],
@@ -210,6 +218,7 @@ export const normal: ReadonlyArray<Binding<Command>> = [
   bind('.', Command.cases.Repeat.make({}), 'repeat last change'),
   bind('v', Command.cases.Select.make({ kind: 'Letters' }), 'select letters'),
   bind('V', Command.cases.Select.make({ kind: 'Lines' }), 'select lines'),
+  bind('<C-v>', Command.cases.Select.make({ kind: 'Block' }), 'select a block'),
   bind('gv', Command.cases.Reselect.make({}), 'select the last selection'),
   bind('<Esc>', Command.cases.Cancel.make({}), 'cancel'),
   bind('<C-[>', Command.cases.Cancel.make({}), 'cancel'),
@@ -236,6 +245,13 @@ const keysWithAnArgument: ReadonlyArray<Key> = [
 
 const leave = VisualCommand.cases.Leave.make({})
 
+const reachAbouts: Readonly<Record<Reach, string>> = {
+  AsSelected: 'the selection',
+  WholeLines: 'the lines',
+  LinesOrBlock: 'the lines, or the block',
+  LinesOrBlockToLineEnds: 'the lines, or the block to each line end',
+}
+
 const operateOn = (
   notation: string,
   operator: OperatorName,
@@ -244,7 +260,7 @@ const operateOn = (
   bind(
     notation,
     VisualCommand.cases.Operate.make({ operator, reach }),
-    `${verbs[operator]} ${reach === 'WholeLines' ? 'the lines' : 'the selection'}`,
+    `${verbs[operator]} ${reachAbouts[reach]}`,
   )
 
 export const visual: ReadonlyArray<Binding<VisualCommand>> = [
@@ -260,6 +276,11 @@ export const visual: ReadonlyArray<Binding<VisualCommand>> = [
   ),
   bind('o', VisualCommand.cases.Swap.make({}), 'go to the other end'),
   bind(
+    'O',
+    VisualCommand.cases.SwapColumns.make({}),
+    'go to the other end, or the other corner of the line',
+  ),
+  bind(
     'v',
     VisualCommand.cases.Select.make({ kind: 'Letters' }),
     'select letters, or leave',
@@ -269,16 +290,21 @@ export const visual: ReadonlyArray<Binding<VisualCommand>> = [
     VisualCommand.cases.Select.make({ kind: 'Lines' }),
     'select lines, or leave',
   ),
+  bind(
+    '<C-v>',
+    VisualCommand.cases.Select.make({ kind: 'Block' }),
+    'select a block, or leave',
+  ),
   operateOn('d', 'Delete', 'AsSelected'),
   operateOn('x', 'Delete', 'AsSelected'),
   operateOn('<Del>', 'Delete', 'AsSelected'),
   operateOn('y', 'Yank', 'AsSelected'),
   operateOn('c', 'Change', 'AsSelected'),
   operateOn('s', 'Change', 'AsSelected'),
-  operateOn('X', 'Delete', 'WholeLines'),
-  operateOn('D', 'Delete', 'WholeLines'),
-  operateOn('Y', 'Yank', 'WholeLines'),
-  operateOn('C', 'Change', 'WholeLines'),
+  operateOn('X', 'Delete', 'LinesOrBlock'),
+  operateOn('D', 'Delete', 'LinesOrBlockToLineEnds'),
+  operateOn('Y', 'Yank', 'LinesOrBlock'),
+  operateOn('C', 'Change', 'LinesOrBlockToLineEnds'),
   operateOn('S', 'Change', 'WholeLines'),
   operateOn('R', 'Change', 'WholeLines'),
   bind(

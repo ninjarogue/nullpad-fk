@@ -120,7 +120,12 @@ const braceAt = (
       })
 }
 
-type Read = Readonly<{ token: Option.Option<Token>; to: number; mode: Mode }>
+type Read = Readonly<{
+  token: Option.Option<Token>
+  to: number
+  mode: Mode
+  swallowsRest?: boolean
+}>
 
 const refused = (raw: string, to: number, mode: Mode): Read => ({
   token: Option.some({ _tag: 'Refused', raw }),
@@ -198,6 +203,7 @@ const readCollection = (
       token: Option.some<Token>({ _tag: 'Letter', text: '[' }),
       to: open + 1,
       mode,
+      swallowsRest: true,
     }),
     onSome: close => ({
       token: Option.some<Token>({
@@ -255,24 +261,26 @@ const tokenize = (text: string, delimiter: Option.Option<string>): Tokens => {
   let at = 0
   let pattern = ''
   let rest: Option.Option<string> = Option.none()
+  let ending = delimiter
   while (at < chars.length) {
     const c = chars[at] ?? ''
-    if (Option.contains(delimiter, c)) {
+    if (Option.contains(ending, c)) {
       rest = Option.some(chars.slice(at + 1).join(''))
       break
     }
     const read: Read =
       c === '\\'
-        ? readEscaped(chars, at, mode, delimiter)
+        ? readEscaped(chars, at, mode, ending)
         : readPlain(chars, at, mode)
     if (Option.isSome(read.token)) {
       tokens.push(read.token.value)
     }
     pattern +=
-      c === '\\' && chars[at + 1] === '?' && Option.contains(delimiter, '?')
+      c === '\\' && chars[at + 1] === '?' && Option.contains(ending, '?')
         ? '?'
         : chars.slice(at, read.to).join('')
     mode = read.mode
+    ending = read.swallowsRest === true ? Option.none() : ending
     at = read.to
   }
   return { tokens, pattern, rest }

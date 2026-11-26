@@ -280,7 +280,7 @@ export const rangeToLanding = (
     buffer,
     ordered(
       from,
-      reach === 'Exclusive' ? beforeLineBreak(buffer, spot) : spot,
+      reach === 'Linewise' ? spot : beforeLineBreak(buffer, spot),
       reach,
     ),
   )

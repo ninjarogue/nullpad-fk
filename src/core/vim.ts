@@ -59,10 +59,19 @@ export const BlockStay = Schema.Struct({
     column: Schema.Int,
     length: Schema.Int,
     kept: Schema.Int,
+    indent: Schema.Struct({ letters: Schema.Int, columns: Schema.Int }),
   }),
   lines: Schema.Int,
   seen: Schema.NonEmptyArray(Buffer.Line),
   home: Schema.Int,
+  entered: Schema.Int,
+  run: Schema.Struct({
+    at: Buffer.Position,
+    origin: Buffer.Position,
+    hasMoved: Schema.Boolean,
+    originFollows: Schema.Boolean,
+    isUntouched: Schema.Boolean,
+  }),
 })
 export type BlockStay = typeof BlockStay.Type
 
@@ -118,6 +127,8 @@ const blockStay = (
     lines: opened.lines.length,
     seen: opened.lines,
     home: home.column,
+    entered: opened.caret.column,
+    run: Operators.runFrom(opened.caret),
   })
 
 export const passed = (
@@ -129,13 +140,17 @@ export const passed = (
     return vim
   }
   const stay = vim.mode.block.value
-  return stay.seen !== before.lines || before.lines === after.lines
+  if (stay.seen !== before.lines) {
+    return vim
+  }
+  const run = Operators.runAfter(stay.run, before, after)
+  return run === stay.run && before.lines === after.lines
     ? vim
     : {
         ...vim,
         mode: insertMode(
           vim.mode.recording,
-          Option.some({ ...stay, seen: after.lines }),
+          Option.some({ ...stay, seen: after.lines, run }),
         ),
       }
 }
@@ -1422,24 +1437,24 @@ const leavesInsert = (input: Input): boolean =>
   Option.exists(keyOf(input), key => key === '<Esc>' || key === '<C-[>')
 
 const copiedDown = (buffer: Buffer.Buffer, stay: BlockStay): Buffer.Buffer => {
-  const { block, rule } = stay
-  const first = buffer.lines[block.first]
+  const first = buffer.lines[stay.block.first]
   if (
     first === undefined ||
     buffer.lines !== stay.seen ||
-    buffer.caret.line !== block.first ||
-    buffer.lines.length !== stay.lines
+    buffer.lines.length !== stay.lines ||
+    (stay.rule !== 'Change' && buffer.caret.line !== stay.block.first)
   ) {
     return buffer
   }
-  return Option.match(Operators.gained(first, block, rule, stay.held), {
+  return Option.match(Operators.gained(first, stay), {
     onNone: () => buffer,
-    onSome: text => {
-      const copied =
-        text === '' ? buffer : Operators.copiedDown(buffer, block, rule, text)
-      return rule === 'Change'
-        ? copied
-        : Buffer.moveTo(copied, { line: block.first, column: stay.home })
+    onSome: copy => {
+      const copied = Operators.copiedDown(buffer, copy)
+      return Option.match(copy.column, {
+        onNone: () => copied,
+        onSome: column =>
+          Buffer.moveTo(copied, { line: stay.block.first, column }),
+      })
     },
   })
 }

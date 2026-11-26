@@ -767,7 +767,73 @@ export const blockOperators: Readonly<
 export const BlockRule = Schema.Literals(['Insert', 'Append', 'Change'])
 export type BlockRule = typeof BlockRule.Type
 
-export type Held = Readonly<{ column: number; length: number; kept: number }>
+export type Indent = Readonly<{ letters: number; columns: number }>
+
+export type Held = Readonly<{
+  column: number
+  length: number
+  kept: number
+  indent: Indent
+}>
+
+const indentOf = (line: Buffer.Line): Indent => {
+  const letters = /^[ \t]*/u.exec(line.text)?.[0].length ?? 0
+  return { letters, columns: caretColumnAt(line, letters, 'First') }
+}
+
+export type Run = Readonly<{
+  at: Buffer.Position
+  origin: Buffer.Position
+  hasMoved: boolean
+  originFollows: boolean
+  isUntouched: boolean
+}>
+
+export const runFrom = (at: Buffer.Position): Run => ({
+  at,
+  origin: at,
+  hasMoved: false,
+  originFollows: true,
+  isUntouched: true,
+})
+
+export const runAfter = (
+  run: Run,
+  before: Buffer.Buffer,
+  after: Buffer.Buffer,
+): Run => {
+  if (before.lines === after.lines) {
+    return before.caret.line === after.caret.line &&
+      before.caret.column === after.caret.column
+      ? run
+      : { ...run, hasMoved: true }
+  }
+  const restarted = run.hasMoved ? before.caret : run.at
+  const originFollows =
+    run.originFollows &&
+    !(run.hasMoved && !run.isUntouched && restarted.column > run.origin.column)
+  const wentBack = Buffer.isBefore(after.caret, before.caret)
+  const at =
+    wentBack &&
+    before.caret.column === 0 &&
+    before.caret.line === restarted.line &&
+    after.caret.line < before.caret.line
+      ? after.caret
+      : restarted
+  const origin =
+    wentBack &&
+    after.caret.line === run.origin.line &&
+    after.caret.column < run.origin.column
+      ? after.caret
+      : run.origin
+  return {
+    at,
+    origin: originFollows ? at : origin,
+    hasMoved: false,
+    originFollows,
+    isUntouched: false,
+  }
+}
 
 type Hold = Readonly<{
   column: number
@@ -794,7 +860,7 @@ const holdOf = (
   if (isShort) {
     const lastLetter =
       cells === 0 ? 0 : line.text.length - cellStart(line, cells - 1)
-    return { ...hold, trimmed: Math.min(length, lastLetter), skipped: 0 }
+    return { ...hold, trimmed: lastLetter, skipped: 0 }
   }
   if (cut.right === undefined) {
     return { ...hold, trimmed: 0, skipped: 0 }
@@ -817,6 +883,7 @@ export const blockOpened = (
   const line = buffer.lines[block.first] ?? buffer.lines[0]
   const hold = holdOf(line, block, rule)
   const end = line.text.length
+  const indent = indentOf(line)
   const at = (column: number): Buffer.Buffer =>
     Buffer.moveTo(buffer, { line: block.first, column })
   if (rule === 'Insert') {
@@ -827,6 +894,7 @@ export const blockOpened = (
         column: hold.column,
         length: hold.length,
         kept: end - hold.column,
+        indent,
       },
     }
   }
@@ -836,7 +904,7 @@ export const blockOpened = (
     return {
       began: { line: block.first, column },
       buffer: at(column),
-      held: { column: hold.column, length: hold.length, kept },
+      held: { column: hold.column, length: hold.length, kept, indent },
     }
   }
   return {
@@ -847,7 +915,12 @@ export const blockOpened = (
       ]),
       { line: block.first, column: end + hold.pad },
     ),
-    held: { column: hold.column, length: hold.length + hold.pad, kept },
+    held: {
+      column: hold.column,
+      length: hold.length + hold.pad,
+      kept,
+      indent,
+    },
   }
 }
 
@@ -855,55 +928,159 @@ export const changeHeld = (buffer: Buffer.Buffer): Held => ({
   column: buffer.caret.column,
   length: 0,
   kept: Buffer.lineEnd(buffer, buffer.caret.line),
+  indent: indentOf(buffer.lines[buffer.caret.line] ?? buffer.lines[0]),
 })
 
 const isWholeLetters = (text: string): boolean =>
   !/^[\uDC00-\uDFFF]|[\uD800-\uDBFF]$/u.test(text)
 
-const someText = (text: string): Option.Option<string> =>
-  text === '' ? Option.none() : Option.some(text)
+export type Stay = Readonly<{
+  rule: BlockRule
+  block: Block
+  held: Held
+  home: number
+  entered: number
+  run: Run
+}>
 
-const gainedBy: Readonly<
-  Record<
-    BlockRule,
-    (line: Buffer.Line, block: Block, held: Held) => Option.Option<string>
-  >
-> = {
-  Change: ({ text }, _block, held) =>
-    someText(text.slice(held.column, held.column + text.length - held.kept)),
-  Insert: (line, block, held) => {
-    const now = holdOf(line, block, 'Insert')
-    const column =
-      !block.toLineEnds || now.length < held.length ? now.column : held.column
-    const from = Math.min(line.text.length, column)
-    return someText(line.text.slice(from, line.text.length - held.kept))
-  },
-  Append: (line, block, held) => {
-    const now = holdOf(line, block, 'Append')
-    const isFresh = !block.toLineEnds || now.length < held.length
-    const kept = isFresh ? held.kept + now.length - held.length : held.kept
-    const from = Math.min(
-      line.text.length,
-      isFresh
-        ? now.column + now.length - now.trimmed
-        : held.column + held.length,
-    )
-    return kept < 0
-      ? Option.none()
-      : Option.map(
-          someText(line.text.slice(from, line.text.length - kept)),
-          text => text.slice(isFresh ? now.skipped : 0),
-        )
-  },
+export type Copy = Readonly<{
+  rule: BlockRule
+  block: Block
+  text: string
+  column: Option.Option<number>
+}>
+
+type Turned = Readonly<{
+  rule: Exclude<BlockRule, 'Change'>
+  left: number
+  kept: number
+  home: number
+}>
+
+const turnedBy = (
+  line: Buffer.Line,
+  rule: Exclude<BlockRule, 'Change'>,
+  { block, held, run, home }: Stay,
+  followsOrigin: boolean,
+): Turned => {
+  const startsOnFirst = run.origin.line === block.first
+  const start =
+    startsOnFirst && run.origin.column < home ? run.origin.column : home
+  const asEntered = { rule, left: block.left, kept: held.kept, home: start }
+  if (!startsOnFirst || !followsOrigin) {
+    return asEntered
+  }
+  const left = caretColumnAt(line, run.origin.column, 'First')
+  const moved = left - block.left
+  if (rule === 'Insert' && start !== run.origin.column) {
+    return {
+      rule: 'Insert',
+      left,
+      kept: held.kept - moved,
+      home: run.origin.column,
+    }
+  }
+  if (rule === 'Append' && start >= run.origin.column) {
+    return {
+      rule: 'Insert',
+      left,
+      kept: held.kept + held.length - moved,
+      home: run.origin.column,
+    }
+  }
+  return asEntered
 }
 
-export const gained = (
+const gainedAtEdge = (
   line: Buffer.Line,
-  block: Block,
-  rule: BlockRule,
-  held: Held,
-): Option.Option<string> =>
-  Option.filter(gainedBy[rule](line, block, held), isWholeLetters)
+  rule: Exclude<BlockRule, 'Change'>,
+  stay: Stay,
+): Option.Option<Copy> => {
+  const { block, held, run } = stay
+  const end = line.text.length
+  const indent = indentOf(line)
+  const isIndented =
+    run.at.column > held.indent.letters && indent.letters > held.indent.letters
+  const turned = turnedBy(line, rule, stay, !block.toLineEnds && !isIndented)
+  const column =
+    held.column + (isIndented ? indent.letters - held.indent.letters : 0)
+  const shift =
+    isIndented && column > indent.letters
+      ? indent.columns - held.indent.columns
+      : 0
+  const right = Math.max(block.right, turned.left)
+  const now = holdOf(
+    line,
+    { ...block, left: turned.left + shift, right: right + shift },
+    turned.rule,
+  )
+  const isFresh = !block.toLineEnds || now.length < held.length
+  const kept =
+    isFresh && turned.rule === 'Append'
+      ? turned.kept + now.length - held.length
+      : turned.kept
+  const edge = isFresh
+    ? now.column + (turned.rule === 'Append' ? now.length - now.trimmed : 0)
+    : column + (turned.rule === 'Append' ? held.length : 0)
+  const back =
+    turned.rule === 'Append' &&
+    block.toLineEnds &&
+    run.at.line === block.first &&
+    stay.entered > run.at.column
+      ? stay.entered - run.at.column
+      : 0
+  if (kept < 0 || back >= Math.max(1, block.right)) {
+    return Option.none()
+  }
+  const from = Math.min(end, edge - back)
+  const length = end - from - kept - back
+  const text =
+    length > 0
+      ? line.text
+          .slice(from, from + length)
+          .slice(isFresh && turned.rule === 'Append' ? now.skipped : 0)
+      : ''
+  return text === ''
+    ? Option.none()
+    : Option.some({
+        rule: turned.rule,
+        block: {
+          ...block,
+          left: turned.left,
+          right: back > 0 ? block.right - back - 1 : right,
+        },
+        text,
+        column: Option.some(turned.home),
+      })
+}
+
+const gainedByChange = (
+  line: Buffer.Line,
+  { block, held }: Stay,
+): Option.Option<Copy> => {
+  const moved =
+    held.column > held.indent.letters
+      ? indentOf(line).letters - held.indent.letters
+      : 0
+  const length = line.text.length - held.kept - moved
+  const from = held.column + moved
+  return length > 0
+    ? Option.some({
+        rule: 'Change',
+        block,
+        text: line.text.slice(from, from + length),
+        column: Option.none(),
+      })
+    : Option.none()
+}
+
+export const gained = (line: Buffer.Line, stay: Stay): Option.Option<Copy> =>
+  Option.filter(
+    stay.rule === 'Change'
+      ? gainedByChange(line, stay)
+      : gainedAtEdge(line, stay.rule, stay),
+    ({ text }) => isWholeLetters(text),
+  )
 
 const splitting = (
   line: number,
@@ -955,13 +1132,28 @@ const copiedOnto: Readonly<
     )
   },
   Append: (line, number, block, text) => {
-    const cut = cutOf(line, block)
     const end = line.text.length
-    if (block.toLineEnds) {
-      return Option.some(insertedAt(number, end, text))
+    if (block.right < block.left - 1) {
+      const stop = stopAtScreenColumn(line, block.left)
+      return Option.some(
+        insertedAt(
+          number,
+          stop.column < block.left
+            ? end
+            : cellStart(line, Math.max(0, stop.cell - 1)),
+          text,
+        ),
+      )
     }
+    const cut = cutOf(line, block)
     if (cut.ends) {
-      return Option.some(insertedAt(number, end, ' '.repeat(cut.pad) + text))
+      return Option.some(
+        insertedAt(
+          number,
+          end,
+          block.toLineEnds ? text : ' '.repeat(cut.pad) + text,
+        ),
+      )
     }
     return Option.some(
       cut.right === undefined
@@ -994,9 +1186,7 @@ const copiedOnto: Readonly<
 
 export const copiedDown = (
   buffer: Buffer.Buffer,
-  block: Block,
-  rule: BlockRule,
-  text: string,
+  { block, rule, text }: Copy,
 ): Buffer.Buffer => {
   const rewrites: Array<Buffer.Rewrite> = []
   for (let number = block.first + 1; number <= block.last; number += 1) {

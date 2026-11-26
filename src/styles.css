@@ -557,25 +557,6 @@ body {
 }
 
 .status .prompt-caret {
-  flex: none;
-}
-
-.status .prompt-before {
-  display: inline-flex;
-  flex: 0 1 auto;
-  justify-content: flex-end;
-  min-width: 0;
-  max-width: calc(100% - 2ch);
-  overflow: hidden;
-}
-
-.status .prompt-after {
-  flex: 1 1 0;
-  min-width: 0;
-  overflow: hidden;
-}
-
-.status .prompt-caret {
   anchor-name: --caret;
   background: var(--cur);
   color: var(--bg);

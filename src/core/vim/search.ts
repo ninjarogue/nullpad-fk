@@ -109,6 +109,22 @@ const lastBefore = (
 
 type Hit = Readonly<{ line: number; match: Span }>
 
+type Memo = Array<Option.Option<Span> | undefined>
+
+const recalled =
+  (memo: Memo | undefined, probe: (text: string) => Option.Option<Span>) =>
+  (text: string, line: number): Option.Option<Span> => {
+    const known = memo?.[line]
+    if (known !== undefined) {
+      return known
+    }
+    const found = probe(text)
+    if (memo !== undefined) {
+      memo[line] = found
+    }
+    return found
+  }
+
 type Stepped = Option.Option<Readonly<{ hit: Hit; wrapped: boolean }>>
 
 const textOf = (buffer: Buffer.Buffer, line: number): string =>
@@ -120,14 +136,14 @@ const scanned = (
   from: number,
   to: number,
   wrapped: boolean,
-  probe: (text: string) => Option.Option<Span>,
+  probe: (text: string, line: number) => Option.Option<Span>,
 ): Stepped => {
   for (
     let line = from;
     forward ? line <= to : line >= to;
     line += forward ? 1 : -1
   ) {
-    const found = probe(textOf(buffer, line))
+    const found = probe(textOf(buffer, line), line)
     if (Option.isSome(found)) {
       return Option.some({ hit: { line, match: found.value }, wrapped })
     }
@@ -138,26 +154,38 @@ const scanned = (
 const orElse = (first: Stepped, second: () => Stepped): Stepped =>
   Option.isSome(first) ? first : second()
 
+const beforeCombining = 0x300
+
+const widthAt = (row: Buffer.Line, column: number): number => {
+  const { text } = row
+  const here = text.charCodeAt(column)
+  const next = text.charCodeAt(column + 1)
+  return here < beforeCombining && !(next >= beforeCombining)
+    ? 1
+    : Math.max(
+        1,
+        cellEnd(row, cellAt(row, column)) - cellStart(row, cellAt(row, column)),
+      )
+}
+
 const forwardStep = (
   buffer: Buffer.Buffer,
   matcher: Matcher,
   start: Start,
   landsOnEnd: boolean,
   firstOfCount: boolean,
+  memo: Memo | undefined,
 ): Stepped => {
   const last = buffer.lines.length - 1
-  const earliest = (text: string) => matcher.find(text, 0)
+  const earliest = recalled(memo, (text: string) => matcher.find(text, 0))
   return Match.value(start).pipe(
     Match.tagsExhaustive({
       BeforeNote: () => scanned(buffer, true, 0, last, false, earliest),
       AfterNote: () => scanned(buffer, true, 0, last, true, earliest),
       At: ({ place }) => {
         const row = buffer.lines[place.line]
-        const cell = row === undefined ? 0 : cellAt(row, place.column)
         const cursorCellWidth =
-          row === undefined
-            ? 1
-            : Math.max(1, cellEnd(row, cell) - cellStart(row, cell))
+          row === undefined ? 1 : widthAt(row, place.column)
         const here = firstAfter(
           matcher,
           textOf(buffer, place.line),
@@ -186,9 +214,12 @@ const backwardStep = (
   matcher: Matcher,
   start: Start,
   landsOnEnd: boolean,
+  memo: Memo | undefined,
 ): Stepped => {
   const last = buffer.lines.length - 1
-  const latest = (text: string) => lastBefore(matcher, text, Infinity, false)
+  const latest = recalled(memo, (text: string) =>
+    lastBefore(matcher, text, Infinity, false),
+  )
   return Match.value(start).pipe(
     Match.tagsExhaustive({
       BeforeNote: () => scanned(buffer, false, last, 0, true, latest),
@@ -311,27 +342,46 @@ export const find = (
   count: number,
   offset: Offset,
 ): Option.Option<Found> => {
+  const memo: Memo | undefined = count > 1 ? [] : undefined
   const landsOnEnd = offset.kind === 'End'
   const stepFrom = (start: Start, firstOfCount: boolean) =>
     Option.map(
       way === 'Forward'
-        ? forwardStep(buffer, matcher, start, landsOnEnd, firstOfCount)
-        : backwardStep(buffer, matcher, start, landsOnEnd),
+        ? forwardStep(buffer, matcher, start, landsOnEnd, firstOfCount, memo)
+        : backwardStep(buffer, matcher, start, landsOnEnd, memo),
       ({ hit, wrapped }): Progress => ({
         place: placeOfHit(buffer, hit, landsOnEnd),
         wrapped,
       }),
     )
-  const first = stepFrom(undone(buffer, from, offset), true)
+  const keyOf = ({ line, column }: Place): number => line * 2 ** 32 + column
+  const counted = (first: Progress): Option.Option<Progress> => {
+    const visited = new Map<number, number>([[keyOf(first.place), 0]])
+    const places: Array<Place> = [first.place]
+    let current = first
+    for (let index = 1; index < count; index += 1) {
+      const next = stepFrom(at(current.place), false)
+      if (Option.isNone(next)) {
+        return next
+      }
+      const wrapped = current.wrapped || next.value.wrapped
+      const seen = visited.get(keyOf(next.value.place))
+      if (seen !== undefined) {
+        const length = index - seen
+        const place = places[seen + ((count - 1 - seen) % length)]
+        return Option.some({
+          place: place ?? next.value.place,
+          wrapped: true,
+        })
+      }
+      visited.set(keyOf(next.value.place), index)
+      places.push(next.value.place)
+      current = { place: next.value.place, wrapped }
+    }
+    return Option.some(current)
+  }
   return Option.map(
-    times(count - 1, first, progress =>
-      Option.flatMap(progress, ({ place, wrapped }) =>
-        Option.map(stepFrom(at(place), false), next => ({
-          place: next.place,
-          wrapped: wrapped || next.wrapped,
-        })),
-      ),
-    ),
+    Option.flatMap(stepFrom(undone(buffer, from, offset), true), counted),
     ({ place, wrapped }) => ({ ...withOffset(buffer, place, offset), wrapped }),
   )
 }

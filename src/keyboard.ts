@@ -244,6 +244,11 @@ const listen = (
             context.updateSelection(caret, caret)
             state.selection = { start: caret, end: caret }
           }
+          const endComposition = (text: string) => {
+            state.composition = Option.none()
+            holdSurrounding()
+            offerInput(Input.cases.Commit.make({ text }))
+          }
           const surroundingChanges = new MutationObserver(holdSurrounding)
           surroundingChanges.observe(port, {
             attributes: true,
@@ -302,12 +307,17 @@ const listen = (
                 onSome: composed => {
                   Option.map(eraseOutside(composed, replaced), offerInput)
                   const { start, end } = composedAfter(composed, replaced, text)
-                  state.composition = Option.some({ start, end })
-                  offerInput(
-                    Input.cases.Preedit.make({
-                      text: context.text.slice(start, end),
-                    }),
-                  )
+                  /** Chrome's EditContext holds no empty composition: an empty one ends it, and an empty commit ends it with no compositionend. */
+                  if (start === end) {
+                    endComposition('')
+                  } else {
+                    state.composition = Option.some({ start, end })
+                    offerInput(
+                      Input.cases.Preedit.make({
+                        text: context.text.slice(start, end),
+                      }),
+                    )
+                  }
                 },
               })
               state.selection = {
@@ -328,13 +338,11 @@ const listen = (
           context.addEventListener(
             'compositionend',
             event => {
-              state.composition = Option.none()
-              holdSurrounding()
-              offerInput(
-                Input.cases.Commit.make({
-                  text: event instanceof CompositionEvent ? event.data : '',
-                }),
-              )
+              if (Option.isSome(state.composition)) {
+                endComposition(
+                  event instanceof CompositionEvent ? event.data : '',
+                )
+              }
             },
             { signal },
           )

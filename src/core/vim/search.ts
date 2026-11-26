@@ -66,21 +66,18 @@ const firstAfter = (
   usesEnd: boolean,
 ): Option.Option<Match> => {
   let from = 0
-  let isFirst = true
   while (from <= text.length) {
     const found = matchAt(regex, text, from)
     if (Option.isNone(found)) {
       return found
     }
     const { start, end } = found.value
-    const rejected =
-      usesEnd && isFirst
-        ? end - 1 < column + extra
-        : start - (start === text.length ? 1 : 0) < column + extra
+    const rejected = usesEnd
+      ? end - 1 < column + extra
+      : start - (start === text.length ? 1 : 0) < column + extra
     if (!rejected) {
       return found
     }
-    isFirst = false
     from = nextColumn(text, found.value)
     if (from >= text.length) {
       return Option.none()
@@ -130,6 +127,7 @@ const forwardStep = (
   regex: RegExp,
   from: Place,
   usesEnd: boolean,
+  firstOfCount: boolean,
 ): Stepped => {
   const count = buffer.lines.length
   const line = buffer.lines[from.line]
@@ -138,13 +136,16 @@ const forwardStep = (
     line === undefined
       ? 1
       : Math.max(1, cellEnd(line, cell) - cellStart(line, cell))
-  const here = firstAfter(
-    regex,
-    textOf(buffer, from.line),
-    from.column,
-    extra,
-    usesEnd,
-  )
+  const here =
+    from.line < 0
+      ? Option.none()
+      : firstAfter(
+          regex,
+          textOf(buffer, from.line),
+          from.column,
+          extra,
+          usesEnd && firstOfCount,
+        )
   if (Option.isSome(here)) {
     return Option.some({
       hit: { line: from.line, match: here.value },
@@ -173,12 +174,10 @@ const backwardStep = (
   from: Place,
   usesEnd: boolean,
 ): Stepped => {
-  const here = lastBefore(
-    regex,
-    textOf(buffer, from.line),
-    from.column,
-    usesEnd,
-  )
+  const here =
+    from.column === 0 || from.line >= buffer.lines.length
+      ? Option.none()
+      : lastBefore(regex, textOf(buffer, from.line), from.column, usesEnd)
   if (Option.isSome(here)) {
     return Option.some({
       hit: { line: from.line, match: here.value },
@@ -211,10 +210,8 @@ const placeOfHit = (
   if (!usesEnd) {
     return { line, column: match.start }
   }
-  if (match.end === 0) {
-    return line > 0
-      ? { line: line - 1, column: textOf(buffer, line - 1).length }
-      : { line, column: 0 }
+  if (match.end === match.start) {
+    return { line, column: match.start }
   }
   const row = buffer.lines[line]
   return {
@@ -243,9 +240,9 @@ const times = <A>(count: number, start: A, step: (a: A) => A): A => {
   return value
 }
 
-const undone = (buffer: Buffer.Buffer, from: Spot, offset: Offset): Spot => {
+const undone = (buffer: Buffer.Buffer, from: Spot, offset: Offset): Place => {
   if (offset.kind === 'Line' || offset.by === 0) {
-    return from
+    return positionOf(buffer, from)
   }
   const walk = offset.by > 0 ? decl : incl
   const moved = times(Math.abs(offset.by), Option.some(from), spot =>
@@ -256,7 +253,13 @@ const undone = (buffer: Buffer.Buffer, from: Spot, offset: Offset): Spot => {
         : Option.some(stepped.spot)
     }),
   )
-  return Option.getOrElse(moved, () => from)
+  return Option.match(moved, {
+    onNone: () => ({
+      line: offset.by > 0 ? -1 : buffer.lines.length,
+      column: 0,
+    }),
+    onSome: spot => positionOf(buffer, spot),
+  })
 }
 
 const withOffset = (
@@ -294,11 +297,12 @@ export const find = (
   offset: Offset,
 ): Option.Option<Found> => {
   const usesEnd = offset.kind === 'End'
-  const step = forward ? forwardStep : backwardStep
-  let place: Place = positionOf(buffer, undone(buffer, from, offset))
+  let place: Place = undone(buffer, from, offset)
   let wrapped = false
   for (let left = count; left > 0; left -= 1) {
-    const stepped = step(buffer, regex, place, usesEnd)
+    const stepped = forward
+      ? forwardStep(buffer, regex, place, usesEnd, left === count)
+      : backwardStep(buffer, regex, place, usesEnd)
     if (Option.isNone(stepped)) {
       return Option.none()
     }

@@ -394,6 +394,27 @@ test('PageDown and PageUp move the cursor a textarea page and scroll its row to 
   ])
 })
 
+test('Delete, PageDown and a letter in one frame scroll the cursor’s row to the top, as PageDown alone does', async ({
+  nullpad,
+}) => {
+  test.fail(
+    true,
+    'known bug: a letter queued behind a queued PageDown leaves the screen where it was',
+  )
+  await nullpad.paste(numberedLines(200))
+  await nullpad.press('Control+Home')
+  const page = await textareaPageRows(nullpad)
+  await nullpad.burst([
+    [{ press: 'Delete' }, { press: 'PageDown' }, { type: 'x' }],
+  ])
+  expect(await pageStop(nullpad)).toEqual({
+    line: 1 + page,
+    column: 2,
+    row: 0,
+    top: 1 + page,
+  })
+})
+
 test('PageDown on the last page goes to the end of the note, and PageUp from there keeps the last page on screen', async ({
   nullpad,
 }) => {
@@ -944,6 +965,32 @@ test('the cursor is drawn where the status line puts it after Backspace joins li
     'the cursor after both spaces',
   ).toEqual({ cell: 3, row: 0 })
   expect(screen.status).toEqual({ line: 1, column: 4, lineCount: 1 })
+})
+
+test('Ctrl+Home in the frame after Backspace took out the last line shows the cursor on line 1', async ({
+  nullpad,
+}) => {
+  test.fail(
+    true,
+    'known bug: the scroll Chrome reports after the note got shorter takes back the reveal of a key in the next frame',
+  )
+  const lastLine = 'line 30'
+  await nullpad.paste(numberedLines(30))
+  await nullpad.press('Control+End')
+  await nullpad.burst([
+    [{ press: 'Backspace', times: lastLine.length + 1 }],
+    [{ press: 'Control+Home' }],
+  ])
+  const screen = await nullpad.screen()
+  expect(screen.status, 'the cursor at the start of 29 lines').toEqual({
+    line: 1,
+    column: 1,
+    lineCount: 29,
+  })
+  expect(
+    { top: screen.rows[0]?.number, cursorOnScreen: screen.cursor?.inside },
+    'line 1 at the top with the cursor on it',
+  ).toEqual({ top: '1', cursorOnScreen: true })
 })
 
 test('a key sent with no gap after a big paste and Ctrl+Home is never lost', async ({

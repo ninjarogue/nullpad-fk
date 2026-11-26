@@ -1,3 +1,5 @@
+import { type VimDifference } from './differences.ts'
+
 export type Row = Readonly<{
   text: keyof typeof texts
   at: readonly [number, number]
@@ -5,6 +7,7 @@ export type Row = Readonly<{
   after: string
   line: number
   column: number
+  differs?: VimDifference
 }>
 
 export const texts = {

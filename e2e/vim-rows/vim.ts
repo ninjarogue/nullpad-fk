@@ -1,3 +1,5 @@
+import { type VimDifference } from './differences.ts'
+
 export type Row = Readonly<{
   name: string
   text: string
@@ -6,6 +8,7 @@ export type Row = Readonly<{
   after: string
   line: number
   column: number
+  differs?: VimDifference
 }>
 
 export const horizontalRows: ReadonlyArray<Row> = [
@@ -1037,6 +1040,7 @@ export const statedRows: ReadonlyArray<Row> = [
     after: 'acd',
     line: 1,
     column: 2,
+    differs: 'unbuilt-keys',
   },
 ]
 

@@ -1,3 +1,5 @@
+import { type VimDifference } from './differences.ts'
+
 export type State = Readonly<{
   text: string
   line: number
@@ -10,6 +12,7 @@ export type Row = Readonly<{
   at: readonly [number, number]
   keys: string
   state: State
+  differs?: VimDifference
 }>
 
 export const stayNotes = {

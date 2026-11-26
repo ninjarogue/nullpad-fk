@@ -1,3 +1,5 @@
+import { type VimDifference } from './differences.ts'
+
 export type Row = Readonly<{
   text: keyof typeof texts
   at: readonly [number, number]
@@ -6,6 +8,7 @@ export type Row = Readonly<{
   line: number
   column: number
   clip?: string
+  differs?: VimDifference
 }>
 
 export type Group = Readonly<{ name: string; rows: ReadonlyArray<Row> }>

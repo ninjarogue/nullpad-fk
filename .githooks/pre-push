@@ -12,6 +12,11 @@ step format pnpm format:check
 step lint pnpm lint
 step typecheck pnpm typecheck
 step architecture pnpm arch
+if sh scripts/vim-oracle-needed.sh; then
+  step vim-oracle pnpm test:oracle
+  git diff --quiet e2e/vim-rows/confirmed.txt ||
+    echo "pre-push: Vim confirmed new rows; commit e2e/vim-rows/confirmed.txt"
+fi
 step build pnpm build
 if [ "${NULLPAD_VIM_TABLES:-}" = 1 ] || sh scripts/vim-tables-needed.sh; then
   step e2e env NULLPAD_DIST=dist pnpm test:e2e

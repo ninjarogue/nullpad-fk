@@ -1,3 +1,5 @@
+import { type VimDifference } from './differences.ts'
+
 export type Row = Readonly<{
   id: number
   why: string
@@ -9,6 +11,7 @@ export type Row = Readonly<{
   column: number
   mode: string
   selection?: string
+  differs?: VimDifference
 }>
 
 export type Group = Readonly<{ name: string; rows: ReadonlyArray<Row> }>
@@ -264,6 +267,7 @@ export const groups: ReadonlyArray<Group> = [
         line: 1,
         column: 1,
         mode: 'NORMAL',
+        differs: 'whole-letters',
       },
       {
         id: 55,
@@ -275,6 +279,7 @@ export const groups: ReadonlyArray<Group> = [
         line: 1,
         column: 2,
         mode: 'NORMAL',
+        differs: 'whole-letters',
       },
       {
         id: 57,
@@ -286,6 +291,7 @@ export const groups: ReadonlyArray<Group> = [
         line: 1,
         column: 4,
         mode: 'NORMAL',
+        differs: 'whole-letters',
       },
     ],
   },
@@ -549,6 +555,7 @@ export const groups: ReadonlyArray<Group> = [
         line: 1,
         column: 1,
         mode: 'NORMAL',
+        differs: 'r-control-cancels',
       },
       {
         id: 22,
@@ -560,6 +567,7 @@ export const groups: ReadonlyArray<Group> = [
         line: 1,
         column: 1,
         mode: 'NORMAL',
+        differs: 'r-control-cancels',
       },
       {
         id: 137,
@@ -571,6 +579,7 @@ export const groups: ReadonlyArray<Group> = [
         line: 1,
         column: 1,
         mode: 'NORMAL',
+        differs: 'r-control-cancels',
       },
       {
         id: 27,
@@ -1155,6 +1164,7 @@ export const groups: ReadonlyArray<Group> = [
         column: 3,
         mode: 'VISUAL',
         selection: 'bc',
+        differs: 'visual-r-enter',
       },
       {
         id: 92,
@@ -1265,6 +1275,7 @@ export const groups: ReadonlyArray<Group> = [
         line: 2,
         column: 5,
         mode: 'VISUAL',
+        differs: 'visual-r-enter',
       },
       {
         id: 102,
@@ -1298,6 +1309,7 @@ export const groups: ReadonlyArray<Group> = [
         line: 1,
         column: 1,
         mode: 'NORMAL',
+        differs: 'whole-letters',
       },
       {
         id: 132,
@@ -1470,6 +1482,7 @@ export const groups: ReadonlyArray<Group> = [
         column: 3,
         mode: 'V-LINE',
         selection: 'one two three\n',
+        differs: 'visual-r-enter',
       },
       {
         id: 110,

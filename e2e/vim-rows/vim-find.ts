@@ -1,3 +1,5 @@
+import { type VimDifference } from './differences.ts'
+
 export type Row = readonly [
   id: number,
   why: string,
@@ -10,6 +12,7 @@ export type Row = readonly [
   mode: string,
   selection: string | null,
   afterP: string | null,
+  differs?: VimDifference,
 ]
 
 export type Group = Readonly<{ name: string; rows: ReadonlyArray<Row> }>
@@ -1272,6 +1275,7 @@ export const groups: ReadonlyArray<Group> = [
         'NORMAL',
         null,
         null,
+        'find-grapheme',
       ],
       [
         96,
@@ -1285,6 +1289,7 @@ export const groups: ReadonlyArray<Group> = [
         'NORMAL',
         null,
         null,
+        'find-grapheme',
       ],
       [
         97,
@@ -1337,6 +1342,7 @@ export const groups: ReadonlyArray<Group> = [
         'NORMAL',
         null,
         null,
+        'find-grapheme',
       ],
       [
         101,

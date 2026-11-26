@@ -336,31 +336,9 @@ const wheelThenKeys = (
   deltaY: number,
   keys: ReadonlyArray<'x' | 'ArrowDown' | 'ArrowUp'>,
 ) =>
-  Promise.all([
-    nullpad.cdp.send('Input.dispatchMouseEvent', {
-      type: 'mouseWheel',
-      x: 400,
-      y: 300,
-      deltaX: 0,
-      deltaY,
-    }),
-    ...keys.flatMap(key => {
-      const event =
-        key === 'x'
-          ? { key: 'x', code: 'KeyX', windowsVirtualKeyCode: 88, text: 'x' }
-          : {
-              key,
-              code: key,
-              windowsVirtualKeyCode: key === 'ArrowUp' ? 38 : 40,
-            }
-      return [
-        nullpad.cdp.send('Input.dispatchKeyEvent', {
-          type: key === 'x' ? 'keyDown' : 'rawKeyDown',
-          ...event,
-        }),
-        nullpad.cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', ...event }),
-      ]
-    }),
+  nullpad.burst([
+    { wheel: deltaY },
+    ...keys.map(key => (key === 'x' ? { type: key } : { press: key })),
   ])
 
 const settleScroll = async (nullpad: Nullpad) => {

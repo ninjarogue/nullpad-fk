@@ -182,26 +182,6 @@ test('closing the read view leaves the editor scrolled where it was, cursor off 
   ).toEqual(before)
 })
 
-const tap = (nullpad: Nullpad, key: Readonly<Record<string, unknown>>) =>
-  Promise.all([
-    nullpad.cdp.send('Input.dispatchKeyEvent', { type: 'rawKeyDown', ...key }),
-    nullpad.cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', ...key }),
-  ])
-
-const ctrlEnd = {
-  key: 'End',
-  code: 'End',
-  windowsVirtualKeyCode: 35,
-  modifiers: 2,
-}
-
-const ctrlE = {
-  key: 'e',
-  code: 'KeyE',
-  windowsVirtualKeyCode: 69,
-  modifiers: 2,
-}
-
 test('Ctrl+End and Ctrl+E in one frame, then Esc, shows what Ctrl+End alone shows', async ({
   nullpad,
 }) => {
@@ -216,13 +196,11 @@ test('Ctrl+End and Ctrl+E in one frame, then Esc, shows what Ctrl+End alone show
     }
   }
   await nullpad.press('Control+Home')
-  await tap(nullpad, ctrlEnd)
-  await settle(nullpad.page)
+  await nullpad.burst([{ press: 'Control+End' }])
   await settle(nullpad.page)
   const alone = await linesOnScreen()
   await nullpad.press('Control+Home')
-  await Promise.all([tap(nullpad, ctrlEnd), tap(nullpad, ctrlE)])
-  await settle(nullpad.page)
+  await nullpad.burst([{ press: 'Control+End' }, { press: 'Control+e' }])
   await expect(
     nullpad.page.locator('.read'),
     'Ctrl+E opens the read view',

@@ -4,14 +4,15 @@ import { type BrowserContext } from '@playwright/test'
 
 import {
   type ClipboardKind,
+  type Input,
   type Nullpad,
+  type Point,
   type Screen,
   driver,
   linesOf,
   settle,
 } from './nullpad.ts'
 
-type Point = Readonly<{ x: number; y: number }>
 type Spot = Readonly<{ row: number; cell: number }>
 type Expectation = Readonly<{
   text?: string
@@ -34,18 +35,14 @@ type ClipboardStep =
   | Readonly<{ copy: string }>
   | Readonly<{ hold: boolean }>
 
-export type Step =
-  | Readonly<{ type: string }>
-  | Readonly<{ press: string; times?: number }>
-  | Readonly<{ paste: string }>
-  | Readonly<{ clipboard: ClipboardStep }>
-  | Readonly<{
-      compose: string
-      replacing?: Readonly<{ start: number; end: number }>
-    }>
-  | Readonly<{ commit: string }>
+type InputStep =
+  | Exclude<Input, Readonly<{ click: Point }>>
   | Readonly<{ click: Point | Spot }>
-  | Readonly<{ wheel: number }>
+
+export type Step =
+  | InputStep
+  | Readonly<{ burst: ReadonlyArray<InputStep>; stall?: number }>
+  | Readonly<{ clipboard: ClipboardStep }>
   | Readonly<{ drag: Readonly<{ from: Point; to: Point }> }>
   | Readonly<{ scheme: 'light' | 'dark' }>
   | Readonly<{ resize: Readonly<{ width: number; height: number }> }>
@@ -64,6 +61,7 @@ const stepKeys = [
   'commit',
   'click',
   'wheel',
+  'burst',
   'drag',
   'scheme',
   'resize',
@@ -73,6 +71,19 @@ const stepKeys = [
   'caption',
   'expect',
 ] as const
+
+const inputKinds = [
+  'type',
+  'press',
+  'paste',
+  'compose',
+  'commit',
+  'click',
+  'wheel',
+] as const
+
+const isInputStep = (step: Step): step is InputStep =>
+  inputKinds.some(kind => kind in step)
 
 const captionLimit = 60
 const noteLimit = 90
@@ -97,6 +108,7 @@ export const parseStep = (value: unknown, index: number): Step => {
     ...(kind === 'press' ? ['times'] : []),
     ...(kind === 'compose' ? ['replacing'] : []),
     ...(kind === 'caption' ? ['note'] : []),
+    ...(kind === 'burst' ? ['stall'] : []),
   ]
   const extra = Object.keys(value).filter(key => !allowed.includes(key))
   if (extra.length > 0) {
@@ -197,6 +209,25 @@ export const parseStep = (value: unknown, index: number): Step => {
         : fail('click takes { row, cell } or { x, y }')
     case 'wheel':
       return { wheel: number(body, 'wheel') }
+    case 'burst': {
+      const inputs = Array.isArray(body)
+        ? body.map((each: unknown) => parseStep(each, index))
+        : []
+      if (inputs.length === 0) {
+        return fail('burst takes a list of input steps')
+      }
+      const burst = inputs.flatMap(each => (isInputStep(each) ? [each] : []))
+      if (burst.length < inputs.length) {
+        fail(`burst takes only ${inputKinds.join(', ')} steps`)
+      }
+      const stall = value['stall']
+      if (stall === undefined) {
+        return { burst }
+      }
+      return number(stall, 'stall') > 0 && number(stall, 'stall') <= 10_000
+        ? { burst, stall: number(stall, 'stall') }
+        : fail('stall takes milliseconds from 1 to 10000')
+    }
     case 'drag': {
       const shape = 'drag takes { from: { x, y }, to: { x, y } }'
       if (!isRecord(body)) {
@@ -566,6 +597,14 @@ export const play = async (
     await nullpad.click(point.x, point.y)
   } else if ('wheel' in step) {
     await nullpad.wheel(step.wheel)
+  } else if ('burst' in step) {
+    const screen = await nullpad.screen()
+    await nullpad.burst(
+      step.burst.map(input =>
+        'click' in input ? { click: clickPoint(screen, input.click) } : input,
+      ),
+      step.stall === undefined ? {} : { stall: step.stall },
+    )
   } else if ('drag' in step) {
     await drag(nullpad, step.drag.from, step.drag.to)
   } else if ('scheme' in step) {

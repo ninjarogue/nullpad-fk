@@ -151,7 +151,7 @@ const keys: Readonly<
     prompt,
     act: Act.cases.Run.make({ text: prompt.text }),
   }),
-  Tab: stay,
+  Tab: prompt => typeText(prompt, '\t'),
   Backspace: prompt =>
     prompt.text === '' && prompt.preedit === ''
       ? closed(prompt)

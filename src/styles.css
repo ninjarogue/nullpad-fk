@@ -541,37 +541,32 @@ body {
   text-overflow: ellipsis;
 }
 
-.prompt {
-  display: flex;
+.status .prompt {
   flex: 1;
   min-width: 0;
   overflow: hidden;
   white-space: pre;
 }
 
-.prompt .phead {
-  display: flex;
-  flex: 0 1 auto;
+.status .prompt .phead {
+  display: inline-flex;
   justify-content: flex-end;
-  min-width: 0;
+  max-width: calc(100% - 1ch);
   overflow: hidden;
+  vertical-align: top;
 }
 
-.prompt .pcur {
-  flex: none;
+.status .prompt .pcur {
   anchor-name: --caret;
   background: var(--cur);
   color: var(--bg);
 }
 
-.prompt .pcur:empty {
+.status .prompt .pcur:empty {
+  display: inline-block;
   width: 1ch;
-}
-
-.prompt .ptail {
-  flex: 0 1000 auto;
-  min-width: 0;
-  overflow: hidden;
+  height: 1lh;
+  vertical-align: top;
 }
 
 .pos {

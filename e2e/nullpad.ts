@@ -806,3 +806,40 @@ export const test = base.extend<{
     }
   },
 })
+
+export const startVimRow = async (
+  nullpad: Nullpad,
+  text: string,
+  line: number,
+  column: number,
+): Promise<void> => {
+  const { page } = nullpad
+  const mode = page.locator('.status .mode')
+  await settle(page)
+  if ((await mode.innerText()) === 'EDIT') {
+    await page.keyboard.press('Control+,')
+  }
+  await page.keyboard.press('Escape')
+  await page.keyboard.press('Escape')
+  for (const key of ['g', 'g', 'd', 'G']) {
+    await page.keyboard.press(key)
+  }
+  await nullpad.paste(text)
+  await nullpad.reload()
+  const keys = [
+    'g',
+    'g',
+    ...(line > 1 ? [...String(line - 1), 'j'] : []),
+    '0',
+    ...(column > 1 ? [...String(column - 1), 'l'] : []),
+  ]
+  for (const key of keys) {
+    await page.keyboard.press(key)
+  }
+  await settle(page)
+  expect(await textOf(await screenOf(page)), 'the row starts on its note').toBe(
+    text,
+  )
+  expect(await mode.innerText(), 'the row starts in NORMAL').toBe('NORMAL')
+  expect((await statusOf(page)).line, 'the row starts on its line').toBe(line)
+}

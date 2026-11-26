@@ -6,6 +6,7 @@ import {
   openFresh,
   settle,
   test,
+  startVimRow,
 } from './nullpad'
 
 const SAVED = 1500
@@ -1782,13 +1783,6 @@ const vimOn = async (nullpad: Nullpad) => {
   await settle(nullpad.page)
 }
 
-const placeAt = async (nullpad: Nullpad, line: number, column: number) => {
-  await nullpad.press('Control+Home')
-  await nullpad.press('ArrowDown', line - 1)
-  await nullpad.press('Home')
-  await nullpad.press('ArrowRight', column - 1)
-}
-
 const selectionOf = async (nullpad: Nullpad): Promise<string> => {
   await settle(nullpad.page)
   const read: unknown = Reflect.get(nullpad, 'selection')
@@ -1841,10 +1835,7 @@ const selectionBox = async (nullpad: Nullpad): Promise<Box | null> => {
 
 const playRow = async (nullpad: Nullpad, row: Row) => {
   const label = `${row.text} at ${row.at.join(':')} keys ${row.keys}`
-  await openFresh(nullpad.page)
-  await nullpad.paste(texts[row.text])
-  await placeAt(nullpad, row.at[0], row.at[1])
-  await vimOn(nullpad)
+  await startVimRow(nullpad, texts[row.text], row.at[0], row.at[1])
   await play(nullpad, row.keys)
   expect.soft(await nullpad.text(), `${label}: text`).toBe(row.after)
   expect

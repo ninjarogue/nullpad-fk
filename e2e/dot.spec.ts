@@ -1,4 +1,4 @@
-import { type Nullpad, expect, openFresh, settle, test } from './nullpad'
+import { type Nullpad, expect, settle, test, startVimRow } from './nullpad'
 
 const SAVED = 1500
 const ROWS_PER_TEST = 18
@@ -1602,25 +1602,9 @@ const vimOn = async (nullpad: Nullpad) => {
   await settle(nullpad.page)
 }
 
-const startWith = async (nullpad: Nullpad, text: string) => {
-  await openFresh(nullpad.page)
-  await nullpad.paste(text)
-  await nullpad.reload()
-  await nullpad.press('Control+Home')
-}
-
-const placeAt = async (nullpad: Nullpad, line: number, column: number) => {
-  await nullpad.press('Control+Home')
-  await nullpad.press('ArrowDown', line - 1)
-  await nullpad.press('Home')
-  await nullpad.press('ArrowRight', column - 1)
-}
-
 const playRow = async (nullpad: Nullpad, row: Row) => {
   const label = `${row.text} at ${row.at.join(':')} keys ${row.keys}`
-  await startWith(nullpad, texts[row.text])
-  await placeAt(nullpad, row.at[0], row.at[1])
-  await vimOn(nullpad)
+  await startVimRow(nullpad, texts[row.text], row.at[0], row.at[1])
   await play(nullpad, row.keys)
   expect.soft(await nullpad.text(), `${label}: text`).toBe(row.after)
   expect

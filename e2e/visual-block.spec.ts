@@ -2,10 +2,10 @@ import {
   type Nullpad,
   expect,
   numberedLines,
-  openFresh,
   openTab,
   settle,
   test,
+  startVimRow,
 } from './nullpad'
 
 const ROWS_PER_TEST = 12
@@ -2536,13 +2536,6 @@ const vimOn = async (nullpad: Nullpad) => {
   await settle(nullpad.page)
 }
 
-const placeAt = async (nullpad: Nullpad, line: number, column: number) => {
-  await nullpad.press('Control+Home')
-  await nullpad.press('ArrowDown', line - 1)
-  await nullpad.press('Home')
-  await nullpad.press('ArrowRight', column - 1)
-}
-
 const kindOf = async (nullpad: Nullpad) => {
   await settle(nullpad.page)
   const selection = nullpad.page.locator('#selection')
@@ -2575,10 +2568,7 @@ const expectState = async (nullpad: Nullpad, label: string, state: State) => {
 
 const playRow = async (nullpad: Nullpad, row: Row) => {
   const label = `${row.note} at ${row.at.join(':')} keys ${row.keys}`
-  await openFresh(nullpad.page)
-  await nullpad.paste(notes[row.note])
-  await placeAt(nullpad, row.at[0], row.at[1])
-  await vimOn(nullpad)
+  await startVimRow(nullpad, notes[row.note], row.at[0], row.at[1])
   await play(nullpad, row.keys)
   await expectState(nullpad, label, row.state)
   if (row.readback !== undefined) {

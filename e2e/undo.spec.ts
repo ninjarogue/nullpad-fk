@@ -6,6 +6,7 @@ import {
   openTab,
   settle,
   test,
+  startVimRow,
 } from './nullpad'
 
 const SAVED = 1500
@@ -1190,19 +1191,9 @@ const startWith = async (nullpad: Nullpad, text: string) => {
   await nullpad.press('Control+Home')
 }
 
-const placeAt = async (nullpad: Nullpad, line: number, column: number) => {
-  await nullpad.press('Control+Home')
-  await nullpad.press('ArrowDown', line - 1)
-  await nullpad.press('Home')
-  await nullpad.press('ArrowRight', column - 1)
-}
-
 const playRow = async (nullpad: Nullpad, row: Row) => {
   const label = `${row.text} at ${row.at.join(':')} keys ${row.keys}`
-  await startWith(nullpad, texts[row.text])
-  await placeAt(nullpad, row.at[0], row.at[1])
-  await nullpad.page.keyboard.press(toggle)
-  await settle(nullpad.page)
+  await startVimRow(nullpad, texts[row.text], row.at[0], row.at[1])
   for (const token of row.keys.match(/<[A-Za-z-]+>|./gu) ?? []) {
     await nullpad.page.keyboard.press(keyNames[token] ?? token)
   }

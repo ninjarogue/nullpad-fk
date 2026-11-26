@@ -7919,7 +7919,14 @@ test('a repeat inside a repeated group is refused with its own notice', async ({
 const refusedGroups: ReadonlyArray<readonly [string, string]> = [
   ['\\(a\\|a\\)*b', 'a star on a group with a bar'],
   ['\\(x\\|xx\\)\\+y', 'a plus on a group with a bar'],
-  ['\\(a\\|b\\)\\{2,3}c', 'a counted repeat on a group with a bar'],
+  [
+    '\\c\\(a\\|A\\)*b',
+    'a star on a group whose bars share a first letter in two cases under \\c',
+  ],
+  [
+    '\\(a\\|ab\\)\\{2,3}c',
+    'a counted repeat on a group whose bars share a first letter',
+  ],
   [
     '\\(\\(a\\|b\\)\\=\\)\\+c',
     'a repeat on a group that holds a group with a bar',
@@ -7938,6 +7945,18 @@ for (const [pattern, name] of refusedGroups) {
     await expectUntouched(nullpad, `/${pattern}`, noteB, 1, 1)
   })
 }
+
+test('a repeated group whose bars start with different letters still searches', async ({
+  nullpad,
+}) => {
+  await begin(nullpad, noteB)
+  await play(nullpad, '/\\(f\\|x\\)\\+our<CR>')
+  expect(await noticeOf(nullpad), 'no notice').toBe('')
+  expect(await nullpad.status(), 'lands on four').toMatchObject({
+    line: 2,
+    column: 5,
+  })
+})
 
 test('a group with a bar that is not repeated still searches', async ({
   nullpad,

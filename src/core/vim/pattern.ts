@@ -262,6 +262,8 @@ type Item = Readonly<{
   repeats: boolean
   alternates: boolean
   varies: boolean
+  letter: string
+  plain: boolean
 }>
 
 type Frame = Readonly<{ items: ReadonlyArray<Item>; opener: string }>
@@ -406,6 +408,8 @@ const atom = (source: string): Item => ({
   repeats: false,
   alternates: false,
   varies: false,
+  letter: '',
+  plain: false,
 })
 
 const quantified = (
@@ -429,7 +433,7 @@ const quantified = (
   if (last.kind === 'Quantified') {
     return syntax(raw === '*' ? 'E61: Nested *' : `E62: Nested ${raw}`)
   }
-  if (last.kind === 'Group' && repeating && last.alternates) {
+  if (last.kind === 'Group' && repeating && last.alternates && !last.plain) {
     return unsupported('a repeat of a group with \\|')
   }
   if (
@@ -450,10 +454,35 @@ const quantified = (
           repeats: last.repeats || repeating,
           alternates: last.alternates,
           varies: true,
+          letter: '',
+          plain: false,
         },
       ],
     }),
   )
+}
+
+const plainlySplit = (items: ReadonlyArray<Item>): boolean => {
+  const firsts: Array<string> = []
+  let begins = true
+  for (const item of items) {
+    if (item.alternates) {
+      return false
+    }
+    if (item.kind === 'Alt') {
+      if (begins) {
+        return false
+      }
+      begins = true
+    } else if (begins) {
+      if (item.kind !== 'Atom' || item.letter === '') {
+        return false
+      }
+      firsts.push(item.letter)
+      begins = false
+    }
+  }
+  return !begins && new Set(firsts).size === firsts.length && firsts.length > 1
 }
 
 const closed = (state: State, raw: string): Result.Result<State, string> => {
@@ -472,6 +501,8 @@ const closed = (state: State, raw: string): Result.Result<State, string> => {
         item => item.alternates || item.kind === 'Alt',
       ),
       varies: Array.some(frame.items, item => item.varies),
+      letter: '',
+      plain: plainlySplit(frame.items),
     }),
   )
 }
@@ -484,6 +515,8 @@ const anchored = (state: State, source: string): Result.Result<State, string> =>
       repeats: false,
       alternates: false,
       varies: false,
+      letter: '',
+      plain: false,
     }),
   )
 
@@ -540,6 +573,8 @@ const magic = (
           repeats: false,
           alternates: false,
           varies: false,
+          letter: '',
+          plain: false,
         }),
       ),
     '<': () => anchored(state, `(?<!${word})(?=${word})`),
@@ -566,7 +601,12 @@ const translated = (
   return Match.value(token).pipe(
     Match.tagsExhaustive({
       Letter: letter =>
-        Result.succeed(pushed(state, atom(escapeLetter(letter.text)))),
+        Result.succeed(
+          pushed(state, {
+            ...atom(escapeLetter(letter.text)),
+            letter: letter.text.toLowerCase(),
+          }),
+        ),
       Magic: magical => magic(state, magical, next),
       Refused: refused => unsupported(refused.raw),
       Collection: collection =>

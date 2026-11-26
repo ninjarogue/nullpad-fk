@@ -503,6 +503,7 @@ const virtualMachine = (
     startsAt === null || startsAt.has(code) ? 1 : 0,
   )
   let generation = 0
+  const generationLimit = 1_000_000_000
 
   const canStart = (text: string, at: number): boolean => {
     if (startsAt === null) {
@@ -587,6 +588,10 @@ const virtualMachine = (
     find: (text, from) => {
       if (literal !== '' && text.indexOf(literal, from) < 0) {
         return Option.none()
+      }
+      if (generation > generationLimit) {
+        marks.fill(0)
+        generation = 0
       }
       const length = text.length
       let current = currentPc

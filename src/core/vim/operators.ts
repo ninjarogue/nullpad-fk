@@ -338,6 +338,14 @@ const maxPutUnitsOnOneLine = 50_000
 
 const maxPutLines = 200_000
 
+export const lettersWithin = (letter: string, count: number): number =>
+  letter.length <= 1
+    ? count
+    : Math.max(
+        1,
+        Math.min(count, Math.floor(maxPutUnits / (letter.length - 1))),
+      )
+
 export const boundedCount = (register: Register, count: number): number => {
   const lines = register.text.split('\n').length - 1
   const within = (units: number): number =>

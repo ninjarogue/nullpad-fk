@@ -917,10 +917,11 @@ const run = (
       if (from.cell + letters > cellsIn(buffer, from.line)) {
         return unchanged
       }
+      const replacing = Operators.lettersWithin(letter, letters)
       const start = positionOf(buffer, from)
       const end = positionOf(buffer, {
         line: from.line,
-        cell: from.cell + letters,
+        cell: from.cell + replacing,
       })
       return replacedStep(
         letter === '\n'
@@ -931,12 +932,12 @@ const run = (
                   line: from.line,
                   from: start.column,
                   to: end.column,
-                  text: letter.repeat(letters),
+                  text: letter.repeat(replacing),
                 },
               ]),
               {
                 line: from.line,
-                column: start.column + letter.length * (letters - 1),
+                column: start.column + letter.length * (replacing - 1),
               },
             ),
         start,

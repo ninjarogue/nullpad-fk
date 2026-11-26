@@ -2196,3 +2196,34 @@ test('r then Page Down or Page Up pages and drops r', async ({ nullpad }) => {
     expect(text.includes('x'), `${key} left no r waiting`).toBe(false)
   }
 })
+
+test('r with a long letter over 20,000 lines adds at most 4,000,000 units, from the top', async ({
+  nullpad,
+}) => {
+  const note = Array.from({ length: 20_000 }, () => 'abcdefghij').join('\n')
+  const letter = `e${'́'.repeat(200)}`
+  const lineAt = async (number: number) => {
+    const rows = (await nullpad.screen()).rows.filter(
+      row => row.number === String(number),
+    )
+    return rows.map(row => row.text).join('')
+  }
+  for (const keys of ['VGr', '<C-v>G$r']) {
+    await begin(nullpad, note)
+    await play(nullpad, keys)
+    await nullpad.commit(letter)
+    expect(await modeOf(nullpad), `${keys}: back in NORMAL`).toBe('NORMAL')
+    await play(nullpad, '2001G')
+    expect(
+      await lineAt(2000),
+      `${keys}: line 2,000 took the letter, 2,000 lines of 2,000 added units each`,
+    ).toBe(letter.repeat(10))
+    expect(
+      await lineAt(2001),
+      `${keys}: line 2,001 would pass 4,000,000 units and stays`,
+    ).toBe('abcdefghij')
+    expect((await nullpad.status()).lineCount, `${keys}: no line added`).toBe(
+      20_000,
+    )
+  }
+})

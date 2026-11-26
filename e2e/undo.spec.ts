@@ -6,6 +6,7 @@ import {
   openTab,
   settle,
   test,
+  startVimRow,
 } from './nullpad'
 
 const SAVED = 1500
@@ -1190,19 +1191,9 @@ const startWith = async (nullpad: Nullpad, text: string) => {
   await nullpad.press('Control+Home')
 }
 
-const placeAt = async (nullpad: Nullpad, line: number, column: number) => {
-  await nullpad.press('Control+Home')
-  await nullpad.press('ArrowDown', line - 1)
-  await nullpad.press('Home')
-  await nullpad.press('ArrowRight', column - 1)
-}
-
 const playRow = async (nullpad: Nullpad, row: Row) => {
   const label = `${row.text} at ${row.at.join(':')} keys ${row.keys}`
-  await startWith(nullpad, texts[row.text])
-  await placeAt(nullpad, row.at[0], row.at[1])
-  await nullpad.page.keyboard.press(toggle)
-  await settle(nullpad.page)
+  await startVimRow(nullpad, texts[row.text], row.at[0], row.at[1])
   for (const token of row.keys.match(/<[A-Za-z-]+>|./gu) ?? []) {
     await nullpad.page.keyboard.press(keyNames[token] ?? token)
   }
@@ -1217,13 +1208,15 @@ const playRow = async (nullpad: Nullpad, row: Row) => {
 const chunk = Math.ceil(vimRows.length / 4)
 for (let part = 0; part < 4; part++) {
   const rows = vimRows.slice(part * chunk, (part + 1) * chunk)
-  test(`vim u and Ctrl-R after changes, counts and mixed scripts act as in Vim (rows ${part * chunk + 1} to ${part * chunk + rows.length})`, async ({
-    nullpad,
-  }) => {
-    for (const row of rows) {
-      await playRow(nullpad, row)
-    }
-  })
+  test(
+    `vim u and Ctrl-R after changes, counts and mixed scripts act as in Vim (rows ${part * chunk + 1} to ${part * chunk + rows.length})`,
+    { tag: '@vim-table' },
+    async ({ nullpad }) => {
+      for (const row of rows) {
+        await playRow(nullpad, row)
+      }
+    },
+  )
 }
 
 const undo = (nullpad: Nullpad) => nullpad.press('Control+z')

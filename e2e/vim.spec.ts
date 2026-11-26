@@ -5,6 +5,7 @@ import {
   openTab,
   settle,
   test,
+  startVimRow,
 } from './nullpad'
 
 type Row = Readonly<{
@@ -1883,13 +1884,7 @@ const pendingOf = async (nullpad: Nullpad) => {
 }
 
 const playRow = async (nullpad: Nullpad, row: Row) => {
-  await openFresh(nullpad.page)
-  await nullpad.paste(row.text)
-  await nullpad.press('Control+Home')
-  await nullpad.press('ArrowDown', row.at[0] - 1)
-  await nullpad.press('Home')
-  await nullpad.press('ArrowRight', row.at[1] - 1)
-  await nullpad.page.keyboard.press(toggle)
+  await startVimRow(nullpad, row.text, row.at[0], row.at[1])
   for (const token of row.keys.match(/<[A-Za-z]+>|./gu) ?? []) {
     await nullpad.page.keyboard.press(keyNames[token] ?? token)
   }
@@ -1927,11 +1922,15 @@ const tables: ReadonlyArray<readonly [string, ReadonlyArray<Row>]> = [
 ]
 
 for (const [name, rows] of tables) {
-  test(`vim Normal keys: ${name}`, async ({ nullpad }) => {
-    for (const row of rows) {
-      await playRow(nullpad, row)
-    }
-  })
+  test(
+    `vim Normal keys: ${name}`,
+    { tag: '@vim-table' },
+    async ({ nullpad }) => {
+      for (const row of rows) {
+        await playRow(nullpad, row)
+      }
+    },
+  )
 }
 
 test('a toggle typed between fast keys acts in order with the keys around it', async ({

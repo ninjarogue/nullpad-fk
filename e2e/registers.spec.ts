@@ -1,4 +1,11 @@
-import { type Nullpad, expect, openFresh, settle, test } from './nullpad'
+import {
+  type Nullpad,
+  expect,
+  openFresh,
+  settle,
+  test,
+  startVimRow,
+} from './nullpad'
 
 const SAVED = 1500
 const ROWS_PER_TEST = 10
@@ -827,13 +834,6 @@ const vimOn = async (nullpad: Nullpad) => {
   await settle(nullpad.page)
 }
 
-const startWith = async (nullpad: Nullpad, text: string) => {
-  await openFresh(nullpad.page)
-  await nullpad.paste(text)
-  await nullpad.reload()
-  await nullpad.press('Control+Home')
-}
-
 const placeAt = async (nullpad: Nullpad, line: number, column: number) => {
   await nullpad.press('Control+Home')
   await nullpad.press('ArrowDown', line - 1)
@@ -866,9 +866,7 @@ const untilScreen = async (
 
 const playRow = async (nullpad: Nullpad, row: Row) => {
   const label = `${row.text} at ${row.at.join(':')}${row.clip === undefined ? '' : ` clipboard ${JSON.stringify(row.clip)}`} keys ${row.keys}`
-  await startWith(nullpad, texts[row.text])
-  await placeAt(nullpad, row.at[0], row.at[1])
-  await vimOn(nullpad)
+  await startVimRow(nullpad, texts[row.text], row.at[0], row.at[1])
   if (row.clip !== undefined) {
     await setClipboard(nullpad, row.clip)
   }
@@ -889,13 +887,15 @@ const playRow = async (nullpad: Nullpad, row: Row) => {
 for (const group of groups) {
   for (let from = 0; from < group.rows.length; from += ROWS_PER_TEST) {
     const rows = group.rows.slice(from, from + ROWS_PER_TEST)
-    test(`vim ${group.name} act as in Vim (rows ${from + 1} to ${from + rows.length})`, async ({
-      nullpad,
-    }) => {
-      for (const row of rows) {
-        await playRow(nullpad, row)
-      }
-    })
+    test(
+      `vim ${group.name} act as in Vim (rows ${from + 1} to ${from + rows.length})`,
+      { tag: '@vim-table' },
+      async ({ nullpad }) => {
+        for (const row of rows) {
+          await playRow(nullpad, row)
+        }
+      },
+    )
   }
 }
 

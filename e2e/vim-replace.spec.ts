@@ -1,4 +1,4 @@
-import { type Nullpad, expect, openFresh, settle, test } from './nullpad'
+import { type Nullpad, expect, settle, startVimRow, test } from './nullpad'
 
 const ROWS_PER_TEST = 12
 
@@ -1824,22 +1824,12 @@ const vimOn = async (nullpad: Nullpad) => {
   await settle(nullpad.page)
 }
 
-const placeAt = async (nullpad: Nullpad, line: number, column: number) => {
-  await nullpad.press('Control+Home')
-  await nullpad.press('ArrowDown', line - 1)
-  await nullpad.press('Home')
-  await nullpad.press('ArrowRight', column - 1)
-}
-
 const begin = async (
   nullpad: Nullpad,
   text: string,
   at: readonly [number, number] = [1, 1],
 ) => {
-  await openFresh(nullpad.page)
-  await nullpad.paste(text)
-  await placeAt(nullpad, at[0], at[1])
-  await vimOn(nullpad)
+  await startVimRow(nullpad, text, at[0], at[1])
 }
 
 const expectScreen = async (
@@ -1878,13 +1868,15 @@ const playRow = async (nullpad: Nullpad, row: Row) => {
 for (const group of groups) {
   for (let from = 0; from < group.rows.length; from += ROWS_PER_TEST) {
     const rows = group.rows.slice(from, from + ROWS_PER_TEST)
-    test(`r ${group.name} as in Vim (rows ${rows.map(row => row.id).join(', ')})`, async ({
-      nullpad,
-    }) => {
-      for (const row of rows) {
-        await playRow(nullpad, row)
-      }
-    })
+    test(
+      `r ${group.name} as in Vim (rows ${rows.map(row => row.id).join(', ')})`,
+      { tag: '@vim-table' },
+      async ({ nullpad }) => {
+        for (const row of rows) {
+          await playRow(nullpad, row)
+        }
+      },
+    )
   }
 }
 

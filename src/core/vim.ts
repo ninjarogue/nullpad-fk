@@ -7,6 +7,7 @@ import { cellAt, cellCount, cellStart } from './vim/cells'
 import * as Keymap from './vim/keymap'
 import {
   Want,
+  cellsIn,
   endOf,
   firstFilled,
   firstNonBlank,
@@ -14,6 +15,7 @@ import {
   motions,
   motionsOn,
   positionOf,
+  spotAt,
   spotOf,
 } from './vim/motions'
 import { type Picked, objects } from './vim/objects'
@@ -234,19 +236,32 @@ const keyNames: Readonly<Record<NamedKey, string>> = {
 const isOneGrapheme = (text: string): boolean =>
   text !== '' && Buffer.segmenter.segment(text).containing(0)?.segment === text
 
-const keyOf = (input: Input): Option.Option<Keymap.Key> =>
-  Input.match(input, {
+const keyOf = (
+  input: Input,
+  awaitsArgument: () => boolean = () => false,
+): Option.Option<Keymap.Key> => {
+  const longerText = (text: string): Option.Option<Keymap.Key> =>
+    text !== '' && awaitsArgument()
+      ? Option.some(Keymap.longerText)
+      : Option.none()
+  return Input.match(input, {
     Key: ({ key, modifiers }) =>
       Option.some(`<${modifiers.ctrl ? 'C-' : ''}${keyNames[key]}>`),
     Chord: ({ char, modifiers }) =>
       modifiers.ctrl ? Option.some(`<C-${char.toLowerCase()}>`) : Option.none(),
     Text: ({ text }) =>
-      isOneGrapheme(text) ? Option.some(text) : Option.none(),
+      isOneGrapheme(text) ? Option.some(text) : longerText(text),
     Erase: () => Option.none(),
     Paste: ({ byKey }) => (byKey ? Option.some('<C-v>') : Option.none()),
     Preedit: () => Option.none(),
-    Commit: () => Option.none(),
+    Commit: ({ text }) =>
+      awaitsArgument()
+        ? isOneGrapheme(text)
+          ? Option.some(text)
+          : longerText(text)
+        : Option.none(),
   })
+}
 
 const isPasteByAnotherRoute = (input: Input): boolean =>
   input._tag === 'Paste' && !input.byKey
@@ -733,6 +748,36 @@ export const putClipboard = (
       }
 }
 
+const lastAfterSplits = (
+  last: Option.Option<Last>,
+  buffer: Buffer.Buffer,
+  after: Buffer.Buffer,
+  block: Selection.Block,
+): Option.Option<Last> => {
+  const moved = (mark: Selection.Mark): Selection.Mark => {
+    const at = Selection.marked(buffer, mark, 'Nowhere')
+    if (at === undefined) {
+      return mark
+    }
+    const position = {
+      line: Operators.lineAfterSplits(buffer, block, at.line),
+      column: at.column,
+    }
+    return Selection.markAt(after, after, position, position)
+  }
+  return Option.map(last, kept => ({
+    ...kept,
+    anchor: moved(kept.anchor),
+    cursor: moved(kept.cursor),
+  }))
+}
+
+const startOf = (buffer: Buffer.Buffer, range: Range): Buffer.Position =>
+  byKind(range, {
+    Charwise: () => positionOf(buffer, range.from),
+    Linewise: () => ({ line: range.from.line, column: 0 }),
+  })
+
 const blockRules: Readonly<
   Record<Keymap.SelectionEdge, Exclude<Operators.BlockRule, 'Change'>>
 > = { Start: 'Insert', End: 'Append' }
@@ -760,6 +805,17 @@ const run = (
   }
   const repeat = Option.some({ command, count, register, typed: [] })
   const recordingStay: Vim = { ...normal, mode: insertMode(repeat) }
+  const replacedStep = (
+    after: Buffer.Buffer,
+    began: Buffer.Position,
+  ): Step => ({
+    vim: normal,
+    buffer: rest(normal, after, false),
+    kept: { ...kept, dot: repeat },
+    fate: done,
+    began: Option.some(began),
+    clipboard: Option.none(),
+  })
   const operated = (
     operator: OperatorName,
     target: TargetName | 'Selection',
@@ -861,6 +917,68 @@ const run = (
         began: Option.some(home),
         clipboard: applied.clipboard,
       }
+    },
+    ReplaceLetters: ({ letter }) => {
+      const from = spotOf(buffer)
+      const letters = count ?? 1
+      if (from.cell + letters > cellsIn(buffer, from.line)) {
+        return unchanged
+      }
+      const replacing = Operators.lettersWithin(letter, letters)
+      const start = positionOf(buffer, from)
+      const end = positionOf(buffer, {
+        line: from.line,
+        cell: from.cell + replacing,
+      })
+      return replacedStep(
+        letter === '\n'
+          ? Buffer.insert(Buffer.erase(buffer, start, end), '\n')
+          : Buffer.moveTo(
+              Buffer.rewrite(buffer, [
+                {
+                  line: from.line,
+                  from: start.column,
+                  to: end.column,
+                  text: letter.repeat(replacing),
+                },
+              ]),
+              {
+                line: from.line,
+                column: start.column + letter.length * (replacing - 1),
+              },
+            ),
+        start,
+      )
+    },
+    ReplaceAmount: ({ letter, amount }) => {
+      const range = Selection.rangeFrom(buffer, spotOf(buffer), amount)
+      return replacedStep(
+        Buffer.moveTo(
+          Operators.replaced(buffer, range, letter),
+          startOf(buffer, range),
+        ),
+        positionOf(buffer, range.from),
+      )
+    },
+    ReplaceBlock: ({ letter, amount }) => {
+      const block = Selection.blockFrom(
+        buffer,
+        spotOf(buffer),
+        amount,
+        vim.want,
+      )
+      const home = Operators.homeOf(buffer, block)
+      const after = Operators.blockReplaced(buffer, block, letter)
+      const step = replacedStep(Buffer.moveTo(after, home), home)
+      return letter === '\n'
+        ? {
+            ...step,
+            vim: {
+              ...step.vim,
+              last: lastAfterSplits(vim.last, buffer, after, block),
+            },
+          }
+        : step
     },
     Put: ({ side }) => {
       const source = Operators.registerFor(kept.registers, register)
@@ -1295,6 +1413,87 @@ const runVisual = (
         vim: { ...normal, want: wantWhere(step.buffer.caret) },
       }
     },
+    ReplaceLetters: ({ letter }): Step => {
+      const replacedOver = (
+        after: Buffer.Buffer,
+        start: Buffer.Position,
+        began: Buffer.Position,
+        command: Keymap.Command,
+        moved: (mark: Buffer.Position) => Buffer.Position,
+      ): Step => {
+        const normal: Vim = {
+          ...leaveVisual(vim, buffer, after, marks => ({
+            anchor: moved(marks.anchor),
+            cursor: moved(marks.cursor),
+          })),
+          want: 'Unset',
+        }
+        return {
+          vim: normal,
+          buffer: rest(normal, Buffer.moveTo(after, start), false),
+          kept: {
+            ...kept,
+            dot: Option.some({
+              command,
+              count: undefined,
+              register,
+              typed: [],
+            }),
+          },
+          fate: done,
+          began: Option.some(began),
+          clipboard: Option.none(),
+        }
+      }
+      const sameCell =
+        (after: Buffer.Buffer) =>
+        (mark: Buffer.Position): Buffer.Position =>
+          positionOf(after, spotAt(buffer, mark, 'LineBreak'))
+      return Selection.byShape(ends, {
+        Stretch: (stretch): Step => {
+          if (letter === '\n') {
+            return unchanged
+          }
+          const range = Selection.rangeOf(buffer, stretch, 'AsSelected')
+          const after = Operators.replaced(buffer, range, letter)
+          return replacedOver(
+            after,
+            startOf(buffer, range),
+            positionOf(buffer, range.from),
+            Keymap.Command.cases.ReplaceAmount.make({
+              letter,
+              amount: Selection.amountOf(
+                buffer,
+                stretch,
+                'AsSelected',
+                vim.want,
+              ),
+            }),
+            sameCell(after),
+          )
+        },
+        Block: (corners): Step => {
+          const block = Selection.blockOf(buffer, corners, vim.want === 'End')
+          const home = Operators.homeOf(buffer, block)
+          const after = Operators.blockReplaced(buffer, block, letter)
+          return replacedOver(
+            after,
+            home,
+            home,
+            Keymap.Command.cases.ReplaceBlock.make({
+              letter,
+              amount: Selection.blockAmountOf(block),
+            }),
+            letter === '\n'
+              ? mark => ({
+                  ...mark,
+                  line: Operators.lineAfterSplits(buffer, block, mark.line),
+                })
+              : sameCell(after),
+          )
+        },
+      })
+    },
     Ignore: () => unchanged,
   })
 }
@@ -1329,24 +1528,27 @@ const pressNormal = (
       fate: { _tag: 'Plain', input },
     }
   }
-  return Option.match(keyOf(input), {
-    onNone: () => unchanged,
-    onSome: key => {
-      const advance = Keymap.advance(Keymap.normal, vim, key)
-      return advance._tag === 'Run'
-        ? run(
-            vim,
-            buffer,
-            kept,
-            advance.command,
-            advance.count,
-            advance.register,
-          )
-        : advance._tag === 'Wait'
-          ? { ...unchanged, vim: { ...vim, ...advance.pending } }
-          : { ...unchanged, vim: idle(vim) }
+  return Option.match(
+    keyOf(input, () => Keymap.awaitsArgument(Keymap.normal, vim)),
+    {
+      onNone: () => unchanged,
+      onSome: key => {
+        const advance = Keymap.advance(Keymap.normal, vim, key)
+        return advance._tag === 'Run'
+          ? run(
+              vim,
+              buffer,
+              kept,
+              advance.command,
+              advance.count,
+              advance.register,
+            )
+          : advance._tag === 'Wait'
+            ? { ...unchanged, vim: { ...vim, ...advance.pending } }
+            : { ...unchanged, vim: idle(vim) }
+      },
     },
-  })
+  )
 }
 
 const pressVisual = (
@@ -1412,25 +1614,28 @@ const pressVisual = (
       began: Option.some(erased.began),
     }
   }
-  return Option.match(keyOf(input), {
-    onNone: () => unchanged,
-    onSome: key => {
-      const advance = Keymap.advance(Keymap.visual, vim, key)
-      return advance._tag === 'Run'
-        ? runVisual(
-            vim,
-            buffer,
-            kept,
-            visual,
-            advance.command,
-            advance.count,
-            advance.register,
-          )
-        : advance._tag === 'Wait'
-          ? { ...unchanged, vim: { ...vim, ...advance.pending } }
-          : { ...unchanged, vim: idle(vim) }
+  return Option.match(
+    keyOf(input, () => Keymap.awaitsArgument(Keymap.visual, vim)),
+    {
+      onNone: () => unchanged,
+      onSome: key => {
+        const advance = Keymap.advance(Keymap.visual, vim, key)
+        return advance._tag === 'Run'
+          ? runVisual(
+              vim,
+              buffer,
+              kept,
+              visual,
+              advance.command,
+              advance.count,
+              advance.register,
+            )
+          : advance._tag === 'Wait'
+            ? { ...unchanged, vim: { ...vim, ...advance.pending } }
+            : { ...unchanged, vim: idle(vim) }
+      },
     },
-  })
+  )
 }
 
 const leavesInsert = (input: Input): boolean =>

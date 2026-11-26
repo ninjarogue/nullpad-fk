@@ -338,6 +338,14 @@ const maxPutUnitsOnOneLine = 50_000
 
 const maxPutLines = 200_000
 
+export const lettersWithin = (letter: string, count: number): number =>
+  letter.length <= 1
+    ? count
+    : Math.max(
+        1,
+        Math.min(count, Math.floor(maxPutUnits / (letter.length - 1))),
+      )
+
 export const boundedCount = (register: Register, count: number): number => {
   const lines = register.text.split('\n').length - 1
   const within = (units: number): number =>
@@ -1348,6 +1356,118 @@ export const putOverBlock = (
       ),
   })
   return isOneEmptyLine(before) ? withoutEmptyLastLine(placed) : placed
+}
+
+export const replaced = (
+  buffer: Buffer.Buffer,
+  range: Range,
+  letter: string,
+): Buffer.Buffer => {
+  const isLinewise = range.kind === 'Linewise'
+  const rewrites: Array<Buffer.Rewrite> = []
+  const added: Array<number> = []
+  for (let line = range.from.line; line <= range.to.line; line += 1) {
+    const text = buffer.lines[line]
+    if (text === undefined) {
+      break
+    }
+    const cells = cellCount(text)
+    const first = isLinewise || line > range.from.line ? 0 : range.from.cell
+    const last =
+      isLinewise || line < range.to.line
+        ? cells
+        : Math.min(cells, range.to.cell)
+    if (last > first) {
+      const from = cellStart(text, first)
+      const to = cellStart(text, last)
+      const put = letter.repeat(last - first)
+      rewrites.push({ line, from, to, text: put })
+      added.push(Math.max(0, put.length - (to - from)))
+    }
+  }
+  return Buffer.rewrite(buffer, rewrites.slice(0, rowsWithin(added)))
+}
+
+const isWideLetter = (letter: string): boolean =>
+  letter !== '\t' && widthOfLetter(letter) > 1
+
+const filled = (letter: string, columns: number, isShort: boolean): string =>
+  isWideLetter(letter)
+    ? letter.repeat(Math.floor(columns / 2)) +
+      (columns % 2 === 1 && !isShort ? ' ' : '')
+    : letter.repeat(columns)
+
+const isTouched = (cut: Cut): boolean => cut.reaches && cut.end > cut.start
+
+const splitsOf = (
+  block: Block,
+  cuts: ReadonlyArray<Cut>,
+): ReadonlyArray<Buffer.Split> => {
+  const splits: Array<Buffer.Split> = []
+  cuts.forEach((cut, index) => {
+    if (isTouched(cut)) {
+      splits.push({
+        line: block.first + index,
+        from: cut.start,
+        to: cut.end,
+        head: ' '.repeat(cut.left?.outside ?? 0),
+        tail: '',
+      })
+    }
+  })
+  return splits
+}
+
+export const lineAfterSplits = (
+  buffer: Buffer.Buffer,
+  block: Block,
+  line: number,
+): number =>
+  Array.reduce(
+    splitsOf(block, cutsOf(buffer, block)),
+    line,
+    (moved, split, index) =>
+      moved >= split.line + index + 2 ? moved + 1 : moved,
+  )
+
+export const blockReplaced = (
+  buffer: Buffer.Buffer,
+  block: Block,
+  letter: string,
+): Buffer.Buffer => {
+  const cuts = cutsOf(buffer, block)
+  if (letter === '\n') {
+    const splits = splitsOf(block, cuts)
+    const split = Buffer.split(buffer, splits)
+    return splits[0] === undefined || splits[0].line === block.first
+      ? split
+      : Buffer.rewrite(split, [{ line: block.first, from: 0, to: 0, text: '' }])
+  }
+  const rewrites: Array<Buffer.Rewrite> = []
+  const added: Array<number> = []
+  cuts.forEach((cut, index) => {
+    if (isTouched(cut)) {
+      const text =
+        ' '.repeat(cut.left?.outside ?? 0) +
+        filled(letter, block.right - block.left + 1 - cut.pad, cut.ends) +
+        ' '.repeat(cut.right?.outside ?? 0)
+      rewrites.push({
+        line: block.first + index,
+        from: cut.start,
+        to: cut.end,
+        text,
+      })
+      added.push(Math.max(0, text.length - (cut.end - cut.start)))
+    }
+  })
+  const kept = rewrites.slice(0, rowsWithin(added))
+  const top = kept[0]
+  return Buffer.rewrite(
+    buffer,
+    top === undefined || top.line === block.first
+      ? kept
+      : [{ line: block.first, from: 0, to: 0, text: '' }, ...kept],
+  )
 }
 
 export const homeOf = (

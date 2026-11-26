@@ -12,7 +12,11 @@ step format pnpm format:check
 step lint pnpm lint
 step typecheck pnpm typecheck
 step architecture pnpm arch
-if sh scripts/vim-oracle-needed.sh; then
+if ! sh scripts/vim-oracle-needed.sh; then
+  :
+elif ! command -v vim >/dev/null; then
+  echo "pre-push: vim is not installed, so the vim oracle is left out"
+else
   step vim-oracle pnpm test:oracle
   git diff --quiet e2e/vim-rows/confirmed.txt ||
     echo "pre-push: Vim confirmed new rows; commit e2e/vim-rows/confirmed.txt"

@@ -152,6 +152,24 @@ const seekRows: ReadonlyArray<Binding<Seek>> = [
     Seek.cases.Again.make({ reverse: true }),
     'the last find the other way',
   ),
+  bind('/', Seek.cases.Open.make({ way: 'Forward' }), 'search forward'),
+  bind('?', Seek.cases.Open.make({ way: 'Backward' }), 'search backward'),
+  bind('n', Seek.cases.Next.make({ reverse: false }), 'the last search again'),
+  bind(
+    'N',
+    Seek.cases.Next.make({ reverse: true }),
+    'the last search the other way',
+  ),
+  bind(
+    '*',
+    Seek.cases.Word.make({ way: 'Forward' }),
+    'search the word forward',
+  ),
+  bind(
+    '#',
+    Seek.cases.Word.make({ way: 'Backward' }),
+    'search the word backward',
+  ),
 ]
 
 const move = (

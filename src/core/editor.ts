@@ -5,6 +5,7 @@ import * as History from './history'
 import { Input, type Modifiers, type NamedKey } from './input'
 import * as Markdown from './markdown'
 import * as Notes from './notes'
+import * as Prompt from './prompt'
 import * as Vim from './vim'
 import * as Words from './words'
 
@@ -77,6 +78,12 @@ export const Need = Schema.TaggedUnion({
 })
 export type Need = typeof Need.Type
 
+export const Asking = Schema.Struct({
+  line: Prompt.Prompt,
+  resume: Vim.Resume,
+})
+export type Asking = typeof Asking.Type
+
 export const Editor = Schema.Struct({
   buffer: Buffer.Buffer,
   history: History.History,
@@ -93,6 +100,7 @@ export const Editor = Schema.Struct({
   asked: Schema.Int,
   pendingReveals: Schema.Int,
   notice: Schema.Option(Schema.String),
+  prompt: Schema.Option(Asking),
 })
 export type Editor = typeof Editor.Type
 
@@ -116,6 +124,13 @@ export type PaintedLine = Readonly<{
 
 export type Selection = Vim.Shown
 
+export type PromptLine = Readonly<{
+  lead: string
+  before: string
+  preedit: string
+  after: string
+}>
+
 export type Frame = Readonly<{
   lines: ReadonlyArray<PaintedLine>
   undrawnAbove: number
@@ -134,6 +149,7 @@ export type Frame = Readonly<{
     mode: Mode
     pending: string
     notice: string
+    prompt: Option.Option<PromptLine>
     line: number
     column: number
     lineCount: number
@@ -159,6 +175,7 @@ export const open = (text: string, vim = false): Editor => {
     asked: 0,
     pendingReveals: 0,
     notice: Option.none(),
+    prompt: Option.none(),
   }
 }
 
@@ -709,6 +726,7 @@ const vimDone = (
         kept: step.kept,
         discards: editor.discards + swallowed,
         goalX: moved ? Option.none() : editor.goalX,
+        notice: Option.orElse(step.notice, () => editor.notice),
       },
       moved ? { buffer: step.buffer, caretAtRowEnd: false } : {},
     ),
@@ -770,20 +788,79 @@ const vimPlan = (
         }
       },
     }),
+    OpenPrompt: ({ resume }): Plan =>
+      now(
+        {
+          ...counted,
+          prompt: Option.some({ line: Prompt.open, resume }),
+        },
+        'None',
+      ),
     Done: () => vimDone(editor, step, swallowed),
   })
 }
 
-const inputPlan = (editor: Editor, input: Input): Plan =>
-  Option.match(editor.vim, {
-    onNone: () => plainPlan(editor, input),
-    onSome: vim =>
-      vimPlan(
-        editor,
-        vim,
-        Vim.press(vim, editor.buffer, editor.kept, input),
-        input._tag === 'Key' || input._tag === 'Chord' ? 0 : 1,
+const isScreenChord = (input: Input): boolean =>
+  input._tag === 'Chord' && /^[ep]$/iu.test(input.char)
+
+const promptPlan = (editor: Editor, asking: Asking, input: Input): Plan => {
+  if (isScreenChord(input)) {
+    return inputPlan({ ...editor, prompt: Option.none() }, input)
+  }
+  const { prompt, act } = Prompt.feed(asking.line, editor.kept.history, input)
+  return Prompt.Act.match(act, {
+    Stay: () =>
+      now(
+        { ...editor, prompt: Option.some({ ...asking, line: prompt }) },
+        'None',
       ),
+    Close: ({ text }) =>
+      now(
+        {
+          ...editor,
+          prompt: Option.none(),
+          kept: {
+            ...editor.kept,
+            history: Prompt.remembered(editor.kept.history, text),
+          },
+          vim: Option.map(editor.vim, Vim.abandoned),
+        },
+        'None',
+      ),
+    Run: ({ text }) => {
+      const kept = {
+        ...editor.kept,
+        history: Prompt.remembered(editor.kept.history, text),
+      }
+      const closed = { ...editor, prompt: Option.none(), kept }
+      return Option.match(editor.vim, {
+        onNone: () => now(closed, 'None'),
+        onSome: vim =>
+          vimPlan(
+            closed,
+            vim,
+            Vim.searched(vim, editor.buffer, kept, asking.resume, text),
+            0,
+          ),
+      })
+    },
+  })
+}
+
+const inputPlan = (editor: Editor, input: Input): Plan =>
+  Option.match(editor.prompt, {
+    onSome: asking => promptPlan(editor, asking, input),
+    onNone: () =>
+      Option.match(editor.vim, {
+        onNone: () => plainPlan(editor, input),
+        onSome: vim =>
+          vimPlan(
+            editor,
+            vim,
+            Vim.press(vim, editor.buffer, editor.kept, input),
+            input._tag === 'Key' || input._tag === 'Chord' ? 0 : 1,
+          ),
+      }),
   })
 
 const againPlan = (editor: Editor, step: Vim.Replayed): Plan =>
@@ -795,10 +872,15 @@ const againPlan = (editor: Editor, step: Vim.Replayed): Plan =>
 
 const toggleVim = (editor: Editor): Editor =>
   Option.match(editor.vim, {
-    onSome: () => ({ ...editor, vim: Option.none() }),
+    onSome: () => ({ ...editor, vim: Option.none(), prompt: Option.none() }),
     onNone: () =>
       changeDrawn(
-        { ...editor, vim: Option.some(Vim.start), goalX: Option.none() },
+        {
+          ...editor,
+          vim: Option.some(Vim.start),
+          goalX: Option.none(),
+          prompt: Option.none(),
+        },
         { preedit: '' },
       ),
   })
@@ -820,6 +902,7 @@ const planFor = (editor: Editor, queued: Queued): Plan =>
       clickPlan(
         {
           ...editor,
+          prompt: Option.none(),
           vim: Option.map(editor.vim, vim => Vim.clicked(vim, editor.buffer)),
         },
         x,
@@ -1275,13 +1358,16 @@ export const paint = (editor: Editor): Frame => {
     selection: Option.flatMap(editor.vim, vim =>
       Vim.selection(vim, buffer, { first, last }),
     ),
-    surrounding: {
-      text: (lines[caret.line]?.text ?? '').slice(
-        near.from.column,
-        near.to.column,
-      ),
-      caret: caret.column - near.from.column,
-    },
+    surrounding: Option.match(editor.prompt, {
+      onSome: ({ line }) => Prompt.surrounding(line),
+      onNone: () => ({
+        text: (lines[caret.line]?.text ?? '').slice(
+          near.from.column,
+          near.to.column,
+        ),
+        caret: caret.column - near.from.column,
+      }),
+    }),
     discards: editor.discards,
     status: {
       mode: Option.match(editor.vim, {
@@ -1293,6 +1379,12 @@ export const paint = (editor: Editor): Frame => {
         onSome: Vim.pendingKeys,
       }),
       notice: Option.getOrElse(editor.notice, () => ''),
+      prompt: Option.map(editor.prompt, ({ line, resume }) => ({
+        lead: resume.way === 'Forward' ? '/' : '?',
+        before: line.text.slice(0, line.caret),
+        preedit: line.preedit,
+        after: line.text.slice(line.caret),
+      })),
       line: caret.line + 1,
       column: caretGrapheme(lines[caret.line]?.text ?? '', caret.column) + 1,
       lineCount: lines.length,

@@ -6,6 +6,7 @@ import { Input, type NamedKey, noModifiers } from './input'
 import { cellAt, cellCount, cellStart } from './vim/cells'
 import * as Keymap from './vim/keymap'
 import {
+  type Spot,
   Want,
   cellsIn,
   endOf,
@@ -23,7 +24,7 @@ import * as Operators from './vim/operators'
 import * as Seek from './vim/seek'
 import * as Selection from './vim/selection'
 import {
-  type OperatorName,
+  OperatorName,
   type Range,
   type TargetName,
   byKind,
@@ -52,6 +53,7 @@ export const Kept = Schema.Struct({
   registers: Operators.Registers,
   dot: Schema.Option(Repeat),
   seek: Seek.Memory,
+  history: Schema.Array(Schema.String),
 })
 export type Kept = typeof Kept.Type
 
@@ -59,6 +61,7 @@ export const nothingKept: Kept = {
   registers: noRegisters,
   dot: Option.none(),
   seek: Seek.forgotten,
+  history: [],
 }
 
 export const BlockStay = Schema.Struct({
@@ -204,12 +207,21 @@ export const Put = Schema.Struct({
 })
 export type Put = typeof Put.Type
 
+export const Resume = Schema.Struct({
+  way: Seek.Way,
+  operator: Schema.Option(OperatorName),
+  count: Schema.UndefinedOr(Schema.Int),
+  register: Operators.RegisterName,
+})
+export type Resume = typeof Resume.Type
+
 export const Fate = Schema.TaggedUnion({
   Done: {},
   Plain: { input: Input },
   Travel: { way: History.Way, count: Schema.Int },
   Replay: { steps: Schema.Array(Replayed) },
   ReadClipboard: { put: Put },
+  OpenPrompt: { resume: Resume },
 })
 export type Fate = typeof Fate.Type
 
@@ -222,6 +234,7 @@ export type Step = Readonly<{
   fate: Fate
   began: Option.Option<Buffer.Position>
   clipboard: Option.Option<string>
+  notice: Option.Option<string>
 }>
 
 const keyNames: Readonly<Record<NamedKey, string>> = {
@@ -588,6 +601,7 @@ const putStep = (
     fate: done,
     began: Option.none(),
     clipboard: Option.none(),
+    notice: Option.none(),
   }
 }
 
@@ -729,6 +743,7 @@ const putOverStep = (
     fate: done,
     began: Option.some(began),
     clipboard: Option.none(),
+    notice: Option.none(),
   }
 }
 
@@ -752,6 +767,7 @@ export const putClipboard = (
         fate: done,
         began: Option.none(),
         clipboard: Option.none(),
+        notice: Option.none(),
       }
 }
 
@@ -792,6 +808,21 @@ const blockRules: Readonly<
 const keepsItsCount = ({ _tag }: Keymap.Command): boolean =>
   _tag === 'InsertAsSelected' || _tag === 'InsertInBlock'
 
+const opening = (
+  unchanged: Step,
+  vim: Vim,
+  way: Seek.Way,
+  operator: Option.Option<OperatorName>,
+  count: number | undefined,
+  register: Operators.RegisterName,
+): Step => ({
+  ...unchanged,
+  vim,
+  fate: Fate.cases.OpenPrompt.make({
+    resume: { way, operator, count, register },
+  }),
+})
+
 const run = (
   vim: Vim,
   buffer: Buffer.Buffer,
@@ -809,6 +840,7 @@ const run = (
     fate: done,
     began: Option.none(),
     clipboard: Option.none(),
+    notice: Option.none(),
   }
   const repeat = Option.some({ command, count, register, typed: [] })
   const recordingStay: Vim = { ...normal, mode: insertMode(repeat) }
@@ -822,6 +854,7 @@ const run = (
     fate: done,
     began: Option.some(began),
     clipboard: Option.none(),
+    notice: Option.none(),
   })
   const operated = (
     operator: OperatorName,
@@ -846,6 +879,7 @@ const run = (
       fate: done,
       began: Option.some(changeBegan(buffer, operator, target, range)),
       clipboard: applied.clipboard,
+      notice: Option.none(),
     }
   }
   return Keymap.Command.match(command, {
@@ -869,16 +903,30 @@ const run = (
       }
     },
     Seek: ({ seek }) => {
-      const { memory, landing } = Seek.sought(
+      if (seek._tag === 'Open') {
+        return opening(unchanged, vim, seek.way, Option.none(), count, register)
+      }
+      const { memory, landing, notice, parked } = Seek.sought(
         buffer,
         spotOf(buffer),
         seek,
         count,
         kept.seek,
       )
-      const remembered: Step = { ...unchanged, kept: { ...kept, seek: memory } }
+      const remembered: Step = {
+        ...unchanged,
+        kept: { ...kept, seek: memory },
+        notice,
+      }
       return Option.match(landing, {
-        onNone: () => remembered,
+        onNone: () =>
+          Option.match(parked, {
+            onNone: () => remembered,
+            onSome: spot => ({
+              ...remembered,
+              buffer: Buffer.moveTo(buffer, positionOf(buffer, spot)),
+            }),
+          }),
         onSome: ({ spot }): Step => ({
           ...remembered,
           vim: normal,
@@ -887,8 +935,18 @@ const run = (
       })
     },
     OperateSeek: ({ operator, seek }) => {
+      if (seek._tag === 'Open') {
+        return opening(
+          unchanged,
+          vim,
+          seek.way,
+          Option.some(operator),
+          count,
+          register,
+        )
+      }
       const from = spotOf(buffer)
-      const { memory, landing } = Seek.sought(
+      const { memory, landing, notice } = Seek.sought(
         buffer,
         from,
         seek,
@@ -904,7 +962,7 @@ const run = (
             rangeToLanding(operator, buffer, from, found),
           ),
       })
-      return { ...step, kept: { ...step.kept, seek: memory } }
+      return { ...step, kept: { ...step.kept, seek: memory }, notice }
     },
     Operate: ({ operator, target }) =>
       Option.match(
@@ -963,6 +1021,7 @@ const run = (
         fate: done,
         began: Option.some(home),
         clipboard: applied.clipboard,
+        notice: Option.none(),
       }
     },
     ReplaceLetters: ({ letter }) => {
@@ -1173,6 +1232,7 @@ const runVisual = (
     fate: done,
     began: Option.none(),
     clipboard: Option.none(),
+    notice: Option.none(),
   }
   const stays = (caret: Buffer.Position): boolean =>
     caret.line === buffer.caret.line && caret.column === buffer.caret.column
@@ -1303,6 +1363,7 @@ const runVisual = (
         fate: done,
         began: Option.some(began),
         clipboard: applied.clipboard,
+        notice: Option.none(),
       }
     },
     Insert: ({ at }): Step =>
@@ -1406,28 +1467,40 @@ const runVisual = (
       }
     },
     Seek: ({ seek }): Step => {
-      const { memory, landing } = Seek.sought(
+      if (seek._tag === 'Open') {
+        return opening(unchanged, vim, seek.way, Option.none(), count, register)
+      }
+      const { memory, landing, notice, parked } = Seek.sought(
         buffer,
         ends.cursor,
         seek,
         count,
         kept.seek,
       )
-      const remembered: Step = { ...unchanged, kept: { ...kept, seek: memory } }
+      const remembered: Step = {
+        ...unchanged,
+        kept: { ...kept, seek: memory },
+        notice,
+      }
+      const moved = (spot: Spot): Step => {
+        const caret = positionOf(buffer, spot)
+        return {
+          ...remembered,
+          vim: {
+            ...cleared,
+            mode: visualMode(visual.kind, visual.anchor, columnAfter(caret)),
+            want: 'Unset',
+          },
+          buffer: Buffer.moveTo(buffer, caret),
+        }
+      }
       return Option.match(landing, {
-        onNone: () => remembered,
-        onSome: ({ spot }): Step => {
-          const caret = positionOf(buffer, spot)
-          return {
-            ...remembered,
-            vim: {
-              ...cleared,
-              mode: visualMode(visual.kind, visual.anchor, columnAfter(caret)),
-              want: 'Unset',
-            },
-            buffer: Buffer.moveTo(buffer, caret),
-          }
-        },
+        onNone: () =>
+          Option.match(parked, {
+            onNone: () => remembered,
+            onSome: moved,
+          }),
+        onSome: ({ spot }) => moved(spot),
       })
     },
     Pick: ({ object }): Step => {
@@ -1516,6 +1589,7 @@ const runVisual = (
           fate: done,
           began: Option.some(began),
           clipboard: Option.none(),
+          notice: Option.none(),
         }
       }
       const sameCell =
@@ -1593,6 +1667,7 @@ const pressNormal = (
     fate: done,
     began: Option.none(),
     clipboard: Option.none(),
+    notice: Option.none(),
   }
   if (isPasteByAnotherRoute(input) || isPageKey(input)) {
     return {
@@ -1638,6 +1713,7 @@ const pressVisual = (
     fate: done,
     began: Option.none(),
     clipboard: Option.none(),
+    notice: Option.none(),
   }
   if (isPageKey(input)) {
     return {
@@ -1761,6 +1837,7 @@ const leaveInsert = (
     fate: done,
     began: Option.none(),
     clipboard: Option.none(),
+    notice: Option.none(),
   }
 }
 
@@ -1799,6 +1876,7 @@ const leaving = (
       }),
       began: Option.none(),
       clipboard: Option.none(),
+      notice: Option.none(),
     }),
   })
 
@@ -1889,6 +1967,7 @@ const pressInsert = (
         fate: { _tag: 'Plain', input },
         began: Option.none(),
         clipboard: Option.none(),
+        notice: Option.none(),
       }
 
 export const press = (
@@ -1916,6 +1995,7 @@ export const again = (
     fate: done,
     began: Option.none(),
     clipboard: Option.none(),
+    notice: Option.none(),
   }
   const inStay = (stepped: (stay: Stay) => Step): Step =>
     Mode.match(vim.mode, {
@@ -1926,7 +2006,13 @@ export const again = (
   return Replayed.match(step, {
     Run: ({ command, count, register }) => {
       const ran = run(vim, buffer, kept, command, count, register)
-      return { ...ran, kept: { ...ran.kept, seek: kept.seek } }
+      return {
+        ...ran,
+        kept: {
+          ...ran.kept,
+          seek: { ...ran.kept.seek, find: kept.seek.find },
+        },
+      }
     },
     Typed: ({ input }) =>
       inStay(stay => pressInsert(vim, buffer, kept, stay, input)),
@@ -1949,6 +2035,52 @@ export const landed = (
     buffer,
     line === began.line ? began : firstNonBlankOf(buffer, line),
   )
+}
+
+export const abandoned = idle
+
+export const searched = (
+  vim: Vim,
+  buffer: Buffer.Buffer,
+  kept: Kept,
+  { way, operator, count, register }: Resume,
+  text: string,
+): Step => {
+  const seek = Seek.Seek.cases.Search.make({ way, text })
+  return Mode.match(vim.mode, {
+    Normal: () =>
+      run(
+        vim,
+        buffer,
+        kept,
+        Option.match(operator, {
+          onNone: () => Keymap.Command.cases.Seek.make({ seek }),
+          onSome: operator =>
+            Keymap.Command.cases.OperateSeek.make({ operator, seek }),
+        }),
+        count,
+        register,
+      ),
+    Insert: () => ({
+      vim: idle(vim),
+      buffer,
+      kept,
+      fate: done,
+      began: Option.none(),
+      clipboard: Option.none(),
+      notice: Option.none(),
+    }),
+    Visual: visual =>
+      runVisual(
+        vim,
+        buffer,
+        kept,
+        visual,
+        Keymap.VisualCommand.cases.Seek.make({ seek }),
+        count,
+        register,
+      ),
+  })
 }
 
 export const pendingKeys = (vim: Vim): string => Keymap.shown(vim)

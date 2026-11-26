@@ -130,6 +130,15 @@ export const toText = (buffer: Buffer): string =>
     '\n',
   )
 
+export const mostUnitsInOneText = 500_000_000
+
+export const textLength = (buffer: Buffer): number =>
+  Array.reduce(
+    buffer.lines,
+    buffer.lines.length - 1,
+    (units, line) => units + line.text.length,
+  )
+
 export const overwrite = (
   buffer: Buffer,
   { line, column }: Position,

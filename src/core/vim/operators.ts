@@ -161,6 +161,13 @@ const remembered = (
     Yank: () => kept(both),
     Letter: ({ letter, appends }) => {
       const old = registers.named[letter]
+      if (
+        appends &&
+        old !== undefined &&
+        old.text.length + register.text.length > Buffer.mostUnitsInOneText
+      ) {
+        return kept({ unnamed: Option.some(register) })
+      }
       const whole =
         appends && old !== undefined ? appended(old, register) : register
       return kept({
@@ -356,6 +363,50 @@ export const boundedCount = (register: Register, count: number): number => {
   )
 }
 
+const copiesWithin = (most: number, once: number, eachCopy: number): number =>
+  Math.max(
+    1,
+    Math.min(
+      most,
+      eachCopy === 0 ? most : Math.floor((maxPutUnits - once) / eachCopy),
+    ),
+  )
+
+const rowsWithin = (units: ReadonlyArray<number>): number => {
+  let sum = 0
+  const over = units.findIndex(each => {
+    sum += each
+    return sum > maxPutUnits
+  })
+  return over === -1 ? units.length : over
+}
+
+type Piece = Readonly<{
+  line: number
+  from: number
+  to: number
+  before: number
+  text: string
+  after: number
+}>
+
+const unitsOf = ({ before, text, after }: Piece): number =>
+  before + text.length + after
+
+const built = ({
+  line,
+  from,
+  to,
+  before,
+  text,
+  after,
+}: Piece): Buffer.Rewrite => ({
+  line,
+  from,
+  to,
+  text: ' '.repeat(before) + text + ' '.repeat(after),
+})
+
 export type Placed = Readonly<{
   buffer: Buffer.Buffer
   first: Buffer.Position
@@ -375,38 +426,34 @@ const columnsVimCounts = (row: string): number =>
       4 * (utf8Units(letter.codePointAt(0) ?? 0) - 1),
   )
 
-type Landed = Readonly<{ rewrite: Buffer.Rewrite; column: number }>
+type Slot = Readonly<{
+  from: number
+  to: number
+  before: number
+  after: number
+  isShort: boolean
+}>
 
-const putRow = (
-  line: Buffer.Line,
-  number: number,
-  column: number,
-  row: string,
-  pad: string,
-  times: number,
-): Landed => {
+const slotAt = (line: Buffer.Line, column: number): Slot => {
   const stop = stopAtScreenColumn(line, column)
-  const atLineEnd = stop.cell === cellCount(line)
-  const isShort = stop.column < column || (stop.column === column && atLineEnd)
-  const body = (row + pad).repeat(times - 1) + row + (isShort ? '' : pad)
   const end = line.text.length
   if (stop.column < column) {
-    const spaces = column - stop.column
     return {
-      rewrite: {
-        line: number,
-        from: end,
-        to: end,
-        text: ' '.repeat(spaces) + body,
-      },
-      column: end + spaces,
+      from: end,
+      to: end,
+      before: column - stop.column,
+      after: 0,
+      isShort: true,
     }
   }
   if (stop.column === column) {
     const at = cellStart(line, stop.cell)
     return {
-      rewrite: { line: number, from: at, to: at, text: body },
-      column: at,
+      from: at,
+      to: at,
+      before: 0,
+      after: 0,
+      isShort: stop.cell === cellCount(line),
     }
   }
   const letter = stop.cell - 1
@@ -414,24 +461,8 @@ const putRow = (
   const after = stop.column - column
   const before = stop.stepped - after
   return cellText(line, letter) === '\t'
-    ? {
-        rewrite: {
-          line: number,
-          from,
-          to: cellEnd(line, letter),
-          text: ' '.repeat(before) + body + ' '.repeat(after),
-        },
-        column: from + before,
-      }
-    : {
-        rewrite: {
-          line: number,
-          from,
-          to: from,
-          text: ' '.repeat(before) + body,
-        },
-        column: from + before,
-      }
+    ? { from, to: cellEnd(line, letter), before, after, isShort: false }
+    : { from, to: from, before, after: 0, isShort: false }
 }
 
 const lineToCome: Buffer.Line = {
@@ -453,17 +484,42 @@ const putRows = (
     side === 'After' && cellCount(text) > 0
       ? lastScreenColumnOf(text, cell) + 1
       : screenColumnOf(text, cell)
-  const times = boundedCount({ _tag: 'Blockwise', ...register }, count)
-  const landed = Array.map(rowsOf(register.text), (row, index) =>
-    putRow(
-      buffer.lines[caret.line + index] ?? lineToCome,
-      caret.line + index,
-      column,
+  const rows = Array.map(rowsOf(register.text), (row, index) => {
+    const pad = Math.max(0, register.width - columnsVimCounts(row))
+    const slot = slotAt(buffer.lines[caret.line + index] ?? lineToCome, column)
+    return {
       row,
-      ' '.repeat(Math.max(0, register.width - columnsVimCounts(row))),
-      times,
+      pad,
+      slot,
+      once: slot.before + slot.after - (slot.isShort ? pad : 0),
+      eachCopy: row.length + pad,
+    }
+  })
+  const times = copiesWithin(
+    boundedCount({ _tag: 'Blockwise', ...register }, count),
+    Array.reduce(rows, 0, (sum, { once }) => sum + once),
+    Array.reduce(rows, 0, (sum, { eachCopy }) => sum + eachCopy),
+  )
+  const fit = Math.max(
+    1,
+    rowsWithin(
+      Array.map(rows, ({ once, eachCopy }) => once + eachCopy * times),
     ),
   )
+  const landed = Array.map(rows.slice(0, fit), ({ row, pad, slot }, index) => {
+    const gap = ' '.repeat(pad)
+    return {
+      rewrite: built({
+        line: caret.line + index,
+        from: slot.from,
+        to: slot.to,
+        before: slot.before,
+        text: (row + gap).repeat(times - 1) + row + (slot.isShort ? '' : gap),
+        after: slot.after,
+      }),
+      column: slot.from + slot.before,
+    }
+  })
   const kept = Array.filter(
     landed,
     ({ rewrite }) => rewrite.line < buffer.lines.length,
@@ -1088,26 +1144,17 @@ const splitting = (
   before: number,
   text: string,
   after: number,
-): Buffer.Rewrite =>
+): Piece =>
   letter.isTab
-    ? {
-        line,
-        from: letter.from,
-        to: letter.to,
-        text: ' '.repeat(before) + text + ' '.repeat(after),
-      }
-    : {
-        line,
-        from: letter.from,
-        to: letter.from,
-        text: ' '.repeat(before) + text,
-      }
+    ? { line, from: letter.from, to: letter.to, before, text, after }
+    : { line, from: letter.from, to: letter.from, before, text, after: 0 }
 
 const insertedAt = (
   line: number,
   column: number,
   text: string,
-): Buffer.Rewrite => ({ line, from: column, to: column, text })
+  before = 0,
+): Piece => ({ line, from: column, to: column, before, text, after: 0 })
 
 const copiedOnto: Readonly<
   Record<
@@ -1117,7 +1164,7 @@ const copiedOnto: Readonly<
       number: number,
       block: Block,
       text: string,
-    ) => Option.Option<Buffer.Rewrite>
+    ) => Option.Option<Piece>
   >
 > = {
   Insert: (line, number, block, text) => {
@@ -1148,11 +1195,7 @@ const copiedOnto: Readonly<
     const cut = cutOf(line, block)
     if (cut.ends) {
       return Option.some(
-        insertedAt(
-          number,
-          end,
-          block.toLineEnds ? text : ' '.repeat(cut.pad) + text,
-        ),
+        insertedAt(number, end, text, block.toLineEnds ? 0 : cut.pad),
       )
     }
     return Option.some(
@@ -1188,17 +1231,20 @@ export const copiedDown = (
   buffer: Buffer.Buffer,
   { block, rule, text }: Copy,
 ): Buffer.Buffer => {
-  const rewrites: Array<Buffer.Rewrite> = []
+  const pieces: Array<Piece> = []
   for (let number = block.first + 1; number <= block.last; number += 1) {
     const line = buffer.lines[number]
     if (line !== undefined) {
       Option.match(copiedOnto[rule](line, number, block, text), {
         onNone: () => undefined,
-        onSome: rewrite => rewrites.push(rewrite),
+        onSome: piece => pieces.push(piece),
       })
     }
   }
-  return Buffer.rewrite(buffer, rewrites)
+  return Buffer.rewrite(
+    buffer,
+    Array.map(pieces.slice(0, rowsWithin(Array.map(pieces, unitsOf))), built),
+  )
 }
 
 const caretColumnAt = (
@@ -1220,7 +1266,8 @@ const lettersDown = (
   block: Block,
   at: Buffer.Position,
   anchor: Buffer.Position,
-  text: string,
+  once: string,
+  most: number,
 ): Placed => {
   const first = after.lines[at.line] ?? after.lines[0]
   const isAfterAnchor =
@@ -1231,16 +1278,21 @@ const lettersDown = (
     at.column,
     isAfterAnchor ? 'Last' : 'First',
   )
-  const rewrites: Array<Buffer.Rewrite> = [insertedAt(at.line, at.column, text)]
+  const spots: Array<Buffer.Position> = [at]
   for (let number = block.first + 1; number <= block.last; number += 1) {
     const line = after.lines[number]
     if (line !== undefined) {
       const stop = stopAtScreenColumn(line, wanted)
       if (stop.column === wanted) {
-        rewrites.push(insertedAt(number, cellStart(line, stop.cell), text))
+        spots.push({ line: number, column: cellStart(line, stop.cell) })
       }
     }
   }
+  const text = once.repeat(copiesWithin(most, 0, once.length * spots.length))
+  const fit = Math.max(1, Math.floor(maxPutUnits / text.length))
+  const rewrites = Array.map(spots.slice(0, fit), ({ line, column }) =>
+    built(insertedAt(line, column, text)),
+  )
   const added = Buffer.moveTo(Buffer.rewrite(after, rewrites), {
     line: at.line,
     column: at.column + text.length,
@@ -1269,7 +1321,7 @@ export const putOverBlock = (
     Charwise: ({ text }) =>
       text === '' || text.includes('\n')
         ? lettersAt(after, at, text, times)
-        : lettersDown(after, block, at, anchor, text.repeat(times)),
+        : lettersDown(after, block, at, anchor, text, times),
     Linewise: ({ text }) => {
       const lines = Array.flatten(
         Array.replicate(linesOf(text.slice(0, -1)), times),

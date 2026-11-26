@@ -333,13 +333,15 @@ const ROWS_PER_TEST = 5
 
 for (let from = 0; from < stayRows.length; from += ROWS_PER_TEST) {
   const rows = stayRows.slice(from, from + ROWS_PER_TEST)
-  test(`a block stay mixing typing with Delete, Backspace, Left and Right, Enter ends as in Vim (rows ${from + 1} to ${from + rows.length})`, async ({
-    nullpad,
-  }) => {
-    for (const row of rows) {
-      await playRow(nullpad, row)
-    }
-  })
+  test(
+    `a block stay mixing typing with Delete, Backspace, Left and Right, Enter ends as in Vim (rows ${from + 1} to ${from + rows.length})`,
+    { tag: '@vim-table' },
+    async ({ nullpad }) => {
+      for (const row of rows) {
+        await playRow(nullpad, row)
+      }
+    },
+  )
 }
 
 const SAVE_AND_MARGIN = 2_000

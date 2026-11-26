@@ -1208,13 +1208,15 @@ const playRow = async (nullpad: Nullpad, row: Row) => {
 const chunk = Math.ceil(vimRows.length / 4)
 for (let part = 0; part < 4; part++) {
   const rows = vimRows.slice(part * chunk, (part + 1) * chunk)
-  test(`vim u and Ctrl-R after changes, counts and mixed scripts act as in Vim (rows ${part * chunk + 1} to ${part * chunk + rows.length})`, async ({
-    nullpad,
-  }) => {
-    for (const row of rows) {
-      await playRow(nullpad, row)
-    }
-  })
+  test(
+    `vim u and Ctrl-R after changes, counts and mixed scripts act as in Vim (rows ${part * chunk + 1} to ${part * chunk + rows.length})`,
+    { tag: '@vim-table' },
+    async ({ nullpad }) => {
+      for (const row of rows) {
+        await playRow(nullpad, row)
+      }
+    },
+  )
 }
 
 const undo = (nullpad: Nullpad) => nullpad.press('Control+z')

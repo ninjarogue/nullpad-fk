@@ -1922,11 +1922,15 @@ const tables: ReadonlyArray<readonly [string, ReadonlyArray<Row>]> = [
 ]
 
 for (const [name, rows] of tables) {
-  test(`vim Normal keys: ${name}`, async ({ nullpad }) => {
-    for (const row of rows) {
-      await playRow(nullpad, row)
-    }
-  })
+  test(
+    `vim Normal keys: ${name}`,
+    { tag: '@vim-table' },
+    async ({ nullpad }) => {
+      for (const row of rows) {
+        await playRow(nullpad, row)
+      }
+    },
+  )
 }
 
 test('a toggle typed between fast keys acts in order with the keys around it', async ({

@@ -1616,13 +1616,15 @@ const playRow = async (nullpad: Nullpad, row: Row) => {
 for (const group of groups) {
   for (let from = 0; from < group.rows.length; from += ROWS_PER_TEST) {
     const rows = group.rows.slice(from, from + ROWS_PER_TEST)
-    test(`vim ${group.name} act as in Vim (rows ${from + 1} to ${from + rows.length})`, async ({
-      nullpad,
-    }) => {
-      for (const row of rows) {
-        await playRow(nullpad, row)
-      }
-    })
+    test(
+      `vim ${group.name} act as in Vim (rows ${from + 1} to ${from + rows.length})`,
+      { tag: '@vim-table' },
+      async ({ nullpad }) => {
+        for (const row of rows) {
+          await playRow(nullpad, row)
+        }
+      },
+    )
   }
 }
 

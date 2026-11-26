@@ -1,0 +1,105 @@
+[
+  { "paste": "abcdef\nab\tcd\nabcdef\nxy" },
+  { "press": "Control+Home" },
+  { "press": "Control+," },
+  { "expect": { "mode": "NORMAL", "status": "1:1 4L" } },
+  {
+    "caption": "Type 3r",
+    "note": "r waits for a letter, and the status line shows the count and r."
+  },
+  { "type": "3r" },
+  {
+    "expect": {
+      "mode": "NORMAL",
+      "pending": "3r",
+      "text": "abcdef\nab\tcd\nabcdef\nxy"
+    }
+  },
+  {
+    "caption": "Type x",
+    "note": "Three letters become x, and the cursor is on the last one."
+  },
+  { "type": "x" },
+  {
+    "expect": {
+      "pending": "",
+      "status": "1:3 4L",
+      "text": "xxxdef\nab\tcd\nabcdef\nxy"
+    }
+  },
+  {
+    "caption": "Press j, 0, then .",
+    "note": ". repeats r with its letter and count, over a tab too."
+  },
+  { "type": "j0." },
+  { "expect": { "status": "2:3 4L", "text": "xxxdef\nxxxcd\nabcdef\nxy" } },
+  {
+    "caption": "Press u",
+    "note": "One undo brings the three letters back, with the cursor on the first."
+  },
+  { "type": "u" },
+  { "expect": { "status": "2:1 4L", "text": "xxxdef\nab\tcd\nabcdef\nxy" } },
+  { "caption": "Type r then Esc", "note": "Esc cancels r. Nothing changes." },
+  { "type": "r" },
+  { "press": "Escape" },
+  {
+    "expect": {
+      "pending": "",
+      "mode": "NORMAL",
+      "text": "xxxdef\nab\tcd\nabcdef\nxy"
+    }
+  },
+  {
+    "caption": "Press V, then r and -",
+    "note": "V-LINE: every letter of the line becomes -, and the mode returns to NORMAL."
+  },
+  { "type": "Vr-" },
+  {
+    "expect": {
+      "mode": "NORMAL",
+      "status": "2:1 4L",
+      "text": "xxxdef\n-----\nabcdef\nxy"
+    }
+  },
+  {
+    "caption": "Press j, l, Ctrl-V, j, l, then r and *",
+    "note": "V-BLOCK: the block's columns become *. The short last line is replaced to its end."
+  },
+  { "type": "jl" },
+  { "press": "Control+v" },
+  { "type": "jlr*" },
+  {
+    "expect": {
+      "mode": "NORMAL",
+      "status": "3:2 4L",
+      "text": "xxxdef\n-----\na**def\nx*"
+    }
+  },
+  {
+    "caption": "Press v, l, then r and Enter",
+    "note": "r then Enter over VISUAL does nothing and keeps the selection."
+  },
+  { "type": "vlr" },
+  { "press": "Enter" },
+  {
+    "expect": {
+      "mode": "VISUAL",
+      "selection": "**",
+      "text": "xxxdef\n-----\na**def\nx*"
+    }
+  },
+  { "press": "Escape" },
+  {
+    "caption": "Press gg, then r and Enter",
+    "note": "In NORMAL, r then Enter breaks the line at the letter."
+  },
+  { "type": "ggr" },
+  { "press": "Enter" },
+  {
+    "expect": {
+      "mode": "NORMAL",
+      "status": "2:1 5L",
+      "text": "\nxxdef\n-----\na**def\nx*"
+    }
+  }
+]

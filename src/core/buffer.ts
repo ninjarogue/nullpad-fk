@@ -314,6 +314,53 @@ export const rewrite = (
   })
 }
 
+export type Split = Readonly<{
+  line: number
+  from: number
+  to: number
+  head: string
+  tail: string
+}>
+
+export const split = (buffer: Buffer, splits: ReadonlyArray<Split>): Buffer => {
+  if (splits.length === 0) {
+    return buffer
+  }
+  const lines: Array<Line> = []
+  let next = 0
+  let id = buffer.nextLineId
+  for (const { line, from, to, head, tail } of splits) {
+    for (; next < line; next += 1) {
+      lines.push(lineAt(buffer, next))
+    }
+    const current = lineAt(buffer, line)
+    lines.push(
+      makeLine(
+        current.id,
+        current.text.slice(0, from) + head,
+        Array.filter(current.joins, join => join <= from),
+      ),
+      makeLine(
+        LineId.make(id),
+        tail + current.text.slice(to),
+        Array.map(
+          Array.filter(current.joins, join => join >= to),
+          join => join - to + tail.length,
+        ),
+      ),
+    )
+    id += 1
+    next = line + 1
+  }
+  for (; next < buffer.lines.length; next += 1) {
+    lines.push(lineAt(buffer, next))
+  }
+  return Array.match(lines, {
+    onEmpty: () => buffer,
+    onNonEmpty: all => ({ ...buffer, lines: all, nextLineId: id }),
+  })
+}
+
 export const isBefore = (a: Position, b: Position): boolean =>
   a.line < b.line || (a.line === b.line && a.column < b.column)
 

@@ -219,7 +219,8 @@ export const markAt = (
     removed:
       held.id === noLine ||
       after.lines[was.line]?.id === held.id ||
-      after.lines[shifted]?.id === held.id
+      after.lines[shifted]?.id === held.id ||
+      after.lines.some(line => line.id === held.id)
         ? Option.none()
         : Option.some(held),
   }

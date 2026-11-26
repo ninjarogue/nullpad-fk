@@ -32,6 +32,9 @@ export const Command = Schema.TaggedUnion({
   Operate: { operator: OperatorName, target: TargetName },
   OperateAmount: { operator: OperatorName, amount: Amount },
   OperateBlock: { operator: OperatorName, amount: BlockAmount },
+  ReplaceLetters: { letter: Schema.String },
+  ReplaceAmount: { letter: Schema.String, amount: Amount },
+  ReplaceBlock: { letter: Schema.String, amount: BlockAmount },
   Put: { side: Side },
   Insert: { at: InsertAt },
   InsertAsSelected: { at: SelectionEdge },
@@ -56,6 +59,7 @@ export const VisualCommand = Schema.TaggedUnion({
   Move: { motion: MotionName },
   Operate: { operator: OperatorName, reach: Reach },
   Replace: { side: Side },
+  ReplaceLetters: { letter: Schema.String },
   Insert: { at: SelectionEdge },
   Pick: { object: ObjectName },
   Swap: {},
@@ -66,11 +70,11 @@ export const VisualCommand = Schema.TaggedUnion({
 })
 export type VisualCommand = typeof VisualCommand.Type
 
-export type Binding<C> = Readonly<{
-  keys: ReadonlyArray<Key>
-  command: C
-  about: string
-}>
+export type Binding<C> = Readonly<{ keys: ReadonlyArray<Key>; about: string }> &
+  (
+    | Readonly<{ command: C }>
+    | Readonly<{ takes: (argument: Key) => Option.Option<C> }>
+  )
 
 export const keysOf = (notation: string): ReadonlyArray<Key> =>
   notation.match(/<[^>]+>|./gu) ?? []
@@ -78,6 +82,28 @@ export const keysOf = (notation: string): ReadonlyArray<Key> =>
 const bind = <C>(notation: string, command: C, about: string): Binding<C> => ({
   keys: keysOf(notation),
   command,
+  about,
+})
+
+const anyKey: Key = '<Any>'
+
+const isNamedKey = (key: Key): boolean => key.length > 1 && key.startsWith('<')
+
+const namedLetters: Readonly<Record<Key, string>> = {
+  '<Tab>': '\t',
+  '<CR>': '\n',
+}
+
+export const letterOf = (key: Key): Option.Option<string> =>
+  isNamedKey(key) ? Option.fromNullishOr(namedLetters[key]) : Option.some(key)
+
+const takeLetter = <C>(
+  notation: string,
+  command: (letter: string) => C,
+  about: string,
+): Binding<C> => ({
+  keys: keysOf(notation + anyKey),
+  takes: key => Option.map(letterOf(key), command),
   about,
 })
 
@@ -213,6 +239,11 @@ export const normal: ReadonlyArray<Binding<Command>> = [
   insert('A', 'LineEnd', 'append at line end'),
   insert('o', 'LineBelow', 'open line below'),
   insert('O', 'LineAbove', 'open line above'),
+  takeLetter(
+    'r',
+    letter => Command.cases.ReplaceLetters.make({ letter }),
+    'replace letters',
+  ),
   bind('u', Command.cases.Travel.make({ way: 'Undo' }), 'undo'),
   bind('<C-r>', Command.cases.Travel.make({ way: 'Redo' }), 'redo'),
   bind('.', Command.cases.Repeat.make({}), 'repeat last change'),
@@ -224,10 +255,7 @@ export const normal: ReadonlyArray<Binding<Command>> = [
   bind('<C-[>', Command.cases.Cancel.make({}), 'cancel'),
 ]
 
-const anyKey: Key = '<Any>'
-
 const keysWithAnArgument: ReadonlyArray<Key> = [
-  'r',
   'f',
   'F',
   't',
@@ -326,6 +354,11 @@ export const visual: ReadonlyArray<Binding<VisualCommand>> = [
     'A',
     VisualCommand.cases.Insert.make({ at: 'End' }),
     'append after the cursor end',
+  ),
+  takeLetter(
+    'r',
+    letter => VisualCommand.cases.ReplaceLetters.make({ letter }),
+    'replace every letter of the selection',
   ),
   bind('<Esc>', leave, 'leave'),
   bind('<C-[>', leave, 'leave'),
@@ -465,12 +498,21 @@ const advanceKeys = <C>(
           binding => binding.keys.length === keys.length,
         ),
         {
-          onSome: ({ command }): Advance<C> => ({
-            _tag: 'Run',
-            command,
-            count: countOf(pending),
-            register: registerOf(pending),
-          }),
+          onSome: (binding): Advance<C> =>
+            Option.match(
+              'command' in binding
+                ? Option.some(binding.command)
+                : binding.takes(key),
+              {
+                onNone: () => drop,
+                onSome: (command): Advance<C> => ({
+                  _tag: 'Run',
+                  command,
+                  count: countOf(pending),
+                  register: registerOf(pending),
+                }),
+              },
+            ),
           onNone: () =>
             candidates.length > 0 ? wait({ ...pending, keys }) : drop,
         },
@@ -490,6 +532,15 @@ export const advance = <C>(
     ? startsRegister(pending)
     : advanceKeys(bindings, pending, key)
 }
+
+export const awaitsArgument = <C>(
+  bindings: ReadonlyArray<Binding<C>>,
+  pending: Pending,
+): boolean =>
+  !awaitsRegisterName(pending) &&
+  reachable(bindings, pending.keys).some(
+    binding => binding.keys[pending.keys.length] === anyKey,
+  )
 
 export const next = <C>(
   bindings: ReadonlyArray<Binding<C>>,

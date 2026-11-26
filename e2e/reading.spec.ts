@@ -196,11 +196,11 @@ test('Ctrl+End and Ctrl+E in one frame, then Esc, shows what Ctrl+End alone show
     }
   }
   await nullpad.press('Control+Home')
-  await nullpad.burst([{ press: 'Control+End' }])
+  await nullpad.burst([[{ press: 'Control+End' }]])
   await settle(nullpad.page)
   const alone = await linesOnScreen()
   await nullpad.press('Control+Home')
-  await nullpad.burst([{ press: 'Control+End' }, { press: 'Control+e' }])
+  await nullpad.burst([[{ press: 'Control+End' }, { press: 'Control+e' }]])
   await expect(
     nullpad.page.locator('.read'),
     'Ctrl+E opens the read view',

@@ -209,11 +209,13 @@ test('300 keys sent while the main thread is blocked land in order', async ({
     '',
   )
   await nullpad.burst(
-    steps.map(step =>
-      step === 'Enter' || step === 'Backspace'
-        ? { press: step }
-        : { type: step },
-    ),
+    [
+      steps.map(step =>
+        step === 'Enter' || step === 'Backspace'
+          ? { press: step }
+          : { type: step },
+      ),
+    ],
     { stall: 400 },
   )
   await expect.poll(() => nullpad.text()).toBe(expected)
@@ -830,7 +832,7 @@ test('a burst of arrows, Home, End, Delete, Backspace and typing sent while the 
     .flat()
     .map(step => (named.has(step) ? { press: step } : { type: step }))
   const sendBurst = async (page: typeof pair.nullpad) =>
-    burst(page, await page.context().newCDPSession(page), inputs, 400)
+    burst(page, await page.context().newCDPSession(page), [inputs], 400)
   await openFresh(pair.nullpad)
   await pair.textarea.evaluate(() =>
     document.querySelector('textarea')?.focus(),

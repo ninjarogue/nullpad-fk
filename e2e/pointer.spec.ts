@@ -337,8 +337,10 @@ const wheelThenKeys = (
   keys: ReadonlyArray<'x' | 'ArrowDown' | 'ArrowUp'>,
 ) =>
   nullpad.burst([
-    { wheel: deltaY },
-    ...keys.map(key => (key === 'x' ? { type: key } : { press: key })),
+    [
+      { wheel: deltaY },
+      ...keys.map(key => (key === 'x' ? { type: key } : { press: key })),
+    ],
   ])
 
 const settleScroll = async (nullpad: Nullpad) => {

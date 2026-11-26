@@ -41,7 +41,10 @@ type InputStep =
 
 export type Step =
   | InputStep
-  | Readonly<{ burst: ReadonlyArray<InputStep>; stall?: number }>
+  | Readonly<{
+      burst: ReadonlyArray<ReadonlyArray<InputStep>>
+      stall?: number
+    }>
   | Readonly<{ clipboard: ClipboardStep }>
   | Readonly<{ drag: Readonly<{ from: Point; to: Point }> }>
   | Readonly<{ scheme: 'light' | 'dark' }>
@@ -210,16 +213,25 @@ export const parseStep = (value: unknown, index: number): Step => {
     case 'wheel':
       return { wheel: number(body, 'wheel') }
     case 'burst': {
-      const inputs = Array.isArray(body)
-        ? body.map((each: unknown) => parseStep(each, index))
+      const shape =
+        'burst takes a list of frames, each a list of input steps, such as [[{"press":"End"},{"type":"x"}]]'
+      const frames = Array.isArray(body)
+        ? body.map((frame: unknown) =>
+            Array.isArray(frame) && frame.length > 0
+              ? frame.map((each: unknown) => parseStep(each, index))
+              : fail(shape),
+          )
         : []
-      if (inputs.length === 0) {
-        return fail('burst takes a list of input steps')
+      if (frames.length === 0) {
+        return fail(shape)
       }
-      const burst = inputs.flatMap(each => (isInputStep(each) ? [each] : []))
-      if (burst.length < inputs.length) {
-        fail(`burst takes only ${inputKinds.join(', ')} steps`)
-      }
+      const burst = frames.map(frame =>
+        frame.map(each =>
+          isInputStep(each)
+            ? each
+            : fail(`burst takes only ${inputKinds.join(', ')} steps`),
+        ),
+      )
       const stall = value['stall']
       if (stall === undefined) {
         return { burst }
@@ -600,8 +612,10 @@ export const play = async (
   } else if ('burst' in step) {
     const screen = await nullpad.screen()
     await nullpad.burst(
-      step.burst.map(input =>
-        'click' in input ? { click: clickPoint(screen, input.click) } : input,
+      step.burst.map(frame =>
+        frame.map(input =>
+          'click' in input ? { click: clickPoint(screen, input.click) } : input,
+        ),
       ),
       step.stall === undefined ? {} : { stall: step.stall },
     )

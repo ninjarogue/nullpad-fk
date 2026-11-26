@@ -730,6 +730,8 @@ const windowEventOf = (sent: Sent): WindowEvent | null =>
         ? 'wheel'
         : null
 
+export type Frames = ReadonlyArray<ReadonlyArray<Input>>
+
 type Landing = Readonly<{
   type: string
   frame: number
@@ -737,11 +739,13 @@ type Landing = Readonly<{
   at: number
 }>
 
+type Hold = Readonly<{ from: number; until: number }>
+
 type Watch = {
   landings: Array<Landing>
+  holds: Array<Hold>
   frame: number
-  ticking: boolean
-  heldUntil: number
+  counting: boolean
 }
 
 declare global {
@@ -752,19 +756,107 @@ const holdUrl = 'http://burst.nullpad.invalid/hold'
 
 const leastHold = 50
 
+const gate = () => {
+  const opened = { open: () => {} }
+  const done = new Promise<void>(resolve => {
+    opened.open = resolve
+  })
+  return { open: () => opened.open(), done }
+}
+
+const within = <A>(promise: Promise<A>, why: string): Promise<A> =>
+  Promise.race([
+    promise,
+    new Promise<never>((_, fail) =>
+      setTimeout(() => fail(new Error(why)), 10_000),
+    ),
+  ])
+
+const sum = (numbers: ReadonlyArray<number>) =>
+  numbers.reduce((total, each) => total + each, 0)
+
+const landingMisses = (
+  sent: ReadonlyArray<ReadonlyArray<Sent>>,
+  landings: ReadonlyArray<Landing>,
+  holds: ReadonlyArray<Hold>,
+): ReadonlyArray<string> => {
+  const counts = sent.map(
+    group =>
+      group.filter(each => {
+        const type = windowEventOf(each)
+        return type === 'keydown' || type === 'pointerdown'
+      }).length,
+  )
+  const discrete = landings.filter(landing => landing.type !== 'wheel')
+  const wheels = landings.filter(landing => landing.type === 'wheel')
+  const sentWheels = sent.flat().filter(each => each.kind === 'wheel').length
+  const groups = counts.map((count, index) => {
+    const start = sum(counts.slice(0, index))
+    return discrete.slice(start, start + count)
+  })
+  const isHeldBy = (hold: Hold | undefined) => (landing: Landing) =>
+    hold !== undefined &&
+    landing.timeStamp >= hold.from &&
+    landing.timeStamp < hold.until &&
+    landing.at >= hold.until
+  const frames = groups.map(group => {
+    const frame = group[0]?.frame
+    return frame === undefined || group.some(landing => landing.frame !== frame)
+      ? null
+      : frame
+  })
+  return [
+    ...(discrete.length === sum(counts)
+      ? []
+      : [`${discrete.length} keys and clicks landed for ${sum(counts)} sent`]),
+    ...(wheels.length === sentWheels
+      ? []
+      : [`${wheels.length} wheel turns landed for ${sentWheels} sent`]),
+    ...groups.flatMap((group, index) =>
+      group.every(isHeldBy(holds[index]))
+        ? []
+        : [
+            `frame ${index + 1}: an input was not queued behind its held main thread`,
+          ],
+    ),
+    ...wheels.flatMap(wheel =>
+      holds.some(hold => isHeldBy(hold)(wheel))
+        ? []
+        : ['a wheel turn was not queued behind a held main thread'],
+    ),
+    ...frames.flatMap((frame, index) => {
+      const earlier = frames
+        .slice(0, index)
+        .flatMap((each, at) => (each === null ? [] : [{ each, at }]))
+        .at(-1)
+      return (counts[index] ?? 0) > 0 && frame === null
+        ? [`frame ${index + 1}: its keys and clicks landed in several frames`]
+        : frame !== null &&
+            earlier !== undefined &&
+            frame - earlier.each !== index - earlier.at
+          ? [
+              `frame ${index + 1} landed ${frame - earlier.each} frames after frame ${earlier.at + 1}`,
+            ]
+          : []
+    }),
+  ]
+}
+
 /**
  * Chrome dispatches a key the moment it reaches the main thread, so keys sent back to back over CDP split across frames
  * on a loaded machine. A synchronous XMLHttpRequest blocks the main thread without spinning the CPU, and every input
  * sent meanwhile queues and is dispatched in one frame after it. Chrome hands a wheel turn to the page at the next frame.
+ * After a long task Chrome may draw two frames before a timer runs, so the hold for the next frame starts in an animation
+ * frame callback, and the inputs it queues are dispatched once that frame is drawn.
  */
 export const burst = async (
   page: Page,
   cdp: CDPSession,
-  inputs: ReadonlyArray<Input>,
+  frames: Frames,
   stall = 0,
 ): Promise<void> => {
   const pastes = new Set(
-    inputs.flatMap(input => ('paste' in input ? [input.paste] : [])),
+    frames.flat().flatMap(input => ('paste' in input ? [input.paste] : [])),
   )
   if (pastes.size > 1) {
     throw new Error(
@@ -775,109 +867,100 @@ export const burst = async (
     await page.evaluate(value => navigator.clipboard.writeText(value), text)
   }
   const viewport = page.viewportSize() ?? { width: 1000, height: 600 }
-  const sent = sentOf(inputs, {
-    x: viewport.width / 2,
-    y: viewport.height / 2,
-  })
-  await page.evaluate(() => {
-    if (globalThis.nullpadBurst !== undefined) {
-      return
-    }
-    const watch: Watch = {
-      landings: [],
-      frame: 0,
-      ticking: false,
-      heldUntil: 0,
-    }
-    const note = (event: Event) => {
-      watch.landings.push({
-        type: event.type,
-        frame: watch.frame,
-        timeStamp: event.timeStamp,
-        at: performance.now(),
-      })
-      if (!watch.ticking) {
-        watch.ticking = true
-        requestAnimationFrame(() => {
-          watch.frame += 1
-          watch.ticking = false
-        })
-      }
-    }
-    for (const type of ['keydown', 'pointerdown', 'wheel']) {
-      addEventListener(type, note, { capture: true, passive: true })
-    }
-    globalThis.nullpadBurst = watch
-  })
-  const holding = { release: () => {} }
-  const released = new Promise<void>(resolve => {
-    holding.release = resolve
-  })
-  const held = new Promise<void>(resolve =>
-    page.route(holdUrl, async route => {
-      resolve()
-      await released
-      await route.fulfill({
-        body: '',
-        headers: { 'access-control-allow-origin': '*' },
-      })
-    }),
-  )
-  await page.evaluate(url => {
-    const watch = globalThis.nullpadBurst
-    if (watch === undefined) {
-      return
-    }
-    watch.landings = []
-    setTimeout(() => {
-      const request = new XMLHttpRequest()
-      request.open('GET', url, false)
-      try {
-        request.send()
-      } finally {
-        watch.heldUntil = performance.now()
-      }
+  const centre = { x: viewport.width / 2, y: viewport.height / 2 }
+  const sent = frames.map(inputs => sentOf(inputs, centre))
+  const gates = frames.map(() => ({ held: gate(), released: gate() }))
+  const reached = { holds: 0 }
+  await page.route(holdUrl, async route => {
+    const reachedGate = gates[reached.holds]
+    reached.holds += 1
+    reachedGate?.held.open()
+    await reachedGate?.released.done
+    await route.fulfill({
+      body: '',
+      headers: { 'access-control-allow-origin': '*' },
     })
-  }, holdUrl)
-  await held
-  const acks = Promise.all(sent.map(each => send(cdp, each)))
-  await new Promise(resolve => setTimeout(resolve, Math.max(stall, leastHold)))
-  holding.release()
-  await acks
+  })
+  await page.evaluate(
+    ({ url, count }) => {
+      const watch: Watch = globalThis.nullpadBurst ?? {
+        landings: [],
+        holds: [],
+        frame: 0,
+        counting: false,
+      }
+      if (globalThis.nullpadBurst === undefined) {
+        for (const type of ['keydown', 'pointerdown', 'wheel']) {
+          addEventListener(
+            type,
+            event =>
+              watch.landings.push({
+                type: event.type,
+                frame: watch.frame,
+                timeStamp: event.timeStamp,
+                at: performance.now(),
+              }),
+            { capture: true, passive: true },
+          )
+        }
+        globalThis.nullpadBurst = watch
+      }
+      watch.landings = []
+      watch.holds = []
+      if (!watch.counting) {
+        watch.counting = true
+        const tick = () => {
+          if (watch.counting) {
+            watch.frame += 1
+            requestAnimationFrame(tick)
+          }
+        }
+        requestAnimationFrame(tick)
+      }
+      const hold = (left: number) => {
+        const from = performance.now()
+        if (left > 1) {
+          requestAnimationFrame(() => hold(left - 1))
+        }
+        const request = new XMLHttpRequest()
+        request.open('GET', url, false)
+        try {
+          request.send()
+        } finally {
+          watch.holds.push({ from, until: performance.now() })
+        }
+      }
+      setTimeout(() => hold(count))
+    },
+    { url: holdUrl, count: frames.length },
+  )
+  const acks: Array<Promise<unknown>> = []
+  for (const [index, { held, released }] of gates.entries()) {
+    await within(
+      held.done,
+      `the page never held its main thread for frame ${index + 1}`,
+    )
+    acks.push(...(sent[index] ?? []).map(each => send(cdp, each)))
+    await new Promise(resolve =>
+      setTimeout(resolve, Math.max(stall, leastHold)),
+    )
+    released.open()
+  }
+  await Promise.all(acks)
   await page.unroute(holdUrl)
   await settle(page)
   await settle(page)
-  const { landings, heldUntil } = await page.evaluate(() => ({
-    landings: globalThis.nullpadBurst?.landings ?? [],
-    heldUntil: globalThis.nullpadBurst?.heldUntil ?? 0,
-  }))
-  const misses: Array<string> = []
-  for (const type of ['keydown', 'pointerdown', 'wheel'] as const) {
-    const sentCount = sent.filter(each => windowEventOf(each) === type).length
-    const landed = landings.filter(landing => landing.type === type).length
-    if (landed !== sentCount) {
-      misses.push(`${landed} ${type} events landed for ${sentCount} sent`)
+  const { landings, holds } = await page.evaluate(() => {
+    const watch = globalThis.nullpadBurst
+    if (watch !== undefined) {
+      watch.counting = false
     }
-  }
-  const frames = new Set(
-    landings
-      .filter(landing => landing.type !== 'wheel')
-      .map(landing => landing.frame),
-  )
-  if (frames.size > 1) {
-    misses.push(`the keys and clicks landed in ${frames.size} frames`)
-  }
-  const unheld = landings.filter(
-    landing => landing.timeStamp >= heldUntil || landing.at < heldUntil,
-  )
-  if (unheld.length > 0) {
-    misses.push(
-      `${unheld.length} events were not queued behind the held main thread`,
-    )
-  }
+    return { landings: watch?.landings ?? [], holds: watch?.holds ?? [] }
+  })
+  const misses = landingMisses(sent, landings, holds)
   if (misses.length > 0) {
     throw new Error(
-      `the burst did not land as one: ${misses.join('; ')}\n${JSON.stringify(landings)}`,
+      `the burst did not land as sent: ${misses.join('; ')}\n${JSON.stringify({ holds, landings })}`,
     )
   }
 }
@@ -991,8 +1074,8 @@ export const driver = (page: Page, cdp: CDPSession) => {
       await page.mouse.click(x, y)
       await settle(page)
     },
-    burst: (inputs: ReadonlyArray<Input>, options: { stall?: number } = {}) =>
-      burst(page, cdp, inputs, options.stall),
+    burst: (frames: Frames, options: { stall?: number } = {}) =>
+      burst(page, cdp, frames, options.stall),
     inkIn: async (
       clip: Readonly<{ x: number; y: number; width: number; height: number }>,
     ) => {

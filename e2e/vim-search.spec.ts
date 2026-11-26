@@ -7422,8 +7422,8 @@ test('Left, Right, Home, End, Backspace, Delete and Ctrl-U edit the prompt', asy
   await play(nullpad, '<C-u>ab<C-u>c')
   expect(
     await promptOf(nullpad),
-    'Ctrl-U at the end empties it (Vim: /c)',
-  ).toBe('/c')
+    'Ctrl-U deletes only before the cursor: the b stays (Vim: /cb)',
+  ).toBe('/cb')
   expect(await nullpad.text(), 'the note is as it was').toBe(noteB)
 })
 
@@ -7914,6 +7914,41 @@ test('a repeat inside a repeated group is refused with its own notice', async ({
     'not supported in a search: a repeat inside a repeated group',
   )
   await expectUntouched(nullpad, 'a repeat inside a group', noteB, 1, 1)
+})
+
+const refusedGroups: ReadonlyArray<readonly [string, string]> = [
+  ['\\(a\\|a\\)*b', 'a star on a group with a bar'],
+  ['\\(x\\|xx\\)\\+y', 'a plus on a group with a bar'],
+  ['\\(a\\|b\\)\\{2,3}c', 'a counted repeat on a group with a bar'],
+  [
+    '\\(\\(a\\|b\\)\\=\\)\\+c',
+    'a repeat on a group that holds a group with a bar',
+  ],
+]
+
+for (const [pattern, name] of refusedGroups) {
+  test(`${name} is refused with its own notice and the cursor stays`, async ({
+    nullpad,
+  }) => {
+    await begin(nullpad, noteB)
+    await play(nullpad, `/${pattern}<CR>`)
+    expect(await noticeOf(nullpad), 'the notice').toBe(
+      'not supported in a search: a repeat of a group with \\|',
+    )
+    await expectUntouched(nullpad, `/${pattern}`, noteB, 1, 1)
+  })
+}
+
+test('a group with a bar that is not repeated still searches', async ({
+  nullpad,
+}) => {
+  await begin(nullpad, noteB)
+  await play(nullpad, '/\\(t\\|f\\)\\=our<CR>')
+  expect(await noticeOf(nullpad), 'no notice').toBe('')
+  expect(await nullpad.status(), 'lands on four').toMatchObject({
+    line: 2,
+    column: 5,
+  })
 })
 
 test('a refused token in a ? search, with an operator and in VISUAL stops the search and the operator', async ({

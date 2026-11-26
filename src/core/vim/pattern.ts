@@ -260,6 +260,8 @@ type Item = Readonly<{
   source: string
   kind: 'Atom' | 'Group' | 'Quantified' | 'Anchor' | 'Alt'
   repeats: boolean
+  alternates: boolean
+  varies: boolean
 }>
 
 type Frame = Readonly<{ items: ReadonlyArray<Item>; opener: string }>
@@ -402,6 +404,8 @@ const atom = (source: string): Item => ({
   source,
   kind: 'Atom',
   repeats: false,
+  alternates: false,
+  varies: false,
 })
 
 const quantified = (
@@ -425,7 +429,14 @@ const quantified = (
   if (last.kind === 'Quantified') {
     return syntax(raw === '*' ? 'E61: Nested *' : `E62: Nested ${raw}`)
   }
-  if (last.kind === 'Group' && last.repeats && repeating) {
+  if (last.kind === 'Group' && repeating && last.alternates) {
+    return unsupported('a repeat of a group with \\|')
+  }
+  if (
+    last.kind === 'Group' &&
+    repeating &&
+    (last.repeats || (last.varies && suffix.startsWith('{')))
+  ) {
     return unsupported('a repeat inside a repeated group')
   }
   return Result.succeed(
@@ -437,6 +448,8 @@ const quantified = (
           source: last.source + suffix,
           kind: 'Quantified',
           repeats: last.repeats || repeating,
+          alternates: last.alternates,
+          varies: true,
         },
       ],
     }),
@@ -454,12 +467,25 @@ const closed = (state: State, raw: string): Result.Result<State, string> => {
       source: `(?:${Array.map(frame.items, item => item.source).join('')})`,
       kind: 'Group',
       repeats: Array.some(frame.items, item => item.repeats),
+      alternates: Array.some(
+        frame.items,
+        item => item.alternates || item.kind === 'Alt',
+      ),
+      varies: Array.some(frame.items, item => item.varies),
     }),
   )
 }
 
 const anchored = (state: State, source: string): Result.Result<State, string> =>
-  Result.succeed(pushed(state, { source, kind: 'Anchor', repeats: false }))
+  Result.succeed(
+    pushed(state, {
+      source,
+      kind: 'Anchor',
+      repeats: false,
+      alternates: false,
+      varies: false,
+    }),
+  )
 
 const endsHere = (next: Token | undefined): boolean =>
   next === undefined ||
@@ -508,7 +534,13 @@ const magic = (
     ')': () => closed(state, raw),
     '|': () =>
       Result.succeed(
-        pushed(state, { source: '|', kind: 'Alt', repeats: false }),
+        pushed(state, {
+          source: '|',
+          kind: 'Alt',
+          repeats: false,
+          alternates: false,
+          varies: false,
+        }),
       ),
     '<': () => anchored(state, `(?<!${word})(?=${word})`),
     '>': () => anchored(state, `(?<=${word})(?!${word})`),

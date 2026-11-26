@@ -8448,3 +8448,85 @@ test('Ctrl-U alone clears the prompt', async ({ nullpad }) => {
   await play(nullpad, '/two<C-u>')
   expect(await promptOf(nullpad), 'the prompt').toBe('/')
 })
+
+const collectionRows: ReadonlyArray<
+  readonly [pattern: string, text: string, column: number]
+> = [
+  ['[\\d]', 'x\\dy', 2],
+  ['[\\d]', 'xdy', 2],
+  ['[\\w]', 'xwy', 2],
+  ['[\\s]', 'x s', 3],
+  ['[\\t]', 'x\ty', 2],
+  ['[\\\\]', 'x\\y', 2],
+  ['[\\]]', 'x]y', 2],
+  ['[\\-]', 'a-b', 2],
+  ['[\\^]', 'a^b', 2],
+  ['[\\d65]', 'xAy', 2],
+  ['[\\x41]', 'xAy', 2],
+  ['[\\o101]', 'xAy', 2],
+  ['[\\u65e5]', 'x日y', 2],
+  ['[\\d65-\\d67]', 'xCy', 2],
+  ['[\\o9]', 'xo9', 2],
+]
+
+for (const [pattern, text, column] of collectionRows) {
+  test(`the collection ${pattern} on ${JSON.stringify(text)} reads its escapes as Vim does`, async ({
+    nullpad,
+  }) => {
+    await begin(nullpad, `zzz\n${text}`)
+    await play(nullpad, `/${pattern}<CR>`)
+    expect(await noticeOf(nullpad), 'no notice').toBe('')
+    expect(await nullpad.status(), 'lands on the match').toMatchObject({
+      line: 2,
+      column,
+    })
+  })
+}
+
+test('a collection with \\n is refused as typed and \\s there is a backslash or s', async ({
+  nullpad,
+}) => {
+  await begin(nullpad, 'zzz\nx y')
+  await play(nullpad, '/[\\n]<CR>')
+  expect(await noticeOf(nullpad), 'the notice').toBe(
+    'not supported in a search: [\\n]',
+  )
+  await play(nullpad, '/[\\s]<CR>')
+  expect(await noticeOf(nullpad), 'the space is not a match').toBe(
+    'E486: Pattern not found: [\\s]',
+  )
+})
+
+test('a long prompt in a narrow window keeps its / and its cursor in view', async ({
+  nullpad,
+}) => {
+  await nullpad.resize(400, 600)
+  await begin(nullpad, noteB)
+  await play(nullpad, '/')
+  await nullpad.page.keyboard.insertText('long '.repeat(30))
+  await settle(nullpad.page)
+  const rects = await nullpad.page.evaluate(() => {
+    const box = (selector: string) => {
+      const rect = document.querySelector(selector)?.getBoundingClientRect()
+      return rect === undefined
+        ? null
+        : { left: rect.left, right: rect.right, width: rect.width }
+    }
+    return {
+      prompt: box('.status .prompt'),
+      lead: box('.status .prompt-lead'),
+      caret: box('.status .prompt-caret'),
+    }
+  })
+  expect(rects.prompt, 'the prompt is drawn').not.toBeNull()
+  expect(rects.lead?.left, 'the / is at the left edge of the prompt').toBe(
+    rects.prompt?.left,
+  )
+  expect(
+    rects.caret?.right ?? Infinity,
+    'the cursor is inside the prompt',
+  ).toBeLessThanOrEqual((rects.prompt?.right ?? 0) + 0.5)
+  expect(await promptOf(nullpad), 'the text is all there').toBe(
+    `/${'long '.repeat(30)}`,
+  )
+})

@@ -366,6 +366,51 @@ const collectionEscapes: Readonly<Record<string, number>> = {
   '-': 45,
 }
 
+const numberEscapes: Readonly<
+  Record<string, Readonly<{ digits: RegExp; radix: number; most: number }>>
+> = {
+  d: { digits: /^\d{1,7}/u, radix: 10, most: 0x10ffff },
+  o: { digits: /^[0-7]{1,4}/u, radix: 8, most: 0o377 },
+  x: { digits: /^[0-9a-fA-F]{1,2}/u, radix: 16, most: 0xff },
+  u: { digits: /^[0-9a-fA-F]{1,4}/u, radix: 16, most: 0xffff },
+  U: { digits: /^[0-9a-fA-F]{1,8}/u, radix: 16, most: 0x10ffff },
+}
+
+type Escape = Readonly<{ code: number; length: number }>
+
+const numberEscape = (
+  chars: ReadonlyArray<string>,
+  index: number,
+  letter: string,
+): Option.Option<Escape> => {
+  const kind = numberEscapes[letter]
+  const digits = kind?.digits.exec(chars.slice(index + 2).join(''))?.[0]
+  if (kind === undefined || digits === undefined) {
+    return Option.none()
+  }
+  const fitting = Array.makeBy(digits.length, count => count + 1)
+    .map(count => digits.slice(0, count))
+    .filter(prefix => parseInt(prefix, kind.radix) <= kind.most)
+  const longest = fitting[fitting.length - 1]
+  return longest === undefined
+    ? Option.none()
+    : Option.some({
+        code: parseInt(longest, kind.radix),
+        length: 2 + longest.length,
+      })
+}
+
+const escapeAt = (
+  chars: ReadonlyArray<string>,
+  index: number,
+  letter: string,
+): Option.Option<Escape> => {
+  const fixed = collectionEscapes[letter]
+  return fixed === undefined
+    ? numberEscape(chars, index, letter)
+    : Option.some({ code: fixed, length: 2 })
+}
+
 const entriesOf = (
   chars: ReadonlyArray<string>,
   raw: string,
@@ -378,23 +423,20 @@ const entriesOf = (
     if (char === '[' && after !== undefined && ':=.'.includes(after)) {
       return unsupported(raw)
     }
-    if (char === '\\' && after !== undefined) {
-      const escaped = collectionEscapes[after]
-      if (escaped === undefined && /[nodxuU0-9]/u.test(after)) {
-        return unsupported(raw)
-      }
-      if (escaped === undefined) {
-        entries.push({ code: 92, isDash: false })
-      } else {
-        entries.push({ code: escaped, isDash: false })
-        index += 2
-        continue
-      }
-      index += 1
-      continue
+    if (char === '\\' && after === 'n') {
+      return unsupported(raw)
     }
-    entries.push({ code: char.codePointAt(0) ?? 0, isDash: char === '-' })
-    index += 1
+    const escape =
+      char === '\\' && after !== undefined
+        ? escapeAt(chars, index, after)
+        : Option.none<Escape>()
+    if (Option.isSome(escape)) {
+      entries.push({ code: escape.value.code, isDash: false })
+      index += escape.value.length
+    } else {
+      entries.push({ code: char.codePointAt(0) ?? 0, isDash: char === '-' })
+      index += 1
+    }
   }
   return Result.succeed(entries)
 }

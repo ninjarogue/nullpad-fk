@@ -20,6 +20,7 @@ import {
 } from './vim/motions'
 import { type Picked, objects } from './vim/objects'
 import * as Operators from './vim/operators'
+import * as Seek from './vim/seek'
 import * as Selection from './vim/selection'
 import {
   type OperatorName,
@@ -27,6 +28,7 @@ import {
   type TargetName,
   byKind,
   isObject,
+  rangeToLanding,
   targetFor,
 } from './vim/targets'
 
@@ -49,10 +51,15 @@ export type Repeat = typeof Repeat.Type
 export const Kept = Schema.Struct({
   registers: Operators.Registers,
   dot: Schema.Option(Repeat),
+  seek: Seek.Memory,
 })
 export type Kept = typeof Kept.Type
 
-export const nothingKept: Kept = { registers: noRegisters, dot: Option.none() }
+export const nothingKept: Kept = {
+  registers: noRegisters,
+  dot: Option.none(),
+  seek: Seek.forgotten,
+}
 
 export const BlockStay = Schema.Struct({
   rule: Operators.BlockRule,
@@ -718,7 +725,7 @@ const putOverStep = (
       }),
       false,
     ),
-    kept: { registers: deleted.registers, dot: Option.some(dot) },
+    kept: { ...kept, registers: deleted.registers, dot: Option.some(dot) },
     fate: done,
     began: Option.some(began),
     clipboard: Option.none(),
@@ -832,6 +839,7 @@ const run = (
       vim: after,
       buffer: rest(after, applied.buffer, false),
       kept: {
+        ...kept,
         registers: applied.registers,
         dot: operator === 'Delete' ? repeat : kept.dot,
       },
@@ -859,6 +867,44 @@ const run = (
         vim: { ...cleared, want },
         buffer: Buffer.moveTo(buffer, positionOf(buffer, spot)),
       }
+    },
+    Seek: ({ seek }) => {
+      const { memory, landing } = Seek.sought(
+        buffer,
+        spotOf(buffer),
+        seek,
+        count,
+        kept.seek,
+      )
+      const remembered: Step = { ...unchanged, kept: { ...kept, seek: memory } }
+      return Option.match(landing, {
+        onNone: () => remembered,
+        onSome: ({ spot }): Step => ({
+          ...remembered,
+          vim: normal,
+          buffer: Buffer.moveTo(buffer, positionOf(buffer, spot)),
+        }),
+      })
+    },
+    OperateSeek: ({ operator, seek }) => {
+      const from = spotOf(buffer)
+      const { memory, landing } = Seek.sought(
+        buffer,
+        from,
+        seek,
+        count,
+        kept.seek,
+      )
+      const step = Option.match(landing, {
+        onNone: () => unchanged,
+        onSome: found =>
+          operated(
+            operator,
+            'Selection',
+            rangeToLanding(operator, buffer, from, found),
+          ),
+      })
+      return { ...step, kept: { ...step.kept, seek: memory } }
     },
     Operate: ({ operator, target }) =>
       Option.match(
@@ -910,6 +956,7 @@ const run = (
         vim: after,
         buffer: rest(after, applied.buffer, false),
         kept: {
+          ...kept,
           registers: applied.registers,
           dot: operator === 'Delete' ? repeat : kept.dot,
         },
@@ -1249,6 +1296,7 @@ const runVisual = (
             : after,
         buffer: rested,
         kept: {
+          ...kept,
           registers: applied.registers,
           dot: operator === 'Delete' ? dot : kept.dot,
         },
@@ -1356,6 +1404,31 @@ const runVisual = (
         },
         buffer: Buffer.moveTo(buffer, caret),
       }
+    },
+    Seek: ({ seek }): Step => {
+      const { memory, landing } = Seek.sought(
+        buffer,
+        ends.cursor,
+        seek,
+        count,
+        kept.seek,
+      )
+      const remembered: Step = { ...unchanged, kept: { ...kept, seek: memory } }
+      return Option.match(landing, {
+        onNone: () => remembered,
+        onSome: ({ spot }): Step => {
+          const caret = positionOf(buffer, spot)
+          return {
+            ...remembered,
+            vim: {
+              ...cleared,
+              mode: visualMode(visual.kind, visual.anchor, columnAfter(caret)),
+              want: 'Unset',
+            },
+            buffer: Buffer.moveTo(buffer, caret),
+          }
+        },
+      })
     },
     Pick: ({ object }): Step => {
       const picked = objects[object].pick(buffer, ends, count ?? 1)
@@ -1851,8 +1924,10 @@ export const again = (
       Visual: () => unchanged,
     })
   return Replayed.match(step, {
-    Run: ({ command, count, register }) =>
-      run(vim, buffer, kept, command, count, register),
+    Run: ({ command, count, register }) => {
+      const ran = run(vim, buffer, kept, command, count, register)
+      return { ...ran, kept: { ...ran.kept, seek: kept.seek } }
+    },
     Typed: ({ input }) =>
       inStay(stay => pressInsert(vim, buffer, kept, stay, input)),
     Leave: () => inStay(stay => leaving(vim, buffer, kept, stay)),

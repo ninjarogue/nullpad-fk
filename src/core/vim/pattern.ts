@@ -495,16 +495,42 @@ type Shape = 'Atom' | 'Group' | 'Repeated' | 'Anchor'
 
 type Item = Readonly<{ node: Node; shape: Shape; atLineStart: boolean }>
 
+type Items =
+  | Readonly<{ _tag: 'NoItems' }>
+  | Readonly<{ _tag: 'Newest'; item: Item; earlier: Items }>
+
+const noItems: Items = { _tag: 'NoItems' }
+
+const withNewest = (earlier: Items, item: Item): Items => ({
+  _tag: 'Newest',
+  item,
+  earlier,
+})
+
+const inOrder = (items: Items): ReadonlyArray<Item> => {
+  const ordered: Array<Item> = []
+  let at = items
+  while (at._tag === 'Newest') {
+    ordered.push(at.item)
+    at = at.earlier
+  }
+  return ordered.reverse()
+}
+
 type Frame = Readonly<{
   branches: ReadonlyArray<Node>
-  items: ReadonlyArray<Item>
+  items: Items
   opener: Opener
 }>
+
+type Enclosing =
+  | Readonly<{ _tag: 'Top' }>
+  | Readonly<{ _tag: 'Inside'; frame: Frame; rest: Enclosing }>
 
 type Opener = Readonly<{ raw: string; captures: boolean }>
 
 type State = Readonly<{
-  outer: ReadonlyArray<Frame>
+  outer: Enclosing
   frame: Frame
   ignoreCase: boolean
   captures: number
@@ -514,7 +540,7 @@ const noOpener: Opener = { raw: '', captures: false }
 
 const emptyFrame = (opener: Opener): Frame => ({
   branches: [],
-  items: [],
+  items: noItems,
   opener,
 })
 
@@ -530,13 +556,15 @@ const itemOf = (
 
 const withItem = (state: State, item: Item): State => ({
   ...state,
-  frame: { ...state.frame, items: [...state.frame.items, item] },
+  frame: { ...state.frame, items: withNewest(state.frame.items, item) },
 })
 
-const concatenated = (items: ReadonlyArray<Item>): Node =>
-  items.length === 1 && items[0] !== undefined
-    ? items[0].node
-    : { _tag: 'Concat', nodes: items.map(item => item.node) }
+const concatenated = (items: Items): Node => {
+  const ordered = inOrder(items)
+  return ordered.length === 1 && ordered[0] !== undefined
+    ? ordered[0].node
+    : { _tag: 'Concat', nodes: ordered.map(item => item.node) }
+}
 
 const alternation = (frame: Frame): Node => {
   const branches = [...frame.branches, concatenated(frame.items)]
@@ -556,30 +584,32 @@ const repeated = (
   how: Repeating,
   starIsLetter: boolean,
 ): Result.Result<State, string> =>
-  Option.match(Array.last(state.frame.items), {
-    onNone: () =>
-      starIsLetter
-        ? Result.succeed(withItem(state, letterItem('*')))
-        : syntax(`E64: ${raw} follows nothing`),
-    onSome: last => {
-      if (last.atLineStart && starIsLetter) {
-        return Result.succeed(withItem(state, letterItem('*')))
-      }
-      if (last.shape === 'Repeated') {
-        return syntax(raw === '*' ? 'E61: Nested *' : `E62: Nested ${raw}`)
-      }
-      return Result.succeed({
-        ...state,
-        frame: {
-          ...state.frame,
-          items: [
-            ...state.frame.items.slice(0, -1),
-            itemOf({ _tag: 'Repeat', node: last.node, ...how }, 'Repeated'),
-          ],
-        },
-      })
-    },
-  })
+  Match.value(state.frame.items).pipe(
+    Match.tagsExhaustive({
+      NoItems: () =>
+        starIsLetter
+          ? Result.succeed(withItem(state, letterItem('*')))
+          : syntax(`E64: ${raw} follows nothing`),
+      Newest: ({ item: last, earlier }) => {
+        if (last.atLineStart && starIsLetter) {
+          return Result.succeed(withItem(state, letterItem('*')))
+        }
+        if (last.shape === 'Repeated') {
+          return syntax(raw === '*' ? 'E61: Nested *' : `E62: Nested ${raw}`)
+        }
+        return Result.succeed({
+          ...state,
+          frame: {
+            ...state.frame,
+            items: withNewest(
+              earlier,
+              itemOf({ _tag: 'Repeat', node: last.node, ...how }, 'Repeated'),
+            ),
+          },
+        })
+      },
+    }),
+  )
 
 const mostCaptures = 9
 
@@ -593,23 +623,21 @@ const opened = (
     ? syntax("E872: (NFA regexp) Too many '('")
     : Result.succeed({
         ...state,
-        outer: [...state.outer, state.frame],
+        outer: { _tag: 'Inside', frame: state.frame, rest: state.outer },
         frame: emptyFrame(opener),
         captures,
       })
 }
 
 const closed = (state: State, raw: string): Result.Result<State, string> =>
-  Option.match(Array.last(state.outer), {
-    onNone: () => syntax(`E55: Unmatched ${raw}`),
-    onSome: outer =>
-      Result.succeed(
+  state.outer._tag === 'Top'
+    ? syntax(`E55: Unmatched ${raw}`)
+    : Result.succeed(
         withItem(
-          { ...state, outer: state.outer.slice(0, -1), frame: outer },
+          { ...state, outer: state.outer.rest, frame: state.outer.frame },
           itemOf({ _tag: 'Group', node: alternation(state.frame) }, 'Group'),
         ),
-      ),
-  })
+      )
 
 const alternated = (state: State): Result.Result<State, string> =>
   Result.succeed({
@@ -617,7 +645,7 @@ const alternated = (state: State): Result.Result<State, string> =>
     frame: {
       ...state.frame,
       branches: [...state.frame.branches, concatenated(state.frame.items)],
-      items: [],
+      items: noItems,
     },
   })
 
@@ -632,16 +660,18 @@ const anchored = (
     ),
   )
 
+const isCaseFlag = (token: Token | undefined): boolean =>
+  token?._tag === 'Magic' && (token.char === 'c' || token.char === 'C')
+
 const closesPattern = (tokens: ReadonlyArray<Token>, from: number): boolean => {
-  const at = tokens.findIndex(
-    (token, index) =>
-      index >= from &&
-      !(token._tag === 'Magic' && (token.char === 'c' || token.char === 'C')),
-  )
+  let at = from
+  while (isCaseFlag(tokens[at])) {
+    at += 1
+  }
   const next = tokens[at]
   return (
-    at < 0 ||
-    (next?._tag === 'Magic' && (next.char === ')' || next.char === '|'))
+    next === undefined ||
+    (next._tag === 'Magic' && (next.char === ')' || next.char === '|'))
   )
 }
 
@@ -669,7 +699,7 @@ const magic = (
   }
   switch (char) {
     case '^':
-      return state.frame.items.length === 0 || token.anchorsAnywhere
+      return state.frame.items._tag === 'NoItems' || token.anchorsAnywhere
         ? anchored(state, 'LineStart')
         : Result.succeed(withItem(state, letterItem('^')))
     case '$':
@@ -731,7 +761,7 @@ export const compileTokens = (
   tokens: ReadonlyArray<Token>,
 ): Result.Result<Matcher, string> => {
   const initial: Result.Result<State, string> = Result.succeed({
-    outer: [],
+    outer: { _tag: 'Top' },
     frame: emptyFrame(noOpener),
     ignoreCase: false,
     captures: 0,
@@ -741,7 +771,7 @@ export const compileTokens = (
   )
   return Result.flatMap(folded, state => {
     const { opener } = state.frame
-    if (state.outer.length > 0) {
+    if (state.outer._tag === 'Inside') {
       return syntax(
         `${opener.captures ? 'E54' : 'E53'}: Unmatched ${opener.raw}`,
       )

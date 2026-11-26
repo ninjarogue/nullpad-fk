@@ -382,9 +382,12 @@ const expectUsable = async (
   ).toBe(SHORT_LINES)
   await play(nullpad, 'ggIZ<Esc>')
   expect(
-    (await nullpad.text()).startsWith('Za'),
+    await nullpad.page
+      .locator('.surface .line')
+      .first()
+      .evaluate(line => line.textContent.slice(0, 2)),
     `${what}: a typed key still shows`,
-  ).toBe(true)
+  ).toBe('Za')
   expect(pageErrors, `${what}: and still no error`).toEqual([])
 }
 

@@ -821,6 +821,7 @@ export const startVimRow = async (
   }
   await page.keyboard.press('Escape')
   await page.keyboard.press('Escape')
+  await expect(mode, 'vim is on before the row is pasted').toHaveText('NORMAL')
   for (const key of ['g', 'g', 'd', 'G']) {
     await page.keyboard.press(key)
   }

@@ -1,0 +1,98 @@
+[
+  { "paste": "abcabc xax\nab.cd.ef" },
+  { "press": "Control+Home" },
+  { "press": "Control+," },
+  { "expect": { "mode": "NORMAL", "status": "1:1 2L" } },
+  {
+    "caption": "Type f",
+    "note": "f waits for a letter, and the status line shows it."
+  },
+  { "type": "f" },
+  { "expect": { "pending": "f" } },
+  {
+    "caption": "Type c",
+    "note": "The cursor goes to the next c on the line."
+  },
+  { "type": "c" },
+  { "expect": { "pending": "", "status": "1:3 2L" } },
+  {
+    "caption": "Press ; then ,",
+    "note": "; repeats the find forward, and , goes back the other way."
+  },
+  { "type": ";" },
+  { "expect": { "status": "1:6 2L" } },
+  { "type": "," },
+  { "expect": { "status": "1:3 2L" } },
+  {
+    "caption": "Type 3fc",
+    "note": "Only one c is left after the cursor, so the find fails and the cursor stays."
+  },
+  { "type": "3fc" },
+  { "expect": { "status": "1:3 2L" } },
+  {
+    "caption": "Type t then x",
+    "note": "t stops on the letter before the next x."
+  },
+  { "type": "tx" },
+  { "expect": { "status": "1:7 2L" } },
+  {
+    "caption": "Type F then a",
+    "note": "F goes back to the a before the cursor."
+  },
+  { "type": "Fa" },
+  { "expect": { "status": "1:4 2L" } },
+  {
+    "caption": "Type f then Esc, then x",
+    "note": "Esc cancels f. The cursor stays, and x then deletes the letter under it."
+  },
+  { "type": "f" },
+  { "press": "Escape" },
+  { "expect": { "pending": "", "status": "1:4 2L" } },
+  { "type": "x" },
+  { "expect": { "text": "abcbc xax\nab.cd.ef", "status": "1:4 2L" } },
+  { "caption": "Press u", "note": "The a comes back." },
+  { "type": "u" },
+  { "expect": { "text": "abcabc xax\nab.cd.ef" } },
+  {
+    "caption": "Press 0, then type dtx",
+    "note": "d with t deletes up to the letter before the x."
+  },
+  { "type": "0dtx" },
+  { "expect": { "text": "xax\nab.cd.ef", "status": "1:1 2L" } },
+  {
+    "caption": "Press j, 0, then type df.",
+    "note": "d with f deletes through the dot it finds."
+  },
+  { "type": "j0df." },
+  { "expect": { "text": "xax\ncd.ef", "status": "2:1 2L" } },
+  {
+    "caption": "Press .",
+    "note": ". repeats the delete with its own letter."
+  },
+  { "type": "." },
+  { "expect": { "text": "xax\nef", "status": "2:1 2L" } },
+  {
+    "caption": "Press u, u, then type dfz",
+    "note": "No z on the line: the find fails, and d deletes nothing."
+  },
+  { "type": "uu0dfz" },
+  { "expect": { "text": "xax\nab.cd.ef", "status": "2:1 2L" } },
+  {
+    "caption": "Press v, then type f.",
+    "note": "In VISUAL the find moves the cursor end and the selection grows to the dot."
+  },
+  { "type": "vf." },
+  { "expect": { "mode": "VISUAL", "selection": "ab.", "status": "2:3 2L" } },
+  {
+    "caption": "Press ;",
+    "note": "; finds the next dot, and the selection grows again."
+  },
+  { "type": ";" },
+  { "expect": { "mode": "VISUAL", "selection": "ab.cd." } },
+  {
+    "caption": "Press d",
+    "note": "d deletes the selection."
+  },
+  { "type": "d" },
+  { "expect": { "mode": "NORMAL", "text": "xax\nef", "status": "2:1 2L" } }
+]

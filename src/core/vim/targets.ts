@@ -23,6 +23,7 @@ import {
   isBefore,
   objects,
 } from './objects'
+import type { Landing } from './seek'
 
 export const Kind = Schema.Literals(['Charwise', 'Linewise'])
 export type Kind = typeof Kind.Type
@@ -259,4 +260,14 @@ export const targetFor = (operator: OperatorName, name: TargetName): Target => {
           linewiseWhenBlankAround(buffer, range),
         )
     : target
+}
+
+export const rangeToLanding = (
+  operator: OperatorName,
+  buffer: Buffer.Buffer,
+  from: Spot,
+  { spot, reach }: Landing,
+): Range => {
+  const range = rangeOf(buffer, ordered(from, spot, reach))
+  return operator === 'Delete' ? linewiseWhenBlankAround(buffer, range) : range
 }

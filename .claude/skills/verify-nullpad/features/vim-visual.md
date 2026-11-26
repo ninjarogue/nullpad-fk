@@ -32,6 +32,6 @@ An `expect` step takes `selection`, the selected text as drawn, and `mode` reads
 - `selection` reads the `#selection` boxes over the drawn rows, so it holds only lines near the screen. A selection longer than three screens reads short. Check a long one by its operator's result.
 - A selected line break reads as `\n`: every line of a `V` selection ends with one, and a `v` selection ends with one when its cursor end is on the line break (`v$`).
 - `G` and a counted `G` go to the line's first non-blank, so `4Gv` on a line that starts with a tab selects the letter after it. Use `4G0v` for the tab.
-- `f` and `t` are not built, so place the cursor with `w`, `e`, `l` and counts.
+- `f`, `t` and `;` move the cursor end on its line (see [Vim find](./vim-find.md)), as do `w`, `e`, `l` and counts.
 - A put from an empty register over a selection deletes the selection, as Vim does.
 - A count before `v` or `V` is ignored: `3v` is `v`.

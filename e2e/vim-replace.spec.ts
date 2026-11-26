@@ -1958,6 +1958,68 @@ test('r then Ctrl-C cancels, the keydown is cancelled so the browser does not ta
   expect(await nullpad.text(), 'x runs on its own and deletes').toBe('bcdef')
 })
 
+test('VISUAL r then Ctrl-E opens the read view, and Esc comes back to NORMAL with nothing selected', async ({
+  nullpad,
+}) => {
+  await begin(nullpad, 'hello world\nsecond line')
+  await play(nullpad, 'ggvjr')
+  await nullpad.page.keyboard.press('Control+e')
+  expect(await modeOf(nullpad), 'Ctrl-E opens the read view').toBe('READ')
+  await play(nullpad, '<Esc>')
+  expect(await modeOf(nullpad), 'back in NORMAL').toBe('NORMAL')
+  expect(await pendingOf(nullpad), 'r is gone').toBe('')
+  expect(await nullpad.selection(), 'nothing selected').toBe('')
+})
+
+test('VISUAL r then Ctrl-P opens the finder, and Esc comes back to NORMAL with nothing selected', async ({
+  nullpad,
+}) => {
+  await begin(nullpad, 'hello world\nsecond line')
+  await play(nullpad, 'ggvjr')
+  await nullpad.page.keyboard.press('Control+p')
+  await play(nullpad, '<Esc>')
+  expect(await modeOf(nullpad), 'back in NORMAL').toBe('NORMAL')
+  expect(await pendingOf(nullpad), 'r is gone').toBe('')
+  expect(await nullpad.selection(), 'nothing selected').toBe('')
+})
+
+test('Ctrl-E and Ctrl-P leave VISUAL whatever key waits, and drop a key waiting in NORMAL', async ({
+  nullpad,
+}) => {
+  await begin(nullpad, 'hello world\nsecond line')
+  const waiting = ['f', 'F', 't', 'T', 'm', "'", '`', '@', 'q', 'z', '[', ']']
+  const starts = ['v', 'V', '<C-v>']
+  const chords = ['Control+e', 'Control+p']
+  for (const [index, key] of [...waiting, 'i', 'g', '"', '2'].entries()) {
+    const start = starts[index % starts.length] ?? 'v'
+    const chord = chords[index % chords.length] ?? 'Control+e'
+    const label = `${start}j${key} then ${chord}`
+    await play(nullpad, `gg${start}j${key}`)
+    await nullpad.page.keyboard.press(chord)
+    await play(nullpad, '<Esc>')
+    expect.soft(await modeOf(nullpad), `${label}: mode`).toBe('NORMAL')
+    expect.soft(await pendingOf(nullpad), `${label}: pending`).toBe('')
+    expect.soft(await nullpad.selection(), `${label}: selection`).toBe('')
+  }
+  for (const chord of ['Control+e', 'Control+p']) {
+    await play(nullpad, 'gg2r')
+    await nullpad.page.keyboard.press(chord)
+    await play(nullpad, '<Esc>')
+    expect.soft(await modeOf(nullpad), `r then ${chord}: mode`).toBe('NORMAL')
+    expect.soft(await pendingOf(nullpad), `r then ${chord}: pending`).toBe('')
+    await play(nullpad, 'x')
+    expect
+      .soft(await nullpad.text(), `r then ${chord}: x runs alone`)
+      .toBe('ello world\nsecond line')
+    await play(nullpad, 'u')
+  }
+  await play(nullpad, '2r')
+  await vimOn(nullpad)
+  await vimOn(nullpad)
+  expect(await modeOf(nullpad), 'r then the vim toggle twice').toBe('NORMAL')
+  expect(await pendingOf(nullpad), 'r is gone after the toggle').toBe('')
+})
+
 for (const key of [
   'Escape',
   'Control+[',

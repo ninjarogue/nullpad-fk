@@ -541,6 +541,39 @@ body {
   text-overflow: ellipsis;
 }
 
+.prompt {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: pre;
+}
+
+.prompt .phead {
+  display: flex;
+  flex: 0 1 auto;
+  justify-content: flex-end;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.prompt .pcur {
+  flex: none;
+  anchor-name: --caret;
+  background: var(--cur);
+  color: var(--bg);
+}
+
+.prompt .pcur:empty {
+  width: 1ch;
+}
+
+.prompt .ptail {
+  flex: 0 1000 auto;
+  min-width: 0;
+  overflow: hidden;
+}
+
 .pos {
   color: var(--dim);
 }

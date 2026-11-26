@@ -1198,6 +1198,11 @@ export const subscriptions = Subscription.make<
 
 const editorBounds: Bounds = { control: '.surface', selection: '#caret' }
 
+const promptBounds: Bounds = {
+  control: '.status .prompt',
+  selection: '.status .pcur',
+}
+
 const paneView = (model: Model, h: HtmlBuilder<Message>): Html =>
   model.pane === 'None'
     ? h.empty
@@ -1219,7 +1224,9 @@ const screenView = (
 ): Html => {
   const editorSurface = surface(
     frame,
-    Option.isSome(model.finder) ? 'Blurred' : model.keyboard,
+    Option.isSome(model.finder) || Option.isSome(frame.status.prompt)
+      ? 'Blurred'
+      : model.keyboard,
     h,
   )
   return h.div(
@@ -1247,9 +1254,11 @@ export const view = (model: Model, h: HtmlBuilder<Message>): Document => {
   const title = Editor.title(model.editor)
   const bounds = Option.isSome(model.finder)
     ? finderBounds
-    : isReading(model)
-      ? readBounds
-      : editorBounds
+    : Option.isSome(frame.status.prompt)
+      ? promptBounds
+      : isReading(model)
+        ? readBounds
+        : editorBounds
   return {
     title,
     body: h.main(

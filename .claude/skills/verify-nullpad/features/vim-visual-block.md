@@ -23,7 +23,7 @@ With vim on, Ctrl-V in NORMAL selects a block: the letters between two screen co
 
 Preconditions: the baseline in [README.md](./README.md).
 
-`node e2e/drive.ts .claude/skills/verify-nullpad/features/vim-visual-block.json` plays the proof and ends `PASS`. On the build before V-BLOCK it fails at step 8, where Ctrl-V pastes and leaves the mode at `NORMAL`. On a note of six lines, with a short line, a line with tabs and a line with a wide letter, it plays `l<C-v>jjl`, `o` and `O`, `d`, `u` and `.`, `<C-v>3j$A!<Esc>`, `<C-v>3jI- <Esc>` and `j.`, `gg<C-v>jjey` and `$p`, `4G<C-v>jl` through a tab with `d`, `u` and `gv`, then `v`, `V` and Ctrl-V twice, `G0<C-v>ggll` and `d` through a tab and a wide letter, a paste over `gg<C-v>j` with one `u`, and a paste with Ctrl-V in INSERT.
+`node e2e/drive.ts .claude/skills/verify-nullpad/features/vim-visual-block.json` plays the proof and ends `PASS`. On the build before V-BLOCK it fails at step 8, where Ctrl-V pastes and leaves the mode at `NORMAL`. On a note of six lines, with a short line, a line with tabs and a line with a wide letter, it plays `l<C-v>jjl`, `o` and `O`, `d`, `u` and `.`, `<C-v>3j$A!<Esc>`, `<C-v>3jI- <Esc>` and `j.`, `gg<C-v>jjey` and `$p`, `4G<C-v>jl` through a tab with `d`, `u` and `gv`, then `v`, `V` and Ctrl-V twice, `G0<C-v>ggll` and `d` through a tab and a wide letter, a paste over `gg<C-v>j` with one `u`, a paste with Ctrl-V in INSERT, `gg<C-v>jjc<Del><Esc>`, which copies nothing, and `$<C-v>jl"+p` with `u`, which leaves the cursor on the first line.
 
 A step `{"press": "Control+v"}` is the key Ctrl-V. A `paste` step presses Ctrl-Shift-V while the mode is NORMAL, VISUAL, V-LINE or V-BLOCK, and Ctrl-V otherwise. An `expect` step takes `selection`, and `mode` reads `V-BLOCK`.
 

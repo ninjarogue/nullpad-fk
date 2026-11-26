@@ -466,5 +466,85 @@
     "expect": {
       "mode": "NORMAL"
     }
+  },
+  {
+    "type": "u"
+  },
+  {
+    "expect": {
+      "text": "one two three\nfour five six\nseven eight nine\nab\n\tx\ty\nab字cd"
+    }
+  },
+  {
+    "caption": "Press gg, Ctrl-V, jj, c, Delete, then Esc",
+    "note": "A Delete in the stay shortens the first line, so nothing is copied, as in Vim."
+  },
+  {
+    "type": "gg"
+  },
+  {
+    "press": "Control+v"
+  },
+  {
+    "type": "jjc"
+  },
+  {
+    "press": "Delete"
+  },
+  {
+    "press": "Escape"
+  },
+  {
+    "expect": {
+      "mode": "NORMAL",
+      "text": "e two three\nour five six\neven eight nine\nab\n\tx\ty\nab字cd",
+      "status": "1:1 6L"
+    }
+  },
+  {
+    "type": "u"
+  },
+  {
+    "expect": {
+      "text": "one two three\nfour five six\nseven eight nine\nab\n\tx\ty\nab字cd",
+      "status": "1:1 6L"
+    }
+  },
+  {
+    "caption": "Copy Z outside, then $, Ctrl-V, jl, \"+p and u",
+    "note": "u after a clipboard put over a block goes to the first changed line."
+  },
+  {
+    "clipboard": {
+      "copy": "Z"
+    }
+  },
+  {
+    "type": "$"
+  },
+  {
+    "press": "Control+v"
+  },
+  {
+    "type": "jl\"+p"
+  },
+  {
+    "wait": 300
+  },
+  {
+    "expect": {
+      "mode": "NORMAL",
+      "text": "one two threZ\nfour five siZ\nseven eight nine\nab\n\tx\ty\nab字cd",
+      "pending": ""
+    }
+  },
+  {
+    "type": "u"
+  },
+  {
+    "expect": {
+      "text": "one two three\nfour five six\nseven eight nine\nab\n\tx\ty\nab字cd",
+      "status": "1:13 6L"
+    }
   }
 ]

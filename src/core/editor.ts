@@ -3,6 +3,7 @@ import { Array, Option, Order, Schema } from 'effect'
 import * as Buffer from './buffer'
 import * as History from './history'
 import { Input, type Modifiers, type NamedKey } from './input'
+import * as Line from './line'
 import * as Markdown from './markdown'
 import * as Notes from './notes'
 import * as Prompt from './prompt'
@@ -79,7 +80,7 @@ export const Need = Schema.TaggedUnion({
 export type Need = typeof Need.Type
 
 export const Asking = Schema.Struct({
-  line: Prompt.Prompt,
+  prompt: Prompt.Prompt,
   resume: Vim.Resume,
 })
 export type Asking = typeof Asking.Type
@@ -128,6 +129,7 @@ export type PromptLine = Readonly<{
   lead: string
   before: string
   preedit: string
+  under: string
   after: string
 }>
 
@@ -792,7 +794,7 @@ const vimPlan = (
       now(
         {
           ...counted,
-          prompt: Option.some({ line: Prompt.open, resume }),
+          prompt: Option.some({ prompt: Prompt.open, resume }),
         },
         'None',
       ),
@@ -804,31 +806,26 @@ const promptPlan = (editor: Editor, asking: Asking, input: Input): Plan => {
   if (Vim.isScreenKey(input)) {
     return inputPlan({ ...editor, prompt: Option.none() }, input)
   }
-  const { prompt, act } = Prompt.feed(asking.line, editor.kept.history, input)
+  const { prompt, act } = Prompt.feed(asking.prompt, editor.kept.history, input)
+  const remembering = () => ({
+    ...editor.kept,
+    history: Prompt.remembered(editor.kept.history, prompt.line.text),
+  })
   return Prompt.Act.match(act, {
     Stay: () =>
-      now(
-        { ...editor, prompt: Option.some({ ...asking, line: prompt }) },
-        'None',
-      ),
-    Close: ({ text }) =>
+      now({ ...editor, prompt: Option.some({ ...asking, prompt }) }, 'None'),
+    Close: () =>
       now(
         {
           ...editor,
           prompt: Option.none(),
-          kept: {
-            ...editor.kept,
-            history: Prompt.remembered(editor.kept.history, text),
-          },
+          kept: remembering(),
           vim: Option.map(editor.vim, Vim.abandoned),
         },
         'None',
       ),
-    Run: ({ text }) => {
-      const kept = {
-        ...editor.kept,
-        history: Prompt.remembered(editor.kept.history, text),
-      }
+    Run: () => {
+      const kept = remembering()
       const closed = { ...editor, prompt: Option.none(), kept }
       return Option.match(editor.vim, {
         onNone: () => now(closed, 'None'),
@@ -836,7 +833,13 @@ const promptPlan = (editor: Editor, asking: Asking, input: Input): Plan => {
           vimPlan(
             closed,
             vim,
-            Vim.searched(vim, editor.buffer, kept, asking.resume, text),
+            Vim.searched(
+              vim,
+              editor.buffer,
+              kept,
+              asking.resume,
+              prompt.line.text,
+            ),
             0,
           ),
       })
@@ -1356,7 +1359,7 @@ export const paint = (editor: Editor): Frame => {
       Vim.selection(vim, buffer, { first, last }),
     ),
     surrounding: Option.match(editor.prompt, {
-      onSome: ({ line }) => Prompt.surrounding(line),
+      onSome: ({ prompt }) => Prompt.surrounding(prompt),
       onNone: () => ({
         text: (lines[caret.line]?.text ?? '').slice(
           near.from.column,
@@ -1376,12 +1379,16 @@ export const paint = (editor: Editor): Frame => {
         onSome: Vim.pendingKeys,
       }),
       notice: Option.getOrElse(editor.notice, () => ''),
-      prompt: Option.map(editor.prompt, ({ line, resume }) => ({
-        lead: resume.way === 'Forward' ? '/' : '?',
-        before: line.text.slice(0, line.caret),
-        preedit: line.preedit,
-        after: line.text.slice(line.caret),
-      })),
+      prompt: Option.map(editor.prompt, ({ prompt: { line }, resume }) => {
+        const under = Line.letterUnderCaret(line)
+        return {
+          lead: resume.way === 'Forward' ? '/' : '?',
+          before: line.text.slice(0, line.caret),
+          preedit: line.preedit,
+          under,
+          after: line.text.slice(line.caret + under.length),
+        }
+      }),
       line: caret.line + 1,
       column: caretGrapheme(lines[caret.line]?.text ?? '', caret.column) + 1,
       lineCount: lines.length,

@@ -1200,7 +1200,7 @@ const editorBounds: Bounds = { control: '.surface', selection: '#caret' }
 
 const promptBounds: Bounds = {
   control: '.status .prompt',
-  selection: '.status .pcur',
+  selection: '.status .prompt-caret',
 }
 
 const paneView = (model: Model, h: HtmlBuilder<Message>): Html =>

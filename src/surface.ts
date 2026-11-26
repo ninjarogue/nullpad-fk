@@ -1448,20 +1448,15 @@ const modeLabels: Readonly<Record<Mode, string>> = {
   VisualBlock: 'V-BLOCK',
 }
 
-const promptSegmenter = new Intl.Segmenter(undefined, {
-  granularity: 'grapheme',
-})
-
-const promptView = (prompt: PromptLine, h: HtmlBuilder<Message>): Html => {
-  const under = promptSegmenter.segment(prompt.after)[Symbol.iterator]().next()
-  const first = under.done ? '' : under.value.segment
-  return h.span(
+const promptView = (prompt: PromptLine, h: HtmlBuilder<Message>): Html =>
+  h.span(
     [h.Class('prompt')],
     [
+      h.span([h.Class('prompt-lead')], [prompt.lead]),
       h.span(
-        [h.Class('phead')],
+        [h.Class('prompt-before')],
         [
-          prompt.lead + prompt.before,
+          prompt.before,
           ...(prompt.preedit === ''
             ? []
             : [
@@ -1472,11 +1467,13 @@ const promptView = (prompt: PromptLine, h: HtmlBuilder<Message>): Html => {
               ]),
         ],
       ),
-      h.span([h.Class('pcur')], first === '' ? [] : [first]),
-      h.span([h.Class('ptail')], [prompt.after.slice(first.length)]),
+      h.span(
+        [h.Class('prompt-caret')],
+        prompt.under === '' ? [] : [prompt.under],
+      ),
+      h.span([h.Class('prompt-after')], [prompt.after]),
     ],
   )
-}
 
 export const statusLine = (
   status: Frame['status'],

@@ -548,21 +548,40 @@ body {
   white-space: pre;
 }
 
-.status .prompt .phead {
+.status .prompt-before {
   display: inline-flex;
   justify-content: flex-end;
-  max-width: calc(100% - 1ch);
+  max-width: calc(100% - 2ch);
   overflow: hidden;
   vertical-align: top;
 }
 
-.status .prompt .pcur {
+.status .prompt-caret {
+  flex: none;
+}
+
+.status .prompt-before {
+  display: inline-flex;
+  flex: 0 1 auto;
+  justify-content: flex-end;
+  min-width: 0;
+  max-width: calc(100% - 2ch);
+  overflow: hidden;
+}
+
+.status .prompt-after {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.status .prompt-caret {
   anchor-name: --caret;
   background: var(--cur);
   color: var(--bg);
 }
 
-.status .prompt .pcur:empty {
+.status .prompt-caret:empty {
   display: inline-block;
   width: 1ch;
   height: 1lh;

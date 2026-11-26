@@ -3728,6 +3728,163 @@ for (let from = 0; from < defectRows.length; from += defectsPerTest) {
   })
 }
 
+const findingRows: ReadonlyArray<
+  readonly [
+    why: string,
+    text: string,
+    at: readonly [number, number],
+    keys: string,
+    after: string,
+    line: number,
+    column: number,
+    notice: string,
+  ]
+> = [
+  [
+    'a failed search resets the column j and k keep',
+    'abcdef\nab',
+    [1, 6],
+    'j/zzz<CR>k',
+    'abcdef\nab',
+    1,
+    2,
+    '',
+  ],
+  [
+    'a failed search in VISUAL resets it too',
+    'abcdef\nab',
+    [1, 6],
+    'jv/zzz<CR>k<Esc>',
+    'abcdef\nab',
+    1,
+    2,
+    '',
+  ],
+  [
+    'a refused pattern resets it too',
+    'abcdef\nab',
+    [1, 6],
+    'j/\\%[/zzz<CR>k',
+    'abcdef\nab',
+    1,
+    2,
+    '',
+  ],
+  [
+    'an unclosed [ makes the rest of the command the collection',
+    'a/e b\nx',
+    [1, 1],
+    '/[/e<CR>',
+    'a/e b\nx',
+    1,
+    1,
+    'E486: Pattern not found: [/e',
+  ],
+  [
+    'an unclosed [ that holds a match',
+    'a[/e\nx',
+    [1, 1],
+    '/[/e<CR>',
+    'a[/e\nx',
+    1,
+    2,
+    '',
+  ],
+  [
+    'a match whose offset runs off the end is passed over by n',
+    'ab\nabc',
+    [1, 1],
+    '/\\l/b+1<CR>nnnn',
+    'ab\nabc',
+    1,
+    2,
+    'search hit BOTTOM, continuing at TOP',
+  ],
+  [
+    'a match whose offset runs off the start is passed over by n',
+    'xab\nxab',
+    [1, 3],
+    '?\\l?s-1<CR>nnnn',
+    'xab\nxab',
+    1,
+    3,
+    '',
+  ],
+  [
+    'd?$?e leaves the letter before the line break',
+    'ab\ncd',
+    [2, 1],
+    'd?$?e<CR>',
+    'ad',
+    1,
+    2,
+    '',
+  ],
+  [
+    'a refused pattern is the last pattern for n',
+    'ab\nab',
+    [1, 1],
+    '/b<CR>/\\(<CR>n',
+    'ab\nab',
+    1,
+    2,
+    'E54: Unmatched \\(',
+  ],
+  [
+    'and for N',
+    'ab\nab',
+    [1, 1],
+    '/b<CR>/\\(<CR>N',
+    'ab\nab',
+    1,
+    2,
+    'E54: Unmatched \\(',
+  ],
+  [
+    'and for dn',
+    'ab\nb',
+    [1, 1],
+    '/b<CR>/\\(<CR>dn',
+    'ab\nb',
+    1,
+    2,
+    'E54: Unmatched \\(',
+  ],
+  [
+    'and for an empty pattern',
+    'ab\nb',
+    [1, 1],
+    '/b<CR>/\\(<CR>/<CR>',
+    'ab\nb',
+    1,
+    2,
+    'E54: Unmatched \\(',
+  ],
+]
+
+test('a failed search, an unclosed [, an offset off the edge and a refused pattern answer as Vim does', async ({
+  nullpad,
+}) => {
+  for (const [
+    why,
+    text,
+    at,
+    keys,
+    after,
+    line,
+    column,
+    notice,
+  ] of findingRows) {
+    await begin(nullpad, text, at)
+    await play(nullpad, keys)
+    expect.soft(await nullpad.text(), `${why}: text`).toBe(after)
+    expect
+      .soft(await nullpad.status(), `${why}: cursor`)
+      .toMatchObject({ line, column })
+    expect.soft(await noticeOf(nullpad), `${why}: notice`).toBe(notice)
+  }
+})
+
 test('chords with Shift, Alt or Meta do not clear or close the prompt, and E and P still open the read view and the finder over it', async ({
   nullpad,
 }) => {

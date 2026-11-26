@@ -885,7 +885,7 @@ const run = (
       opening(unchanged, vim, { way, operator, count, register }),
     Seek: ({ seek }) => {
       const { memory, landing, notice, cursorOnFailure, resetsColumn } =
-        Seek.sought(buffer, spotOf(buffer), seek, count, kept.seek)
+        Seek.sought(buffer, spotOf(buffer), seek, count, kept.seek, true)
       const remembered: Step = {
         ...unchanged,
         vim: resetsColumn ? { ...cleared, want: 'Unset' } : cleared,
@@ -916,6 +916,7 @@ const run = (
         seek,
         count,
         kept.seek,
+        true,
       )
       const step = Option.match(landing, {
         onNone: (): Step =>
@@ -1425,7 +1426,7 @@ const runVisual = (
       }),
     Seek: ({ seek }): Step => {
       const { memory, landing, notice, cursorOnFailure, resetsColumn } =
-        Seek.sought(buffer, ends.cursor, seek, count, kept.seek)
+        Seek.sought(buffer, ends.cursor, seek, count, kept.seek, false)
       const remembered: Step = {
         ...unchanged,
         vim: resetsColumn ? { ...cleared, want: 'Unset' } : cleared,

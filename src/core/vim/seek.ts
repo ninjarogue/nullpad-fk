@@ -1,7 +1,7 @@
 import { Option, Result, Schema } from 'effect'
 
 import type * as Buffer from '../buffer'
-import { cellAt, cellEnd, cellStart } from './cells'
+import { cellAt, cellCount, cellEnd, cellStart } from './cells'
 import type { Spot } from './motions'
 import * as Pattern from './pattern'
 import * as Search from './search'
@@ -155,7 +155,40 @@ type Run = Readonly<{
   count: number
   remembers: boolean
   cursorOnFailure: Option.Option<Spot>
+  repeatsOnSpot: Option.Option<'Clamped' | 'Open'>
 }>
+
+const spotAfterCheck = (
+  buffer: Buffer.Buffer,
+  { line, cell }: Spot,
+  how: 'Clamped' | 'Open',
+): Spot => {
+  const row = buffer.lines[line]
+  return how === 'Clamped' && row !== undefined
+    ? { line, cell: Math.max(0, Math.min(cell, cellCount(row) - 1)) }
+    : { line, cell }
+}
+
+const repeated = (
+  buffer: Buffer.Buffer,
+  from: Spot,
+  how: Option.Option<'Clamped' | 'Open'>,
+  count: number,
+  first: () => Option.Option<Search.Found>,
+  again: (count: number) => Option.Option<Search.Found>,
+): Option.Option<Search.Found> =>
+  Option.flatMap(first(), found => {
+    const stuck = Option.exists(how, kind => {
+      const landed = spotAfterCheck(buffer, found.spot, kind)
+      return (
+        !found.wrapped &&
+        found.reach !== 'Linewise' &&
+        landed.line === from.line &&
+        landed.cell === from.cell
+      )
+    })
+    return stuck ? again(count + 1) : Option.some(found)
+  })
 
 const ranSearch = ({
   buffer,
@@ -165,6 +198,7 @@ const ranSearch = ({
   count,
   remembers,
   cursorOnFailure,
+  repeatsOnSpot,
 }: Run): Sought => {
   const kept: Memory = remembers
     ? { ...memory, search: Option.some(request) }
@@ -173,14 +207,29 @@ const ranSearch = ({
     onFailure: notice => failed(kept, notice),
     onSuccess: matcher =>
       Option.match(
-        Search.find(
+        repeated(
           buffer,
           from,
-          matcher,
-          request.way,
+          repeatsOnSpot,
           count,
-          request.offset,
-          !remembers,
+          () =>
+            Search.find(
+              buffer,
+              from,
+              matcher,
+              request.way,
+              count,
+              request.offset,
+            ),
+          extra =>
+            Search.find(
+              buffer,
+              from,
+              matcher,
+              request.way,
+              extra,
+              request.offset,
+            ),
         ),
         {
           onNone: () =>
@@ -239,6 +288,7 @@ export const sought = (
   seek: Seek,
   count: number | undefined,
   memory: Memory,
+  clamps: boolean,
 ): Sought =>
   Seek.match(seek, {
     Find: ({ way, till, letter }): Sought => {
@@ -272,6 +322,7 @@ export const sought = (
             count: count ?? 1,
             remembers: true,
             cursorOnFailure: Option.none(),
+            repeatsOnSpot: Option.none(),
           }),
       }),
     Next: ({ reverse }): Sought =>
@@ -286,6 +337,7 @@ export const sought = (
             count: count ?? 1,
             remembers: false,
             cursorOnFailure: Option.none(),
+            repeatsOnSpot: Option.some(clamps ? 'Clamped' : 'Open'),
           }),
       }),
     Word: ({ way }): Sought =>
@@ -300,6 +352,7 @@ export const sought = (
             count: count ?? 1,
             remembers: true,
             cursorOnFailure: Option.some(start),
+            repeatsOnSpot: Option.none(),
           }),
       }),
   })

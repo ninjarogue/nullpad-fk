@@ -305,6 +305,30 @@ const undone = (buffer: Buffer.Buffer, from: Spot, offset: Offset): Start => {
   })
 }
 
+const runsOff = (
+  buffer: Buffer.Buffer,
+  place: Place,
+  offset: Offset,
+): boolean => {
+  if (offset.kind === 'Line' || offset.by === 0) {
+    return false
+  }
+  const walk = offset.by > 0 ? incl : decl
+  return Option.isNone(
+    times(
+      Math.abs(offset.by),
+      Option.some(spotAt(buffer, place, 'LineBreak')),
+      spot =>
+        Option.flatMap(spot, current => {
+          const stepped = walk(buffer, current)
+          return stepped.crossing === 'Stuck'
+            ? Option.none()
+            : Option.some(stepped.spot)
+        }),
+    ),
+  )
+}
+
 const withOffset = (
   buffer: Buffer.Buffer,
   place: Place,
@@ -341,6 +365,7 @@ export const find = (
   way: Way,
   count: number,
   offset: Offset,
+  passesOver: boolean,
 ): Option.Option<Found> => {
   const memo: Memo | undefined = count > 1 ? [] : undefined
   const landsOnEnd = offset.kind === 'End'
@@ -380,8 +405,27 @@ export const find = (
     }
     return Option.some(current)
   }
+  const settled = (first: Progress): Progress => {
+    const seen = new Set([keyOf(first.place)])
+    let current = first
+    while (passesOver && runsOff(buffer, current.place, offset)) {
+      const next = stepFrom(at(current.place), false)
+      if (Option.isNone(next) || seen.has(keyOf(next.value.place))) {
+        return first
+      }
+      seen.add(keyOf(next.value.place))
+      current = {
+        place: next.value.place,
+        wrapped: current.wrapped || next.value.wrapped,
+      }
+    }
+    return current
+  }
   return Option.map(
-    Option.flatMap(stepFrom(undone(buffer, from, offset), true), counted),
+    Option.map(
+      Option.flatMap(stepFrom(undone(buffer, from, offset), true), counted),
+      settled,
+    ),
     ({ place, wrapped }) => ({ ...withOffset(buffer, place, offset), wrapped }),
   )
 }

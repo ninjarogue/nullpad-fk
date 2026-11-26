@@ -38,7 +38,10 @@ export const Memory = Schema.Struct({
 })
 export type Memory = typeof Memory.Type
 
-export const forgotten: Memory = { find: Option.none(), search: Option.none() }
+export const forgotten: Memory = {
+  find: Option.none(),
+  search: Option.none(),
+}
 
 export type Landing = Readonly<{
   spot: Spot
@@ -50,6 +53,7 @@ export type Sought = Readonly<{
   landing: Option.Option<Landing>
   notice: Option.Option<string>
   cursorOnFailure: Option.Option<Spot>
+  resetsColumn: boolean
 }>
 
 const cellMatching = (
@@ -133,11 +137,15 @@ const outcome = (memory: Memory, overrides: Partial<Sought> = {}): Sought => ({
   landing: Option.none(),
   notice: Option.none(),
   cursorOnFailure: Option.none(),
+  resetsColumn: false,
   ...overrides,
 })
 
-const failed = (memory: Memory, notice: string): Sought =>
-  outcome(memory, { notice: Option.some(notice) })
+const failed = (
+  memory: Memory,
+  notice: string,
+  resetsColumn: boolean = true,
+): Sought => outcome(memory, { notice: Option.some(notice), resetsColumn })
 
 type Run = Readonly<{
   buffer: Buffer.Buffer
@@ -157,20 +165,29 @@ const ranSearch = ({
   count,
   remembers,
   cursorOnFailure,
-}: Run): Sought =>
-  Result.match(Pattern.compile(request.pattern), {
-    onFailure: notice => failed(memory, notice),
-    onSuccess: matcher => {
-      const kept: Memory = remembers
-        ? { ...memory, search: Option.some(request) }
-        : memory
-      return Option.match(
-        Search.find(buffer, from, matcher, request.way, count, request.offset),
+}: Run): Sought => {
+  const kept: Memory = remembers
+    ? { ...memory, search: Option.some(request) }
+    : memory
+  return Result.match(Pattern.compile(request.pattern), {
+    onFailure: notice => failed(kept, notice),
+    onSuccess: matcher =>
+      Option.match(
+        Search.find(
+          buffer,
+          from,
+          matcher,
+          request.way,
+          count,
+          request.offset,
+          !remembers,
+        ),
         {
           onNone: () =>
             outcome(kept, {
               notice: Option.some(notFound(request.pattern)),
               cursorOnFailure,
+              resetsColumn: true,
             }),
           onSome: ({ spot, reach, wrapped }) =>
             outcome(kept, {
@@ -180,9 +197,9 @@ const ranSearch = ({
                 : Option.none(),
             }),
         },
-      )
-    },
+      ),
   })
+}
 
 const requestFrom = (
   text: string,
@@ -273,7 +290,7 @@ export const sought = (
       }),
     Word: ({ way }): Sought =>
       Option.match(Search.wordUnder(buffer, from), {
-        onNone: () => failed(memory, 'E348: No string under cursor'),
+        onNone: () => failed(memory, 'E348: No string under cursor', false),
         onSome: ({ start, pattern }) =>
           ranSearch({
             buffer,

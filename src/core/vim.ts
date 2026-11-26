@@ -884,15 +884,11 @@ const run = (
     OpenSearch: ({ way, operator }) =>
       opening(unchanged, vim, { way, operator, count, register }),
     Seek: ({ seek }) => {
-      const { memory, landing, notice, cursorOnFailure } = Seek.sought(
-        buffer,
-        spotOf(buffer),
-        seek,
-        count,
-        kept.seek,
-      )
+      const { memory, landing, notice, cursorOnFailure, resetsColumn } =
+        Seek.sought(buffer, spotOf(buffer), seek, count, kept.seek)
       const remembered: Step = {
         ...unchanged,
+        vim: resetsColumn ? { ...cleared, want: 'Unset' } : cleared,
         kept: { ...kept, seek: memory },
         notice,
       }
@@ -914,7 +910,7 @@ const run = (
     },
     OperateSeek: ({ operator, seek }) => {
       const from = spotOf(buffer)
-      const { memory, landing, notice } = Seek.sought(
+      const { memory, landing, notice, resetsColumn } = Seek.sought(
         buffer,
         from,
         seek,
@@ -922,7 +918,10 @@ const run = (
         kept.seek,
       )
       const step = Option.match(landing, {
-        onNone: () => unchanged,
+        onNone: (): Step =>
+          resetsColumn
+            ? { ...unchanged, vim: { ...cleared, want: 'Unset' } }
+            : unchanged,
         onSome: found =>
           operated(
             operator,
@@ -1425,15 +1424,11 @@ const runVisual = (
         register,
       }),
     Seek: ({ seek }): Step => {
-      const { memory, landing, notice, cursorOnFailure } = Seek.sought(
-        buffer,
-        ends.cursor,
-        seek,
-        count,
-        kept.seek,
-      )
+      const { memory, landing, notice, cursorOnFailure, resetsColumn } =
+        Seek.sought(buffer, ends.cursor, seek, count, kept.seek)
       const remembered: Step = {
         ...unchanged,
+        vim: resetsColumn ? { ...cleared, want: 'Unset' } : cleared,
         kept: { ...kept, seek: memory },
         notice,
       }

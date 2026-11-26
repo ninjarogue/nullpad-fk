@@ -317,6 +317,8 @@ type Settled = Readonly<{
   recordsItself: boolean
 }>
 
+type Landed = Pick<Settled, 'outcome' | 'began'>
+
 type Plan =
   | Settled
   | Readonly<{
@@ -326,7 +328,7 @@ type Plan =
     }>
   | Readonly<{
       _tag: 'ReadClipboard'
-      land: (text: Option.Option<string>) => Outcome
+      land: (text: Option.Option<string>) => Landed
     }>
 
 const now = (
@@ -755,14 +757,17 @@ const vimPlan = (
     ReadClipboard: ({ put }): Plan => ({
       _tag: 'ReadClipboard',
       land: text => {
-        const { outcome } = vimDone(
+        const { outcome, began } = vimDone(
           editor,
           Vim.putClipboard(vim, editor.buffer, editor.kept, put, text),
           swallowed,
         )
-        return Option.isSome(text)
-          ? outcome
-          : { ...outcome, editor: clipboardBlocked(outcome.editor) }
+        return {
+          began,
+          outcome: Option.isSome(text)
+            ? outcome
+            : { ...outcome, editor: clipboardBlocked(outcome.editor) },
+        }
       },
     }),
     Done: () => vimDone(editor, step, swallowed),
@@ -935,7 +940,10 @@ const planOf = (editor: Editor, queued: Queued): Plan => {
   if (plan._tag === 'ReadClipboard') {
     return {
       ...plan,
-      land: (text: Option.Option<string>) => landed(plan.land(text)),
+      land: (text: Option.Option<string>) => {
+        const { outcome, began } = plan.land(text)
+        return { outcome: tracked(editor, queued, outcome, began), began }
+      },
     }
   }
   return plan.recordsItself
@@ -1124,7 +1132,7 @@ export const clipboardRead = (
 ): Outcome =>
   answered(editor, ticket, plan =>
     plan._tag === 'ReadClipboard'
-      ? Option.some(plan.land(text))
+      ? Option.some(plan.land(text).outcome)
       : Option.none(),
   )
 

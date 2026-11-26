@@ -825,6 +825,16 @@ export const startVimRow = async (
     await page.keyboard.press(key)
   }
   await nullpad.paste(text)
+  const lineCount = text.split('\n').length
+  await expect
+    .poll(
+      async () =>
+        lineCount <= 40
+          ? await textOf(await screenOf(page))
+          : (await statusOf(page)).lineCount,
+      { message: 'the pasted note is in the editor before the reload' },
+    )
+    .toBe(lineCount <= 40 ? text : lineCount)
   await nullpad.reload()
   const keys = [
     'g',
@@ -837,7 +847,6 @@ export const startVimRow = async (
     await page.keyboard.press(key)
   }
   await settle(page)
-  const lineCount = text.split('\n').length
   const status = await statusOf(page)
   expect(status.lineCount, 'the row starts with its line count').toBe(lineCount)
   if (lineCount <= 40) {

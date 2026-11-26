@@ -25,6 +25,7 @@ type Tokens = Readonly<{
 export type Split = Readonly<{
   pattern: string
   offset: Option.Option<string>
+  tokens: ReadonlyArray<Token>
 }>
 
 const escapableToMagic = '^$.*[~()|+?={<>@%&'
@@ -102,193 +103,174 @@ const closesCollection = (
   return Option.none()
 }
 
-const braceAt = (
-  chars: ReadonlyArray<string>,
-  at: number,
-  raw: string,
-): Option.Option<Readonly<{ token: Token; to: number }>> => {
-  const close = chars.indexOf('}', at)
-  return close < 0
-    ? Option.none()
-    : Option.some({
-        token: {
-          _tag: 'Brace',
-          body: chars.slice(at, close).join('').replace(/\\$/u, ''),
-          raw: raw + chars.slice(at, close + 1).join(''),
-        },
-        to: close + 1,
-      })
-}
+type Cursor = Readonly<{
+  chars: ReadonlyArray<string>
+  at: number
+  mode: Mode
+  ending: Option.Option<string>
+}>
 
 type Read = Readonly<{
   token: Option.Option<Token>
   to: number
   mode: Mode
-  swallowsRest?: boolean
+  ending: Option.Option<string>
+  source: string
 }>
 
-const refused = (raw: string, to: number, mode: Mode): Read => ({
-  token: Option.some({ _tag: 'Refused', raw }),
+const reading = (
+  { chars, at, mode, ending }: Cursor,
+  to: number,
+  token: Option.Option<Token>,
+  over: Partial<Read> = {},
+): Read => ({
+  token,
   to,
   mode,
+  ending,
+  source: chars.slice(at, to).join(''),
+  ...over,
 })
 
-const readEscaped = (
-  chars: ReadonlyArray<string>,
-  at: number,
-  mode: Mode,
-  delimiter: Option.Option<string>,
-): Read => {
+const refused = (cursor: Cursor, raw: string, to: number): Read =>
+  reading(cursor, to, Option.some({ _tag: 'Refused', raw }))
+
+const readBrace = (cursor: Cursor, open: number, escape: string): Read => {
+  const { chars } = cursor
+  const close = chars.indexOf('}', open + 1)
+  return close < 0
+    ? refused(cursor, escape + '{', open + 1)
+    : reading(
+        cursor,
+        close + 1,
+        Option.some({
+          _tag: 'Brace',
+          body: chars
+            .slice(open + 1, close)
+            .join('')
+            .replace(/\\$/u, ''),
+          raw: escape + chars.slice(open, close + 1).join(''),
+        }),
+      )
+}
+
+const readHeld = (cursor: Cursor, held: number, escape: string): Read => {
+  const c = cursor.chars[held] ?? ''
+  const next = cursor.chars[held + 1]
+  return c === '%' && next === '('
+    ? reading(
+        cursor,
+        held + 2,
+        Option.some({
+          _tag: 'Magic',
+          char: '%(',
+          raw: escape + '%(',
+          anchorsAnywhere: false,
+        }),
+      )
+    : refused(cursor, escape + c + (next ?? ''), held + 2)
+}
+
+const readCollection = (cursor: Cursor, open: number): Read =>
+  Option.match(closesCollection(cursor.chars, open), {
+    onNone: () =>
+      reading(
+        cursor,
+        open + 1,
+        Option.some<Token>({ _tag: 'Letter', text: '[' }),
+        {
+          ending: Option.none(),
+        },
+      ),
+    onSome: close =>
+      reading(
+        cursor,
+        close + 1,
+        Option.some<Token>({
+          _tag: 'Collection',
+          body: cursor.chars.slice(open + 1, close).join(''),
+          raw: cursor.chars.slice(cursor.at, close + 1).join(''),
+        }),
+      ),
+  })
+
+const readEscaped = (cursor: Cursor): Read => {
+  const { chars, at, mode, ending } = cursor
   const c = chars[at + 1]
   const to = at + 2
-  const one = (token: Token): Read => ({
-    token: Option.some(token),
-    to,
-    mode,
-  })
+  const one = (token: Token, over: Partial<Read> = {}): Read =>
+    reading(cursor, to, Option.some(token), over)
   if (c === undefined) {
     return one({ _tag: 'Letter', text: '\\' })
   }
-  if (c === '/' || Option.contains(delimiter, c)) {
-    return one({ _tag: 'Letter', text: c })
+  if (c === '/' || Option.contains(ending, c)) {
+    return c === '?'
+      ? reading(cursor, to, Option.some(classified(mode, false, c, c)), {
+          source: c,
+        })
+      : one({ _tag: 'Letter', text: c })
   }
   const switched = modes[c]
   if (switched !== undefined) {
-    return { token: Option.none(), to, mode: switched }
+    return reading(cursor, to, Option.none(), { mode: switched })
   }
   if (c === '{') {
-    return Option.match(braceAt(chars, to, '\\{'), {
-      onNone: () => refused('\\{', to, mode),
-      onSome: ({ token, to: end }) => ({
-        token: Option.some(token),
-        to: end,
-        mode,
-      }),
-    })
+    return readBrace(cursor, to - 1, '\\')
   }
   if (c === '%' || c === '_' || c === 'z') {
-    const next = chars[to]
-    return c === '%' && next === '('
-      ? {
-          token: Option.some({
-            _tag: 'Magic',
-            char: '%(',
-            raw: '\\%(',
-            anchorsAnywhere: false,
-          }),
-          to: to + 1,
-          mode,
-        }
-      : refused('\\' + c + (next ?? ''), to + 1, mode)
+    return readHeld(cursor, at + 1, '\\')
   }
   if (c === '@' && mode !== 'VeryMagic') {
     const follows =
       /^\d*(?:<=|<!|=|!|>)/u.exec(chars.slice(to).join(''))?.[0] ?? ''
-    return refused('\\@' + follows, to + follows.length, mode)
+    return refused(cursor, '\\@' + follows, to + follows.length)
   }
   if (c === '[' && !isMagicByDefault(mode, '[')) {
-    return readCollection(chars, at, to - 1, mode)
+    return readCollection(cursor, to - 1)
   }
   return one(classified(mode, true, c, '\\' + c))
 }
 
-const readCollection = (
-  chars: ReadonlyArray<string>,
-  at: number,
-  open: number,
-  mode: Mode,
-): Read =>
-  Option.match(closesCollection(chars, open), {
-    onNone: () => ({
-      token: Option.some<Token>({ _tag: 'Letter', text: '[' }),
-      to: open + 1,
-      mode,
-      swallowsRest: true,
-    }),
-    onSome: close => ({
-      token: Option.some<Token>({
-        _tag: 'Collection',
-        body: chars.slice(open + 1, close).join(''),
-        raw: chars.slice(at, close + 1).join(''),
-      }),
-      to: close + 1,
-      mode,
-    }),
-  })
-
-const readPlain = (
-  chars: ReadonlyArray<string>,
-  at: number,
-  mode: Mode,
-): Read => {
+const readPlain = (cursor: Cursor): Read => {
+  const { chars, at, mode } = cursor
   const c = chars[at] ?? ''
-  const one = (token: Token): Read => ({
-    token: Option.some(token),
-    to: at + 1,
-    mode,
-  })
   if (c === '[' && isMagicByDefault(mode, '[')) {
-    return readCollection(chars, at, at, mode)
+    return readCollection(cursor, at)
   }
   if (c === '{' && mode === 'VeryMagic') {
-    return Option.match(braceAt(chars, at + 1, '{'), {
-      onNone: () => refused('{', at + 1, mode),
-      onSome: ({ token, to }) => ({ token: Option.some(token), to, mode }),
-    })
+    return readBrace(cursor, at, '')
   }
   if (c === '%' && mode === 'VeryMagic') {
-    const next = chars[at + 1]
-    return next === '('
-      ? {
-          token: Option.some({
-            _tag: 'Magic',
-            char: '%(',
-            raw: '%(',
-            anchorsAnywhere: false,
-          }),
-          to: at + 2,
-          mode,
-        }
-      : refused('%' + (next ?? ''), at + 2, mode)
+    return readHeld(cursor, at, '')
   }
-  return one(classified(mode, false, c, c))
+  return reading(cursor, at + 1, Option.some(classified(mode, false, c, c)))
 }
 
 const tokenize = (text: string, delimiter: Option.Option<string>): Tokens => {
   const chars = Array.fromIterable(text)
   const tokens: Array<Token> = []
-  let mode: Mode = 'Magic'
-  let at = 0
+  let cursor: Cursor = { chars, at: 0, mode: 'Magic', ending: delimiter }
   let pattern = ''
   let rest: Option.Option<string> = Option.none()
-  let ending = delimiter
-  while (at < chars.length) {
-    const c = chars[at] ?? ''
-    if (Option.contains(ending, c)) {
-      rest = Option.some(chars.slice(at + 1).join(''))
+  while (cursor.at < chars.length) {
+    const c = chars[cursor.at] ?? ''
+    if (Option.contains(cursor.ending, c)) {
+      rest = Option.some(chars.slice(cursor.at + 1).join(''))
       break
     }
-    const read: Read =
-      c === '\\'
-        ? readEscaped(chars, at, mode, ending)
-        : readPlain(chars, at, mode)
+    const read = c === '\\' ? readEscaped(cursor) : readPlain(cursor)
     if (Option.isSome(read.token)) {
       tokens.push(read.token.value)
     }
-    pattern +=
-      c === '\\' && chars[at + 1] === '?' && Option.contains(ending, '?')
-        ? '?'
-        : chars.slice(at, read.to).join('')
-    mode = read.mode
-    ending = read.swallowsRest === true ? Option.none() : ending
-    at = read.to
+    pattern += read.source
+    cursor = { ...cursor, at: read.to, mode: read.mode, ending: read.ending }
   }
   return { tokens, pattern, rest }
 }
 
 export const split = (text: string, delimiter: '/' | '?'): Split => {
-  const { pattern, rest } = tokenize(text, Option.some(delimiter))
-  return { pattern, offset: rest }
+  const { tokens, pattern, rest } = tokenize(text, Option.some(delimiter))
+  return { pattern, offset: rest, tokens }
 }
 
 export const noPrevious = 'E35: No previous regular expression'
@@ -516,8 +498,10 @@ type Item = Readonly<{ node: Node; shape: Shape; atLineStart: boolean }>
 type Frame = Readonly<{
   branches: ReadonlyArray<Node>
   items: ReadonlyArray<Item>
-  opener: string
+  opener: Opener
 }>
+
+type Opener = Readonly<{ raw: string; captures: boolean }>
 
 type State = Readonly<{
   outer: ReadonlyArray<Frame>
@@ -526,7 +510,9 @@ type State = Readonly<{
   captures: number
 }>
 
-const emptyFrame = (opener: string): Frame => ({
+const noOpener: Opener = { raw: '', captures: false }
+
+const emptyFrame = (opener: Opener): Frame => ({
   branches: [],
   items: [],
   opener,
@@ -597,14 +583,18 @@ const repeated = (
 
 const mostCaptures = 9
 
-const opened = (state: State, raw: string): Result.Result<State, string> => {
-  const captures = state.captures + (raw.endsWith('%(') ? 0 : 1)
+const opened = (
+  state: State,
+  { char, raw }: Extract<Token, { _tag: 'Magic' }>,
+): Result.Result<State, string> => {
+  const opener: Opener = { raw, captures: char === '(' }
+  const captures = state.captures + (opener.captures ? 1 : 0)
   return captures > mostCaptures
     ? syntax("E872: (NFA regexp) Too many '('")
     : Result.succeed({
         ...state,
         outer: [...state.outer, state.frame],
-        frame: emptyFrame(raw),
+        frame: emptyFrame(opener),
         captures,
       })
 }
@@ -690,7 +680,7 @@ const magic = (
       return Result.succeed(withItem(state, itemOf({ _tag: 'Any' })))
     case '(':
     case '%(':
-      return opened(state, raw)
+      return opened(state, token)
     case ')':
       return closed(state, raw)
     case '|':
@@ -734,11 +724,15 @@ const translated = (
     }),
   )
 
-export const compile = (pattern: string): Result.Result<Matcher, string> => {
-  const { tokens } = tokenize(pattern, Option.none())
+export const compile = (pattern: string): Result.Result<Matcher, string> =>
+  compileTokens(tokenize(pattern, Option.none()).tokens)
+
+export const compileTokens = (
+  tokens: ReadonlyArray<Token>,
+): Result.Result<Matcher, string> => {
   const initial: Result.Result<State, string> = Result.succeed({
     outer: [],
-    frame: emptyFrame(''),
+    frame: emptyFrame(noOpener),
     ignoreCase: false,
     captures: 0,
   })
@@ -749,9 +743,7 @@ export const compile = (pattern: string): Result.Result<Matcher, string> => {
     const { opener } = state.frame
     if (state.outer.length > 0) {
       return syntax(
-        opener.endsWith('%(')
-          ? `E53: Unmatched ${opener.replace('%(', '')}%(`
-          : `E54: Unmatched ${opener}`,
+        `${opener.captures ? 'E54' : 'E53'}: Unmatched ${opener.raw}`,
       )
     }
     return build(alternation(state.frame), state.ignoreCase)

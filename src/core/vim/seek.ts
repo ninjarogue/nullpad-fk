@@ -194,39 +194,53 @@ const searching =
   (matcher: Matcher, count: number): Option.Option<Search.Found> =>
     Search.find(buffer, from, matcher, way, count, offset)
 
+type Request = Readonly<{
+  searched: Searched
+  compiled: Result.Result<Matcher, string>
+}>
+
 const ranSearch = (
   kept: Memory,
-  request: Searched,
+  { searched, compiled }: Request,
   cursor: Option.Option<Spot>,
   search: (matcher: Matcher) => Option.Option<Search.Found>,
 ): Sought =>
-  Result.match(Pattern.compile(request.pattern), {
+  Result.match(compiled, {
     onFailure: notice => failed(kept, Option.some(notice), true),
     onSuccess: matcher =>
       Option.match(search(matcher), {
         onNone: () =>
-          failed(kept, Option.some(notFound(request.pattern)), true, cursor),
+          failed(kept, Option.some(notFound(searched.pattern)), true, cursor),
         onSome: ({ spot, reach, wrapped }) =>
           landed(
             kept,
             { spot, reach },
-            wrapped ? Option.some(wrapNotice(request.way)) : Option.none(),
+            wrapped ? Option.some(wrapNotice(searched.way)) : Option.none(),
           ),
       }),
   })
+
+const recompiled = (searched: Searched): Request => ({
+  searched,
+  compiled: Pattern.compile(searched.pattern),
+})
 
 const requestFrom = (
   text: string,
   way: Way,
   last: Option.Option<Searched>,
-): Result.Result<Searched, string> => {
+): Result.Result<Request, string> => {
+  const previous = (searched: Searched) => Result.succeed(recompiled(searched))
   if (text === '') {
     return Option.match(last, {
       onNone: () => Result.fail(Pattern.noPrevious),
-      onSome: previous => Result.succeed({ ...previous, way }),
+      onSome: kept => previous({ ...kept, way }),
     })
   }
-  const { pattern, offset } = Pattern.split(text, way === 'Forward' ? '/' : '?')
+  const { pattern, offset, tokens } = Pattern.split(
+    text,
+    way === 'Forward' ? '/' : '?',
+  )
   return Result.flatMap(
     Option.match(offset, {
       onNone: () => Result.succeed(Search.noOffset),
@@ -234,15 +248,14 @@ const requestFrom = (
     }),
     parsed =>
       pattern !== ''
-        ? Result.succeed({ pattern, offset: parsed, way })
+        ? Result.succeed({
+            searched: { pattern, offset: parsed, way },
+            compiled: Pattern.compileTokens(tokens),
+          })
         : Option.match(last, {
             onNone: () => Result.fail(Pattern.noPrevious),
-            onSome: previous =>
-              Result.succeed({
-                pattern: previous.pattern,
-                offset: parsed,
-                way,
-              }),
+            onSome: kept =>
+              previous({ pattern: kept.pattern, offset: parsed, way }),
           }),
   )
 }
@@ -281,9 +294,9 @@ export const sought = (
       Result.match(requestFrom(text, way, memory.search), {
         onFailure: notice => failed(memory, Option.some(notice), true),
         onSuccess: request => {
-          const probe = searching(buffer, from, request)
+          const probe = searching(buffer, from, request.searched)
           return ranSearch(
-            { ...memory, search: Option.some(request) },
+            { ...memory, search: Option.some(request.searched) },
             request,
             Option.none(),
             matcher => probe(matcher, times),
@@ -294,8 +307,10 @@ export const sought = (
       Option.match(memory.search, {
         onNone: () => failed(memory, Option.some(Pattern.noPrevious), true),
         onSome: last => {
-          const request = reverse ? { ...last, way: flipped(last.way) } : last
-          const probe = searching(buffer, from, request)
+          const request = recompiled(
+            reverse ? { ...last, way: flipped(last.way) } : last,
+          )
+          const probe = searching(buffer, from, request.searched)
           return ranSearch(memory, request, Option.none(), matcher =>
             repeated(buffer, from, lineEnd, times, extra =>
               probe(matcher, extra),
@@ -308,10 +323,10 @@ export const sought = (
         onNone: () =>
           failed(memory, Option.some('E348: No string under cursor'), false),
         onSome: ({ start, pattern }) => {
-          const request = { pattern, offset: Search.noOffset, way }
-          const probe = searching(buffer, start, request)
+          const request = recompiled({ pattern, offset: Search.noOffset, way })
+          const probe = searching(buffer, start, request.searched)
           return ranSearch(
-            { ...memory, search: Option.some(request) },
+            { ...memory, search: Option.some(request.searched) },
             request,
             Option.some(start),
             matcher => probe(matcher, times),

@@ -1,4 +1,4 @@
-import { type Nullpad, expect, openFresh, settle, test } from './nullpad'
+import { type Nullpad, expect, settle, startVimRow, test } from './nullpad'
 
 const ROWS_PER_TEST = 12
 
@@ -1824,22 +1824,12 @@ const vimOn = async (nullpad: Nullpad) => {
   await settle(nullpad.page)
 }
 
-const placeAt = async (nullpad: Nullpad, line: number, column: number) => {
-  await nullpad.press('Control+Home')
-  await nullpad.press('ArrowDown', line - 1)
-  await nullpad.press('Home')
-  await nullpad.press('ArrowRight', column - 1)
-}
-
 const begin = async (
   nullpad: Nullpad,
   text: string,
   at: readonly [number, number] = [1, 1],
 ) => {
-  await openFresh(nullpad.page)
-  await nullpad.paste(text)
-  await placeAt(nullpad, at[0], at[1])
-  await vimOn(nullpad)
+  await startVimRow(nullpad, text, at[0], at[1])
 }
 
 const expectScreen = async (

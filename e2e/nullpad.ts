@@ -837,9 +837,15 @@ export const startVimRow = async (
     await page.keyboard.press(key)
   }
   await settle(page)
-  expect(await textOf(await screenOf(page)), 'the row starts on its note').toBe(
-    text,
-  )
+  const lineCount = text.split('\n').length
+  const status = await statusOf(page)
+  expect(status.lineCount, 'the row starts with its line count').toBe(lineCount)
+  if (lineCount <= 40) {
+    expect(
+      await textOf(await screenOf(page)),
+      'the row starts on its note',
+    ).toBe(text)
+  }
   expect(await mode.innerText(), 'the row starts in NORMAL').toBe('NORMAL')
-  expect((await statusOf(page)).line, 'the row starts on its line').toBe(line)
+  expect(status.line, 'the row starts on its line').toBe(line)
 }

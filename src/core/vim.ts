@@ -239,22 +239,29 @@ const isOneGrapheme = (text: string): boolean =>
 const keyOf = (
   input: Input,
   awaitsArgument: () => boolean = () => false,
-): Option.Option<Keymap.Key> =>
-  Input.match(input, {
+): Option.Option<Keymap.Key> => {
+  const longerText = (text: string): Option.Option<Keymap.Key> =>
+    text !== '' && awaitsArgument()
+      ? Option.some(Keymap.longerText)
+      : Option.none()
+  return Input.match(input, {
     Key: ({ key, modifiers }) =>
       Option.some(`<${modifiers.ctrl ? 'C-' : ''}${keyNames[key]}>`),
     Chord: ({ char, modifiers }) =>
       modifiers.ctrl ? Option.some(`<C-${char.toLowerCase()}>`) : Option.none(),
     Text: ({ text }) =>
-      isOneGrapheme(text) ? Option.some(text) : Option.none(),
+      isOneGrapheme(text) ? Option.some(text) : longerText(text),
     Erase: () => Option.none(),
     Paste: ({ byKey }) => (byKey ? Option.some('<C-v>') : Option.none()),
     Preedit: () => Option.none(),
     Commit: ({ text }) =>
-      isOneGrapheme(text) && awaitsArgument()
-        ? Option.some(text)
+      awaitsArgument()
+        ? isOneGrapheme(text)
+          ? Option.some(text)
+          : longerText(text)
         : Option.none(),
   })
+}
 
 const isPasteByAnotherRoute = (input: Input): boolean =>
   input._tag === 'Paste' && !input.byKey

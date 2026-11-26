@@ -87,6 +87,8 @@ const bind = <C>(notation: string, command: C, about: string): Binding<C> => ({
 
 const anyKey: Key = '<Any>'
 
+export const longerText: Key = '<Text>'
+
 const isNamedKey = (key: Key): boolean => key.length > 1 && key.startsWith('<')
 
 const namedLetters: Readonly<Record<Key, string>> = {
@@ -273,6 +275,8 @@ const keysWithAnArgument: ReadonlyArray<Key> = [
 
 const leave = VisualCommand.cases.Leave.make({})
 
+const screenKeys: ReadonlyArray<Key> = ['<C-e>', '<C-p>']
+
 const reachAbouts: Readonly<Record<Reach, string>> = {
   AsSelected: 'the selection',
   WholeLines: 'the lines',
@@ -363,8 +367,7 @@ export const visual: ReadonlyArray<Binding<VisualCommand>> = [
   bind('<Esc>', leave, 'leave'),
   bind('<C-[>', leave, 'leave'),
   bind('<C-c>', leave, 'leave'),
-  bind('<C-e>', leave, 'leave'),
-  bind('<C-p>', leave, 'leave'),
+  ...Array.map(screenKeys, key => bind(key, leave, 'leave')),
   ...Array.map(keysWithAnArgument, key =>
     bind(key + anyKey, VisualCommand.cases.Ignore.make({}), 'not built'),
   ),
@@ -525,6 +528,9 @@ export const advance = <C>(
   pending: Pending,
   key: Key,
 ): Advance<C> => {
+  if (screenKeys.includes(key)) {
+    return advanceKeys(bindings, idle, key)
+  }
   if (awaitsRegisterName(pending)) {
     return namesRegister(pending, key)
   }

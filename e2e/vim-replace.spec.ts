@@ -2118,12 +2118,22 @@ test('a letter chosen in an IME after r replaces the letter, and IME text counts
     'にbcdef',
   )
   await play(nullpad, 'r')
+  await nullpad.compose('ね')
+  await nullpad.compose('')
+  expect(await pendingOf(nullpad), 'a cancelled composition keeps r').toBe('r')
   await nullpad.commit('xy')
-  expect(await nullpad.text(), 'two letters while r waits do nothing').toBe(
+  expect(await nullpad.text(), 'two letters while r waits put nothing').toBe(
     'にbcdef',
   )
-  await play(nullpad, '<Esc>')
-  expect(await nullpad.text(), 'and Esc leaves it as it was').toBe('にbcdef')
+  expect(await pendingOf(nullpad), 'and drop r').toBe('')
+  await play(nullpad, 'x')
+  expect(await nullpad.text(), 'x then runs on its own').toBe('bcdef')
+  await play(nullpad, 'vlf')
+  await nullpad.commit('ab')
+  await play(nullpad, 'd')
+  expect(await nullpad.text(), 'two letters after VISUAL f drop it too').toBe(
+    'def',
+  )
 })
 
 test('a single letter that arrives as a typed key with text, such as a dead key makes, replaces the letter', async ({

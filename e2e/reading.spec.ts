@@ -506,8 +506,12 @@ const opensAtBlockStartingOnNextLine = async (
   await nullpad.paste([...paragraph, '', ...target, '', ...after].join('\n'))
   await nullpad.press('Control+End')
   await nullpad.press('ArrowUp', after.length + 1 + upFromEnd)
-  const { line } = await nullpad.status()
-  expect(line, 'cursor on the first line of the target block').toBe(402)
+  await expect
+    .poll(
+      async () => (await nullpad.status()).line,
+      'cursor on the first line of the target block',
+    )
+    .toBe(402)
   await openRead(nullpad)
   const top = await nullpad.page.evaluate(() => {
     const read = document.querySelector('.read')
@@ -592,7 +596,9 @@ test('opening the read view on a fence with an info string shows the info line',
   )
   await nullpad.press('Control+End')
   await nullpad.press('ArrowUp', after.length + 3)
-  expect((await nullpad.status()).line, 'cursor on the fence').toBe(402)
+  await expect
+    .poll(async () => (await nullpad.status()).line, 'cursor on the fence')
+    .toBe(402)
   await openRead(nullpad)
   await expect(
     nullpad.page.locator('.read pre[data-info="js"]'),

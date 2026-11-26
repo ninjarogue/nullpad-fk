@@ -619,6 +619,7 @@ test('a wheel turn dropped for a key that could not move the cursor stays droppe
   for (let trial = 1; trial <= 4; trial++) {
     await nullpad.press('Control+Home')
     await wheelThenKeys(nullpad, start.rowHeight * 200, ['ArrowUp'])
+    await settleScroll(nullpad)
     await turnWheelNoWait(nullpad, start.rowHeight * 3)
     const after = await settleScroll(nullpad)
     expect(

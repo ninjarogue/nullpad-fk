@@ -179,6 +179,9 @@ export const isVimOn = (editor: Editor): boolean => Option.isSome(editor.vim)
 
 export const text = (editor: Editor): string => Buffer.toText(editor.buffer)
 
+export const isSavable = (editor: Editor): boolean =>
+  Buffer.textLength(editor.buffer) <= Buffer.mostUnitsInOneText
+
 const queuedToggles = (editor: Editor): number =>
   Option.match(editor.locating, {
     onNone: () => 0,

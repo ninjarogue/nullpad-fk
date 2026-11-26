@@ -43,6 +43,13 @@ export const noModifiers: Modifiers = {
   shift: false,
 }
 
+export const isControlAlone = ({
+  ctrl,
+  alt,
+  meta,
+  shift,
+}: Modifiers): boolean => ctrl && !alt && !meta && !shift
+
 const notationKeys: Readonly<Record<string, NamedKey>> = {
   CR: 'Enter',
   Enter: 'Enter',

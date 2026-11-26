@@ -2,7 +2,7 @@ import { Array, Option, Schema } from 'effect'
 
 import * as Buffer from './buffer'
 import * as History from './history'
-import { Input, type NamedKey, noModifiers } from './input'
+import { Input, type NamedKey, isControlAlone, noModifiers } from './input'
 import { cellAt, cellCount, cellStart } from './vim/cells'
 import * as Keymap from './vim/keymap'
 import {
@@ -2036,6 +2036,11 @@ export const landed = (
     line === began.line ? began : firstNonBlankOf(buffer, line),
   )
 }
+
+export const isScreenKey = (input: Input): boolean =>
+  input._tag === 'Chord' &&
+  isControlAlone(input.modifiers) &&
+  Keymap.screenKeys.includes(`<C-${input.char.toLowerCase()}>`)
 
 export const abandoned = idle
 

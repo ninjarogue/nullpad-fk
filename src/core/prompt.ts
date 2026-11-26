@@ -1,6 +1,6 @@
 import { Array, Option, Schema } from 'effect'
 
-import { Input, type NamedKey } from './input'
+import { Input, type NamedKey, isControlAlone } from './input'
 
 export const Recall = Schema.Struct({
   prefix: Schema.String,
@@ -195,7 +195,7 @@ export const feed = (
   Input.match(input, {
     Key: ({ key }) => keys[key](prompt, history),
     Chord: ({ char, modifiers }) =>
-      modifiers.ctrl ? chord(prompt, char) : stay(prompt),
+      isControlAlone(modifiers) ? chord(prompt, char) : stay(prompt),
     Text: ({ text }) => typeText(prompt, text),
     Paste: ({ text }) => typeText(prompt, text),
     Commit: ({ text }) => typeText({ ...prompt, preedit: '' }, text),

@@ -345,7 +345,7 @@ const keysWithAnArgument: ReadonlyArray<Key> = [
 
 const leave = VisualCommand.cases.Leave.make({})
 
-const screenKeys: ReadonlyArray<Key> = ['<C-e>', '<C-p>']
+export const screenKeys: ReadonlyArray<Key> = ['<C-e>', '<C-p>']
 
 const reachAbouts: Readonly<Record<Reach, string>> = {
   AsSelected: 'the selection',

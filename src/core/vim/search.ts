@@ -293,10 +293,11 @@ const withOffset = (
   }
   const start = spotAt(buffer, place, 'LineBreak')
   const walk = offset.by > 0 ? incl : decl
-  const spot = times(Math.abs(offset.by), start, current => {
-    const stepped = walk(buffer, current)
-    return stepped.crossing === 'Stuck' ? current : stepped.spot
-  })
+  const spot = times(
+    Math.abs(offset.by),
+    start,
+    current => walk(buffer, current).spot,
+  )
   return { spot, reach: offset.kind === 'End' ? 'Inclusive' : 'Exclusive' }
 }
 

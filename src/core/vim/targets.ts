@@ -1,6 +1,7 @@
 import { Option, Schema } from 'effect'
 
 import type * as Buffer from '../buffer'
+import { cellCount } from './cells'
 import {
   type Motion,
   MotionName,
@@ -262,12 +263,26 @@ export const targetFor = (operator: OperatorName, name: TargetName): Target => {
     : target
 }
 
+const beforeLineBreak = (buffer: Buffer.Buffer, spot: Spot): Spot => {
+  const line = buffer.lines[spot.line]
+  return line !== undefined && spot.cell > 0 && spot.cell >= cellCount(line)
+    ? { ...spot, cell: cellCount(line) - 1 }
+    : spot
+}
+
 export const rangeToLanding = (
   operator: OperatorName,
   buffer: Buffer.Buffer,
   from: Spot,
   { spot, reach }: Landing,
 ): Range => {
-  const range = rangeOf(buffer, ordered(from, spot, reach))
+  const range = rangeOf(
+    buffer,
+    ordered(
+      from,
+      reach === 'Exclusive' ? beforeLineBreak(buffer, spot) : spot,
+      reach,
+    ),
+  )
   return operator === 'Delete' ? linewiseWhenBlankAround(buffer, range) : range
 }

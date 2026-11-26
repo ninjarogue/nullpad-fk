@@ -800,11 +800,8 @@ const vimPlan = (
   })
 }
 
-const isScreenChord = (input: Input): boolean =>
-  input._tag === 'Chord' && /^[ep]$/iu.test(input.char)
-
 const promptPlan = (editor: Editor, asking: Asking, input: Input): Plan => {
-  if (isScreenChord(input)) {
+  if (Vim.isScreenKey(input)) {
     return inputPlan({ ...editor, prompt: Option.none() }, input)
   }
   const { prompt, act } = Prompt.feed(asking.line, editor.kept.history, input)

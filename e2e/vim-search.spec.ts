@@ -7940,22 +7940,32 @@ for (const [pattern, line, column, notice] of repeatedGroups) {
   })
 }
 
-const freezing: ReadonlyArray<readonly [pattern: string, letter: string]> = [
-  ['a*a*a*a*a*b', 'a'],
-  ['\\(a\\|a\\)*b', 'a'],
-  ['\\(x\\+x\\+\\)\\+y', 'x'],
-  ['[a-z]\\+ing', 'a'],
-  ['.*.*.*.*x', 'a'],
+const freezing: ReadonlyArray<
+  readonly [pattern: string, unit: string, times: number]
+> = [
+  ['a*a*a*a*a*b', 'a', 5000],
+  ['\\(a\\|a\\)*b', 'a', 5000],
+  ['\\(x\\+x\\+\\)\\+y', 'x', 5000],
+  ['[a-z]\\+ing', 'a', 5000],
+  ['.*.*.*.*x', 'a', 5000],
+  ['.*.*.*.*.*x', 'a', 100],
+  ['\\w*\\w*\\w*\\w*x', 'a', 200],
+  ['a*a*a*a*b', 'a', 50000],
+  ['.*c', 'ab ', 16000],
+  ['.\\{-}c', 'ab ', 16000],
+  ['\\<c', 'ab ', 16000],
+  ['\\w\\+c', 'ab ', 16000],
+  ['\\(ab \\)\\+c', 'ab ', 16000],
 ]
 
-for (const [pattern, letter] of freezing) {
-  test(`${pattern} on one line of 5,000 letters answers at once`, async ({
+for (const [pattern, unit, times] of freezing) {
+  test(`${pattern} on one line of ${(unit.length * times).toLocaleString('en-US')} letters answers at once`, async ({
     nullpad,
   }) => {
     test.setTimeout(30_000)
     await begin(nullpad, 'q')
     await play(nullpad, 'i')
-    await nullpad.paste(letter.repeat(5000))
+    await nullpad.paste(unit.repeat(times))
     await play(nullpad, '<Esc>gg0/')
     await nullpad.page.keyboard.insertText(pattern)
     const started = Date.now()
@@ -8064,4 +8074,377 @@ test('the last pattern and the history stay when another note is opened and when
   )
   await play(nullpad, '/<Up>')
   expect(await promptOf(nullpad), 'and the history').toBe('/')
+})
+
+const defectRows: ReadonlyArray<
+  readonly [
+    why: string,
+    text: string,
+    at: readonly [number, number],
+    keys: string,
+    after: string,
+    line: number,
+    column: number,
+    mode: string,
+  ]
+> = [
+  ['* on an emoji', '😀 a 😀', [1, 1], '*', '😀 a 😀', 1, 5, 'NORMAL'],
+  [
+    '* on an emoji with a letter after it',
+    '😀a 😀a',
+    [1, 1],
+    '*',
+    '😀a 😀a',
+    1,
+    4,
+    'NORMAL',
+  ],
+  [
+    '* on a letter beside an emoji',
+    'x😀y x',
+    [1, 1],
+    '*',
+    'x😀y x',
+    1,
+    5,
+    'NORMAL',
+  ],
+  [
+    '* on a letter after an emoji stays',
+    'x😀y x',
+    [1, 3],
+    '*',
+    'x😀y x',
+    1,
+    3,
+    'NORMAL',
+  ],
+  [
+    '# on a letter with an emoji after it',
+    'a😀 b a😀',
+    [1, 1],
+    '#',
+    'a😀 b a😀',
+    1,
+    6,
+    'NORMAL',
+  ],
+  [
+    '# on an emoji between emoji',
+    '😀 😀 😀',
+    [1, 3],
+    '#',
+    '😀 😀 😀',
+    1,
+    1,
+    'NORMAL',
+  ],
+  [
+    'an offset that runs off the top makes no line',
+    'ab\ncd',
+    [2, 2],
+    '/^$/e-2<CR>',
+    'ab\ncd',
+    2,
+    2,
+    'NORMAL',
+  ],
+  [
+    'd with an offset that runs off the top deletes nothing',
+    'x',
+    [1, 1],
+    'd/^$/e-1<CR>',
+    'x',
+    1,
+    1,
+    'NORMAL',
+  ],
+  [
+    'a large negative end offset',
+    'ab\ncd\nef',
+    [2, 1],
+    '/^$/e-9<CR>',
+    'ab\ncd\nef',
+    2,
+    1,
+    'NORMAL',
+  ],
+  [
+    'an end offset that runs off the bottom',
+    'ab\ncd\nef',
+    [2, 1],
+    '?^$?e+3<CR>',
+    'ab\ncd\nef',
+    2,
+    1,
+    'NORMAL',
+  ],
+  [
+    'd backward with an offset off the bottom',
+    'ab\ncd\nef',
+    [2, 1],
+    'd?^$?e+3<CR>',
+    'ab\ncd\nef',
+    2,
+    1,
+    'NORMAL',
+  ],
+  [
+    'a start offset off the top',
+    'ab\ncd\nef',
+    [2, 1],
+    '/^$/s-3<CR>',
+    'ab\ncd\nef',
+    2,
+    1,
+    'NORMAL',
+  ],
+  [
+    'd/\\s*$ stops before the last letter',
+    'ab\nab\nab',
+    [2, 1],
+    'd/\\s*$<CR>',
+    'ab\nb\nab',
+    2,
+    1,
+    'NORMAL',
+  ],
+  [
+    'd/\\s*$ on one letter does nothing',
+    'x',
+    [1, 1],
+    'd/\\s*$<CR>',
+    'x',
+    1,
+    1,
+    'NORMAL',
+  ],
+  [
+    'd/$ stops before the last letter',
+    'ab\nab\nab',
+    [2, 1],
+    'd/$<CR>',
+    'ab\nb\nab',
+    2,
+    1,
+    'NORMAL',
+  ],
+  [
+    'y/$ yanks up to the last letter',
+    'ab\nab\nab',
+    [2, 1],
+    'y/$<CR>P',
+    'ab\naab\nab',
+    2,
+    1,
+    'NORMAL',
+  ],
+  [
+    'c/$ changes up to the last letter',
+    'ab\nab\nab',
+    [2, 1],
+    'c/$<CR>Z<Esc>',
+    'ab\nZb\nab',
+    2,
+    1,
+    'NORMAL',
+  ],
+  [
+    'd/$ from the last letter wraps back a line',
+    'ab\ncd',
+    [2, 2],
+    'd/$<CR>',
+    'ad',
+    1,
+    2,
+    'NORMAL',
+  ],
+  [
+    'd?$ from the first line goes to the last line',
+    'abc\ncd',
+    [1, 2],
+    'd?$<CR>',
+    'ad',
+    1,
+    2,
+    'NORMAL',
+  ],
+  [
+    'the . of d/$ finds the next $ after the cursor',
+    'abc\ndef',
+    [1, 1],
+    'd/$<CR>.',
+    'f',
+    1,
+    1,
+    'NORMAL',
+  ],
+  [
+    'd/$/e still takes the last letter',
+    'abc def',
+    [1, 1],
+    'd/$/e<CR>',
+    '',
+    1,
+    1,
+    'NORMAL',
+  ],
+  [
+    'v/$ then d takes the last letter',
+    'abc def',
+    [1, 1],
+    'v/$<CR>d',
+    '',
+    1,
+    1,
+    'NORMAL',
+  ],
+  [
+    'y/$ then P puts the text before the last letter',
+    'abc def',
+    [1, 1],
+    'y/$<CR>P',
+    'abc deabc def',
+    1,
+    6,
+    'NORMAL',
+  ],
+  [
+    'd/\\> stops before the last letter',
+    'ab\ncd',
+    [1, 1],
+    'd/\\><CR>',
+    'b\ncd',
+    1,
+    1,
+    'NORMAL',
+  ],
+  [
+    'd/$ over an empty line below',
+    'ab\n\nab',
+    [1, 1],
+    'd/$<CR>',
+    'b\n\nab',
+    1,
+    1,
+    'NORMAL',
+  ],
+  [
+    '$ before \\c is the line end',
+    'one two\ntwo three',
+    [2, 1],
+    '/two$\\c<CR>',
+    'one two\ntwo three',
+    1,
+    5,
+    'NORMAL',
+  ],
+  [
+    '$ before \\c with a letter',
+    'one two\ntwo three',
+    [1, 1],
+    '/o$\\c<CR>',
+    'one two\ntwo three',
+    1,
+    7,
+    'NORMAL',
+  ],
+  [
+    '$ before \\C is the line end',
+    'one two\ntwo three',
+    [1, 1],
+    '/two$\\C<CR>',
+    'one two\ntwo three',
+    1,
+    5,
+    'NORMAL',
+  ],
+  [
+    '^\\+ finds an empty match',
+    'one two\ntwo three',
+    [1, 3],
+    '/^\\+<CR>',
+    'one two\ntwo three',
+    2,
+    1,
+    'NORMAL',
+  ],
+  [
+    '\\<\\+ finds an empty match',
+    'one two\ntwo three',
+    [1, 1],
+    '/\\<\\+<CR>',
+    'one two\ntwo three',
+    1,
+    5,
+    'NORMAL',
+  ],
+  [
+    '^\\=o finds an o at a line start or anywhere',
+    'one two\ntwo three',
+    [1, 1],
+    '/^\\=o<CR>',
+    'one two\ntwo three',
+    1,
+    7,
+    'NORMAL',
+  ],
+  [
+    'VISUAL with an offset past the line end rests on the line break',
+    'ab\nab\nab',
+    [1, 1],
+    'v?[ab]?e+3<CR>',
+    'ab\nab\nab',
+    3,
+    3,
+    'VISUAL',
+  ],
+  [
+    'VISUAL with an empty match and an offset past the end',
+    'ab\nab\nab',
+    [1, 1],
+    'v?x*?e+3<CR>',
+    'ab\nab\nab',
+    3,
+    3,
+    'VISUAL',
+  ],
+]
+
+test('the defects the interrogate pass found answer as Vim does', async ({
+  nullpad,
+}) => {
+  for (const [why, text, at, keys, after, line, column, mode] of defectRows) {
+    await begin(nullpad, text, at)
+    await play(nullpad, keys)
+    expect.soft(await nullpad.text(), `${why}: text`).toBe(after)
+    expect
+      .soft(await nullpad.status(), `${why}: cursor`)
+      .toMatchObject({ line, column })
+    expect.soft(await modeOf(nullpad), `${why}: mode`).toBe(mode)
+  }
+})
+
+for (const chord of [
+  'Control+Shift+U',
+  'Control+Alt+u',
+  'Meta+u',
+  'Meta+e',
+  'Meta+p',
+  'Control+Shift+E',
+  'Alt+Control+p',
+]) {
+  test(`${chord} leaves the prompt as it was`, async ({ nullpad }) => {
+    await begin(nullpad, noteB)
+    await play(nullpad, '/two')
+    await nullpad.page.keyboard.press(chord)
+    await settle(nullpad.page)
+    expect(await promptOf(nullpad), 'the prompt').toBe('/two')
+  })
+}
+
+test('Ctrl-U alone clears the prompt', async ({ nullpad }) => {
+  await begin(nullpad, noteB)
+  await play(nullpad, '/two<C-u>')
+  expect(await promptOf(nullpad), 'the prompt').toBe('/')
 })

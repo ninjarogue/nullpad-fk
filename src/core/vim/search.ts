@@ -1,8 +1,15 @@
 import { Array, Match, Option, Result, Schema } from 'effect'
 
 import type * as Buffer from '../buffer'
-import { cellAt, cellCount, cellEnd, cellStart } from './cells'
-import { type Matcher, type Span, classOfCodePoint } from './matcher'
+import { cellAt, cellCount, cellLengthAt, cellStart } from './cells'
+import {
+  type Matcher,
+  type Span,
+  blankClass,
+  classOfCodePoint,
+  isWordClass,
+  punctuationClass,
+} from './matcher'
 import { type Spot, decl, incl, positionOf, spotAt } from './motions'
 import { notSupported } from './pattern'
 
@@ -55,6 +62,9 @@ const advanced = (text: string, { start, end }: Span): number =>
     ? end
     : end + String.fromCodePoint(text.codePointAt(end) ?? 0).length
 
+const clampedToLetter = (text: string, start: number): number =>
+  start === text.length ? start - 1 : start
+
 const firstAfter = (
   matcher: Matcher,
   text: string,
@@ -71,7 +81,7 @@ const firstAfter = (
     const { start, end } = found.value
     const rejected = landsOnEnd
       ? end - 1 < column + cursorCellWidth
-      : start - (start === text.length ? 1 : 0) < column + cursorCellWidth
+      : clampedToLetter(text, start) < column + cursorCellWidth
     if (!rejected) {
       return found
     }
@@ -109,21 +119,20 @@ const lastBefore = (
 
 type Hit = Readonly<{ line: number; match: Span }>
 
-type Memo = Array<Option.Option<Span> | undefined>
+type Probe = (text: string, line: number) => Option.Option<Span>
 
-const recalled =
-  (memo: Memo | undefined, probe: (text: string) => Option.Option<Span>) =>
-  (text: string, line: number): Option.Option<Span> => {
-    const known = memo?.[line]
-    if (known !== undefined) {
-      return known
+const memoized = (probe: Probe): Probe => {
+  const known: Array<Option.Option<Span>> = []
+  return (text, line) => {
+    const hit = known[line]
+    if (hit !== undefined) {
+      return hit
     }
-    const found = probe(text)
-    if (memo !== undefined) {
-      memo[line] = found
-    }
+    const found = probe(text, line)
+    known[line] = found
     return found
   }
+}
 
 type Stepped = Option.Option<Readonly<{ hit: Hit; wrapped: boolean }>>
 
@@ -136,7 +145,7 @@ const scanned = (
   from: number,
   to: number,
   wrapped: boolean,
-  probe: (text: string, line: number) => Option.Option<Span>,
+  probe: Probe,
 ): Stepped => {
   for (
     let line = from;
@@ -154,30 +163,15 @@ const scanned = (
 const orElse = (first: Stepped, second: () => Stepped): Stepped =>
   Option.isSome(first) ? first : second()
 
-const beforeCombining = 0x300
-
-const widthAt = (row: Buffer.Line, column: number): number => {
-  const { text } = row
-  const here = text.charCodeAt(column)
-  const next = text.charCodeAt(column + 1)
-  return here < beforeCombining && !(next >= beforeCombining)
-    ? 1
-    : Math.max(
-        1,
-        cellEnd(row, cellAt(row, column)) - cellStart(row, cellAt(row, column)),
-      )
-}
-
 const forwardStep = (
   buffer: Buffer.Buffer,
   matcher: Matcher,
   start: Start,
   landsOnEnd: boolean,
   firstOfCount: boolean,
-  memo: Memo | undefined,
+  earliest: Probe,
 ): Stepped => {
   const last = buffer.lines.length - 1
-  const earliest = recalled(memo, (text: string) => matcher.find(text, 0))
   return Match.value(start).pipe(
     Match.tagsExhaustive({
       BeforeNote: () => scanned(buffer, true, 0, last, false, earliest),
@@ -185,7 +179,7 @@ const forwardStep = (
       At: ({ place }) => {
         const row = buffer.lines[place.line]
         const cursorCellWidth =
-          row === undefined ? 1 : widthAt(row, place.column)
+          row === undefined ? 1 : cellLengthAt(row, place.column)
         const here = firstAfter(
           matcher,
           textOf(buffer, place.line),
@@ -214,12 +208,9 @@ const backwardStep = (
   matcher: Matcher,
   start: Start,
   landsOnEnd: boolean,
-  memo: Memo | undefined,
+  latest: Probe,
 ): Stepped => {
   const last = buffer.lines.length - 1
-  const latest = recalled(memo, (text: string) =>
-    lastBefore(matcher, text, Infinity, false),
-  )
   return Match.value(start).pipe(
     Match.tagsExhaustive({
       BeforeNote: () => scanned(buffer, false, last, 0, true, latest),
@@ -342,21 +333,35 @@ export const find = (
   count: number,
   offset: Offset,
 ): Option.Option<Found> => {
-  const memo: Memo | undefined = count > 1 ? [] : undefined
   const landsOnEnd = offset.kind === 'End'
+  const raw: Probe =
+    way === 'Forward'
+      ? text => matcher.find(text, 0)
+      : text => lastBefore(matcher, text, Infinity, false)
+  const probe = count > 1 ? memoized(raw) : raw
   const stepFrom = (start: Start, firstOfCount: boolean) =>
     Option.map(
       way === 'Forward'
-        ? forwardStep(buffer, matcher, start, landsOnEnd, firstOfCount, memo)
-        : backwardStep(buffer, matcher, start, landsOnEnd, memo),
+        ? forwardStep(buffer, matcher, start, landsOnEnd, firstOfCount, probe)
+        : backwardStep(buffer, matcher, start, landsOnEnd, probe),
       ({ hit, wrapped }): Progress => ({
         place: placeOfHit(buffer, hit, landsOnEnd),
         wrapped,
       }),
     )
-  const keyOf = ({ line, column }: Place): number => line * 2 ** 32 + column
   const counted = (first: Progress): Option.Option<Progress> => {
-    const visited = new Map<number, number>([[keyOf(first.place), 0]])
+    const visited = new Map<number, Map<number, number>>()
+    const visitedAt = ({ line, column }: Place): number | undefined =>
+      visited.get(line)?.get(column)
+    const visit = ({ line, column }: Place, index: number): void => {
+      const row = visited.get(line)
+      if (row === undefined) {
+        visited.set(line, new Map([[column, index]]))
+      } else {
+        row.set(column, index)
+      }
+    }
+    visit(first.place, 0)
     const places: Array<Place> = [first.place]
     let current = first
     for (let index = 1; index < count; index += 1) {
@@ -365,7 +370,7 @@ export const find = (
         return next
       }
       const wrapped = current.wrapped || next.value.wrapped
-      const seen = visited.get(keyOf(next.value.place))
+      const seen = visitedAt(next.value.place)
       if (seen !== undefined) {
         const length = index - seen
         const place = places[seen + ((count - 1 - seen) % length)]
@@ -374,7 +379,7 @@ export const find = (
           wrapped: true,
         })
       }
-      visited.set(keyOf(next.value.place), index)
+      visit(next.value.place, index)
       places.push(next.value.place)
       current = { place: next.value.place, wrapped }
     }
@@ -390,11 +395,6 @@ type Under = Readonly<{ start: Spot; pattern: string }>
 
 const escapedForSearch = (text: string): string =>
   text.replace(/[/.*~[^$\\]/gu, '\\$&')
-
-const blankClass = 0
-const punctuationClass = 1
-
-const isWordClass = (kind: number): boolean => kind > punctuationClass
 
 export const wordUnder = (
   buffer: Buffer.Buffer,

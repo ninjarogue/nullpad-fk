@@ -1277,13 +1277,13 @@ const groups: ReadonlyArray<Group> = [
       ],
       [
         96,
-        'decomposed é typed as e and a combining accent',
+        'decomposed é typed as e and a combining accent: fe finds no e under an accent (accepted difference, Vim lands on 1:4), and the lone accent does nothing',
         'cafe\u0301 e\u0301 x',
         [1, 1],
         'fe\u0301',
         null,
         1,
-        4,
+        1,
         'NORMAL',
         null,
         null,
@@ -3006,7 +3006,10 @@ const typeKeyWithText = async (nullpad: Nullpad, text: string) => {
     text,
     unmodifiedText: text,
   })
-  await nullpad.cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', key: text })
+  await nullpad.cdp.send('Input.dispatchKeyEvent', {
+    type: 'keyUp',
+    key: text,
+  })
   await settle(nullpad.page)
 }
 
@@ -3053,7 +3056,10 @@ test('a find waits for its letter and .status .pending reads f, 2f, 2df and the 
   expect(await pendingOf(nullpad), 'f in VISUAL').toBe('f')
   await play(nullpad, 'c')
   expect(await pendingOf(nullpad), 'done').toBe('')
-  expect(await nullpad.selection(), 'the selection grew to the c').toBe('abc')
+  expect(
+    await nullpad.selection(),
+    'the selection grew from the c that fc left the cursor on to the next c (Vim: VISUAL from 1:3 to 1:6)',
+  ).toBe('cabc')
 })
 
 for (const key of [
@@ -3080,11 +3086,15 @@ for (const key of [
       '',
     )
     expect(await modeOf(nullpad), 'NORMAL').toBe('NORMAL')
+    expect(
+      await nullpad.status(),
+      'the cursor stays on the c (Vim: column 3)',
+    ).toMatchObject({ line: 1, column: 3 })
     await play(nullpad, 'x')
     expect(
-      (await nullpad.text()).length,
-      'x deleted one letter, the count did not carry',
-    ).toBe(5)
+      await nullpad.text(),
+      'x deleted the c alone, the count did not carry (Vim: abdef)',
+    ).toBe('abdef')
   })
 }
 

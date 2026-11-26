@@ -1,10 +1,17 @@
 import { Array, Match, Option, Result } from 'effect'
 
+import { type Matcher, type Node, build } from './matcher'
+
 type Mode = 'VeryMagic' | 'Magic' | 'NoMagic' | 'VeryNoMagic'
 
 type Token =
   | Readonly<{ _tag: 'Letter'; text: string }>
-  | Readonly<{ _tag: 'Magic'; c: string; raw: string }>
+  | Readonly<{
+      _tag: 'Magic'
+      char: string
+      raw: string
+      anchorsAnywhere: boolean
+    }>
   | Readonly<{ _tag: 'Collection'; body: string; raw: string }>
   | Readonly<{ _tag: 'Brace'; body: string; raw: string }>
   | Readonly<{ _tag: 'Refused'; raw: string }>
@@ -20,7 +27,7 @@ export type Split = Readonly<{
   offset: Option.Option<string>
 }>
 
-const known = '^$.*[~()|+?={<>@%&'
+const escapableToMagic = '^$.*[~()|+?={<>@%&'
 
 const isWordCharacter = /^[0-9A-Za-z_]$/u
 
@@ -36,16 +43,26 @@ const isMagicByDefault = (mode: Mode, c: string): boolean =>
 const classified = (
   mode: Mode,
   escaped: boolean,
-  c: string,
+  char: string,
   raw: string,
-): Token =>
-  isWordCharacter.test(c)
+): Token => {
+  const magic: Token = {
+    _tag: 'Magic',
+    char,
+    raw,
+    anchorsAnywhere:
+      (char === '^' || char === '$') &&
+      (mode === 'VeryMagic' || (mode === 'VeryNoMagic' && escaped)),
+  }
+  return isWordCharacter.test(char)
     ? escaped
-      ? { _tag: 'Magic', c, raw }
-      : { _tag: 'Letter', text: c }
-    : isMagicByDefault(mode, c) !== escaped && (!escaped || known.includes(c))
-      ? { _tag: 'Magic', c, raw }
-      : { _tag: 'Letter', text: c }
+      ? magic
+      : { _tag: 'Letter', text: char }
+    : isMagicByDefault(mode, char) !== escaped &&
+        (!escaped || escapableToMagic.includes(char))
+      ? magic
+      : { _tag: 'Letter', text: char }
+}
 
 const modes: Readonly<Record<string, Mode>> = {
   v: 'VeryMagic',
@@ -115,7 +132,7 @@ const readEscaped = (
   chars: ReadonlyArray<string>,
   at: number,
   mode: Mode,
-  delimiter: string,
+  delimiter: Option.Option<string>,
 ): Read => {
   const c = chars[at + 1]
   const to = at + 2
@@ -127,7 +144,7 @@ const readEscaped = (
   if (c === undefined) {
     return one({ _tag: 'Letter', text: '\\' })
   }
-  if (c === '/' || c === delimiter) {
+  if (c === '/' || Option.contains(delimiter, c)) {
     return one({ _tag: 'Letter', text: c })
   }
   const switched = modes[c]
@@ -148,7 +165,12 @@ const readEscaped = (
     const next = chars[to]
     return c === '%' && next === '('
       ? {
-          token: Option.some({ _tag: 'Magic', c: '%(', raw: '\\%(' }),
+          token: Option.some({
+            _tag: 'Magic',
+            char: '%(',
+            raw: '\\%(',
+            anchorsAnywhere: false,
+          }),
           to: to + 1,
           mode,
         }
@@ -212,7 +234,12 @@ const readPlain = (
     const next = chars[at + 1]
     return next === '('
       ? {
-          token: Option.some({ _tag: 'Magic', c: '%(', raw: '%(' }),
+          token: Option.some({
+            _tag: 'Magic',
+            char: '%(',
+            raw: '%(',
+            anchorsAnywhere: false,
+          }),
           to: at + 2,
           mode,
         }
@@ -221,7 +248,7 @@ const readPlain = (
   return one(classified(mode, false, c, c))
 }
 
-const tokenize = (text: string, delimiter: string): Tokens => {
+const tokenize = (text: string, delimiter: Option.Option<string>): Tokens => {
   const chars = Array.fromIterable(text)
   const tokens: Array<Token> = []
   let mode: Mode = 'Magic'
@@ -230,7 +257,7 @@ const tokenize = (text: string, delimiter: string): Tokens => {
   let rest: Option.Option<string> = Option.none()
   while (at < chars.length) {
     const c = chars[at] ?? ''
-    if (c === delimiter) {
+    if (Option.contains(delimiter, c)) {
       rest = Option.some(chars.slice(at + 1).join(''))
       break
     }
@@ -242,7 +269,7 @@ const tokenize = (text: string, delimiter: string): Tokens => {
       tokens.push(read.token.value)
     }
     pattern +=
-      c === '\\' && chars[at + 1] === delimiter && delimiter === '?'
+      c === '\\' && chars[at + 1] === '?' && Option.contains(delimiter, '?')
         ? '?'
         : chars.slice(at, read.to).join('')
     mode = read.mode
@@ -252,426 +279,431 @@ const tokenize = (text: string, delimiter: string): Tokens => {
 }
 
 export const split = (text: string, delimiter: '/' | '?'): Split => {
-  const { pattern, rest } = tokenize(text, delimiter)
+  const { pattern, rest } = tokenize(text, Option.some(delimiter))
   return { pattern, offset: rest }
 }
 
-type Item = Readonly<{
-  source: string
-  kind: 'Atom' | 'Group' | 'Quantified' | 'Anchor' | 'Alt'
-  repeats: boolean
-  alternates: boolean
-  varies: boolean
-  letter: string
-  plain: boolean
-}>
+export const noPrevious = 'E35: No previous regular expression'
 
-type Frame = Readonly<{ items: ReadonlyArray<Item>; opener: string }>
+export const notSupported = (what: string): string =>
+  `not supported in a search: ${what}`
 
-type State = Readonly<{
-  frames: ReadonlyArray<Frame>
-  ignoreCase: boolean
-}>
+const unsupported = (what: string): Result.Result<never, string> =>
+  Result.fail(notSupported(what))
 
-const unsupported = (token: string): Result.Result<never, string> =>
-  Result.fail(`not supported in a search: ${token}`)
+type Range = readonly [number, number]
 
-const syntax = (text: string): Result.Result<never, string> => Result.fail(text)
+type ClassNode = Extract<Node, { _tag: 'Class' }>
 
-const escapeLetter = (text: string): string =>
-  text.replace(/[\\^$.*+?()[\]{}|/]/gu, '\\$&')
+const classOf = (
+  ranges: ReadonlyArray<Range>,
+  negated = false,
+  folds = true,
+): ClassNode => ({
+  _tag: 'Class',
+  ranges,
+  negated,
+  folds,
+})
 
-const word = '[\\p{L}\\p{M}\\p{Nd}_]'
+const blank: ReadonlyArray<Range> = [
+  [9, 9],
+  [32, 32],
+]
+const wordLetters: ReadonlyArray<Range> = [
+  [48, 57],
+  [65, 90],
+  [95, 95],
+  [97, 122],
+]
+const letters: ReadonlyArray<Range> = [
+  [65, 90],
+  [97, 122],
+]
+const digits: ReadonlyArray<Range> = [[48, 57]]
+const lower: ReadonlyArray<Range> = [[97, 122]]
+const upper: ReadonlyArray<Range> = [[65, 90]]
+const hexDigits: ReadonlyArray<Range> = [
+  [48, 57],
+  [65, 70],
+  [97, 102],
+]
+const headLetters: ReadonlyArray<Range> = [
+  [65, 90],
+  [95, 95],
+  [97, 122],
+]
 
-const classes: Readonly<Record<string, string>> = {
-  s: '[ \\t]',
-  S: '[^ \\t]',
-  w: '[0-9A-Za-z_]',
-  W: '[^0-9A-Za-z_]',
-  a: '[A-Za-z]',
-  A: '[^A-Za-z]',
-  d: '[0-9]',
-  D: '[^0-9]',
-  l: '[a-z]',
-  L: '[^a-z]',
-  u: '[A-Z]',
-  U: '[^A-Z]',
-  x: '[0-9A-Fa-f]',
-  X: '[^0-9A-Fa-f]',
-  h: '[A-Za-z_]',
-  H: '[^A-Za-z_]',
+const namedClasses: Readonly<Record<string, ClassNode>> = {
+  s: classOf(blank),
+  S: classOf(blank, true),
+  w: classOf(wordLetters),
+  W: classOf(wordLetters, true),
+  a: classOf(letters),
+  A: classOf(letters, true),
+  d: classOf(digits),
+  D: classOf(digits, true),
+  l: classOf(lower, false, false),
+  L: classOf(lower, true, false),
+  u: classOf(upper, false, false),
+  U: classOf(upper, true, false),
+  x: classOf(hexDigits),
+  X: classOf(hexDigits, true),
+  h: classOf(headLetters),
+  H: classOf(headLetters, true),
 }
 
-const collectionEscapes: Readonly<Record<string, string>> = {
-  e: '\\x1b',
-  t: '\\t',
-  r: '\\r',
-  b: '\\x08',
-  '\\': '\\\\',
-  ']': '\\]',
-  '^': '\\^',
-  '-': '\\-',
+type Entry = Readonly<{ code: number; isDash: boolean }>
+
+const collectionEscapes: Readonly<Record<string, number>> = {
+  e: 0x1b,
+  t: 9,
+  r: 13,
+  b: 8,
+  '\\': 92,
+  ']': 93,
+  '^': 94,
+  '-': 45,
 }
 
-const collectionClass = (
-  body: string,
+const entriesOf = (
+  chars: ReadonlyArray<string>,
   raw: string,
-): Result.Result<string, string> => {
-  const chars = Array.fromIterable(body)
-  const negated = chars[0] === '^'
-  const items = negated ? chars.slice(1) : chars
-  let out = ''
+): Result.Result<ReadonlyArray<Entry>, string> => {
+  const entries: Array<Entry> = []
   let index = 0
-  while (index < items.length) {
-    const c = items[index] ?? ''
-    const after = items[index + 1]
-    if (c === '[' && after !== undefined && ':=.'.includes(after)) {
+  while (index < chars.length) {
+    const char = chars[index] ?? ''
+    const after = chars[index + 1]
+    if (char === '[' && after !== undefined && ':=.'.includes(after)) {
       return unsupported(raw)
     }
-    if (c === '\\' && after !== undefined) {
+    if (char === '\\' && after !== undefined) {
       const escaped = collectionEscapes[after]
       if (escaped === undefined && /[nodxuU0-9]/u.test(after)) {
         return unsupported(raw)
       }
-      out += escaped ?? '\\\\' + escapeLetter(after)
-      index += 2
+      if (escaped === undefined) {
+        entries.push({ code: 92, isDash: false })
+      } else {
+        entries.push({ code: escaped, isDash: false })
+        index += 2
+        continue
+      }
+      index += 1
+      continue
+    }
+    entries.push({ code: char.codePointAt(0) ?? 0, isDash: char === '-' })
+    index += 1
+  }
+  return Result.succeed(entries)
+}
+
+const rangesOf = (
+  entries: ReadonlyArray<Entry>,
+): Result.Result<ReadonlyArray<Range>, string> => {
+  const ranges: Array<Range> = []
+  let index = 0
+  while (index < entries.length) {
+    const from = entries[index]?.code ?? 0
+    const dash = entries[index + 1]
+    const to = entries[index + 2]
+    if (dash?.isDash === true && to !== undefined) {
+      if (from > to.code) {
+        return Result.fail('E944: Reverse range in character class')
+      }
+      ranges.push([from, to.code])
+      index += 3
     } else {
-      out += c === ']' || c === '\\' ? '\\' + c : c
+      ranges.push([from, from])
       index += 1
     }
   }
-  return Result.succeed(`[${negated ? '^' : ''}${out}]`)
+  return Result.succeed(ranges)
 }
 
-const quantifierOf = (
-  token: Token,
-): Option.Option<
-  Readonly<{ suffix: string; repeating: boolean; raw: string }>
-> => {
-  if (token._tag === 'Magic') {
-    return token.c === '*'
-      ? Option.some({ suffix: '*', repeating: true, raw: token.raw })
-      : token.c === '+'
-        ? Option.some({ suffix: '+', repeating: true, raw: token.raw })
-        : token.c === '=' || token.c === '?'
-          ? Option.some({ suffix: '?', repeating: false, raw: token.raw })
-          : Option.none()
-  }
-  return Option.none()
-}
-
-const countsOf = (
+const collectionNode = (
   body: string,
-): Option.Option<Readonly<{ suffix: string; repeating: boolean }>> => {
+  raw: string,
+): Result.Result<Node, string> => {
+  const chars = Array.fromIterable(body)
+  const negated = chars[0] === '^'
+  return Result.map(
+    Result.flatMap(entriesOf(negated ? chars.slice(1) : chars, raw), rangesOf),
+    ranges => classOf(ranges, negated),
+  )
+}
+
+type Repeating = Readonly<{ min: number; max: number; lazy: boolean }>
+
+const countsOf = (body: string): Option.Option<Repeating> => {
   const found = /^(-?)(\d*)(?:(,)(\d*))?$/u.exec(body)
   if (found === null) {
     return Option.none()
   }
-  const lazy = found[1] === '-' ? '?' : ''
   const low = found[2] ?? ''
-  const hasComma = found[3] === ','
   const high = found[4] ?? ''
   const min = low === '' ? 0 : Number(low)
-  const max = hasComma
-    ? high === ''
-      ? Infinity
-      : Number(high)
-    : low === ''
-      ? Infinity
-      : min
-  const [from, to] = min > max ? [max, min] : [min, max]
-  const counted =
-    from === to
-      ? `{${from}}`
-      : to === Infinity
-        ? `{${from},}`
-        : `{${from},${to}}`
-  return Option.some({ suffix: counted + lazy, repeating: to > 1 })
+  const max =
+    found[3] === ','
+      ? high === ''
+        ? Infinity
+        : Number(high)
+      : low === ''
+        ? Infinity
+        : min
+  return Option.some({
+    min: Math.min(min, max),
+    max: Math.max(min, max),
+    lazy: found[1] === '-',
+  })
 }
 
-const lastFrame = (state: State): Frame =>
-  state.frames[state.frames.length - 1] ?? { items: [], opener: '' }
+type Shape = 'Atom' | 'Group' | 'Repeated' | 'Anchor'
 
-const withFrame = (state: State, frame: Frame): State => ({
+type Item = Readonly<{ node: Node; shape: Shape; atLineStart: boolean }>
+
+type Frame = Readonly<{
+  branches: ReadonlyArray<Node>
+  items: ReadonlyArray<Item>
+  opener: string
+}>
+
+type State = Readonly<{
+  outer: ReadonlyArray<Frame>
+  frame: Frame
+  ignoreCase: boolean
+  captures: number
+}>
+
+const emptyFrame = (opener: string): Frame => ({
+  branches: [],
+  items: [],
+  opener,
+})
+
+const itemOf = (
+  node: Node,
+  shape: Shape = 'Atom',
+  atLineStart = false,
+): Item => ({
+  node,
+  shape,
+  atLineStart,
+})
+
+const withItem = (state: State, item: Item): State => ({
   ...state,
-  frames: [...state.frames.slice(0, -1), frame],
+  frame: { ...state.frame, items: [...state.frame.items, item] },
 })
 
-const pushed = (state: State, item: Item): State => {
-  const frame = lastFrame(state)
-  return withFrame(state, { ...frame, items: [...frame.items, item] })
+const concatenated = (items: ReadonlyArray<Item>): Node =>
+  items.length === 1 && items[0] !== undefined
+    ? items[0].node
+    : { _tag: 'Concat', nodes: items.map(item => item.node) }
+
+const alternation = (frame: Frame): Node => {
+  const branches = [...frame.branches, concatenated(frame.items)]
+  return branches.length === 1 && branches[0] !== undefined
+    ? branches[0]
+    : { _tag: 'Alternate', branches }
 }
 
-const atom = (source: string): Item => ({
-  source,
-  kind: 'Atom',
-  repeats: false,
-  alternates: false,
-  varies: false,
-  letter: '',
-  plain: false,
-})
+const syntax = (text: string): Result.Result<never, string> => Result.fail(text)
 
-const quantified = (
+const letterItem = (text: string): Item =>
+  itemOf({ _tag: 'Letter', char: text })
+
+const repeated = (
   state: State,
   raw: string,
-  suffix: string,
-  repeating: boolean,
-  literalAtStart: Option.Option<string>,
-): Result.Result<State, string> => {
-  const frame = lastFrame(state)
-  const last = frame.items[frame.items.length - 1]
-  if (last === undefined || last.kind === 'Alt' || last.source === '^') {
-    return Option.match(literalAtStart, {
-      onSome: text => Result.succeed(pushed(state, atom(escapeLetter(text)))),
-      onNone: () => syntax(`E64: ${raw} follows nothing`),
-    })
-  }
-  if (last.kind === 'Anchor') {
-    return syntax(`E64: ${raw} follows nothing`)
-  }
-  if (last.kind === 'Quantified') {
-    return syntax(raw === '*' ? 'E61: Nested *' : `E62: Nested ${raw}`)
-  }
-  if (last.kind === 'Group' && repeating && last.alternates && !last.plain) {
-    return unsupported('a repeat of a group with \\|')
-  }
-  if (
-    last.kind === 'Group' &&
-    repeating &&
-    (last.repeats || (last.varies && suffix.startsWith('{')))
-  ) {
-    return unsupported('a repeat inside a repeated group')
-  }
-  return Result.succeed(
-    withFrame(state, {
-      ...frame,
-      items: [
-        ...frame.items.slice(0, -1),
-        {
-          source: last.source + suffix,
-          kind: 'Quantified',
-          repeats: last.repeats || repeating,
-          alternates: last.alternates,
-          varies: true,
-          letter: '',
-          plain: false,
+  how: Repeating,
+  starIsLetter: boolean,
+): Result.Result<State, string> =>
+  Option.match(Array.last(state.frame.items), {
+    onNone: () =>
+      starIsLetter
+        ? Result.succeed(withItem(state, letterItem('*')))
+        : syntax(`E64: ${raw} follows nothing`),
+    onSome: last => {
+      if (last.atLineStart && starIsLetter) {
+        return Result.succeed(withItem(state, letterItem('*')))
+      }
+      if (last.shape === 'Repeated') {
+        return syntax(raw === '*' ? 'E61: Nested *' : `E62: Nested ${raw}`)
+      }
+      return Result.succeed({
+        ...state,
+        frame: {
+          ...state.frame,
+          items: [
+            ...state.frame.items.slice(0, -1),
+            itemOf({ _tag: 'Repeat', node: last.node, ...how }, 'Repeated'),
+          ],
         },
-      ],
-    }),
-  )
+      })
+    },
+  })
+
+const mostCaptures = 9
+
+const opened = (state: State, raw: string): Result.Result<State, string> => {
+  const captures = state.captures + (raw.endsWith('%(') ? 0 : 1)
+  return captures > mostCaptures
+    ? syntax("E872: (NFA regexp) Too many '('")
+    : Result.succeed({
+        ...state,
+        outer: [...state.outer, state.frame],
+        frame: emptyFrame(raw),
+        captures,
+      })
 }
 
-const plainlySplit = (items: ReadonlyArray<Item>): boolean => {
-  const firsts: Array<string> = []
-  let begins = true
-  for (const item of items) {
-    if (item.alternates) {
-      return false
-    }
-    if (item.kind === 'Alt') {
-      if (begins) {
-        return false
-      }
-      begins = true
-    } else if (begins) {
-      if (item.kind !== 'Atom' || item.letter === '') {
-        return false
-      }
-      firsts.push(item.letter)
-      begins = false
-    }
-  }
-  return !begins && new Set(firsts).size === firsts.length && firsts.length > 1
-}
-
-const closed = (state: State, raw: string): Result.Result<State, string> => {
-  if (state.frames.length < 2) {
-    return syntax(`E55: Unmatched ${raw}`)
-  }
-  const frame = lastFrame(state)
-  const outer = { ...state, frames: state.frames.slice(0, -1) }
-  return Result.succeed(
-    pushed(outer, {
-      source: `(?:${Array.map(frame.items, item => item.source).join('')})`,
-      kind: 'Group',
-      repeats: Array.some(frame.items, item => item.repeats),
-      alternates: Array.some(
-        frame.items,
-        item => item.alternates || item.kind === 'Alt',
+const closed = (state: State, raw: string): Result.Result<State, string> =>
+  Option.match(Array.last(state.outer), {
+    onNone: () => syntax(`E55: Unmatched ${raw}`),
+    onSome: outer =>
+      Result.succeed(
+        withItem(
+          { ...state, outer: state.outer.slice(0, -1), frame: outer },
+          itemOf({ _tag: 'Group', node: alternation(state.frame) }, 'Group'),
+        ),
       ),
-      varies: Array.some(frame.items, item => item.varies),
-      letter: '',
-      plain: plainlySplit(frame.items),
-    }),
+  })
+
+const alternated = (state: State): Result.Result<State, string> =>
+  Result.succeed({
+    ...state,
+    frame: {
+      ...state.frame,
+      branches: [...state.frame.branches, concatenated(state.frame.items)],
+      items: [],
+    },
+  })
+
+const anchored = (
+  state: State,
+  kind: 'LineStart' | 'LineEnd' | 'WordStart' | 'WordEnd',
+): Result.Result<State, string> =>
+  Result.succeed(
+    withItem(
+      state,
+      itemOf({ _tag: 'Assert', kind }, 'Anchor', kind === 'LineStart'),
+    ),
+  )
+
+const closesPattern = (tokens: ReadonlyArray<Token>, from: number): boolean => {
+  const at = tokens.findIndex(
+    (token, index) =>
+      index >= from &&
+      !(token._tag === 'Magic' && (token.char === 'c' || token.char === 'C')),
+  )
+  const next = tokens[at]
+  return (
+    at < 0 ||
+    (next?._tag === 'Magic' && (next.char === ')' || next.char === '|'))
   )
 }
 
-const anchored = (state: State, source: string): Result.Result<State, string> =>
-  Result.succeed(
-    pushed(state, {
-      source,
-      kind: 'Anchor',
-      repeats: false,
-      alternates: false,
-      varies: false,
-      letter: '',
-      plain: false,
-    }),
-  )
-
-const endsHere = (next: Token | undefined): boolean =>
-  next === undefined ||
-  (next._tag === 'Magic' && (next.c === ')' || next.c === '|'))
-
-const startsHere = (state: State): boolean => {
-  const last = lastFrame(state).items[lastFrame(state).items.length - 1]
-  return last === undefined || last.kind === 'Alt'
+const quantifiers: Readonly<Record<string, Repeating>> = {
+  '*': { min: 0, max: Infinity, lazy: false },
+  '+': { min: 1, max: Infinity, lazy: false },
+  '=': { min: 0, max: 1, lazy: false },
+  '?': { min: 0, max: 1, lazy: false },
 }
 
 const magic = (
   state: State,
-  { c, raw }: Extract<Token, { _tag: 'Magic' }>,
-  next: Token | undefined,
+  token: Extract<Token, { _tag: 'Magic' }>,
+  tokens: ReadonlyArray<Token>,
+  index: number,
 ): Result.Result<State, string> => {
-  const quantifier = quantifierOf({ _tag: 'Magic', c, raw })
-  if (Option.isSome(quantifier)) {
-    return quantified(
-      state,
-      quantifier.value.raw,
-      quantifier.value.suffix,
-      quantifier.value.repeating,
-      c === '*' ? Option.some('*') : Option.none(),
-    )
+  const { char, raw } = token
+  const quantifier = quantifiers[char]
+  if (quantifier !== undefined) {
+    return repeated(state, raw, quantifier, char === '*')
   }
-  const simple: Readonly<Record<string, () => Result.Result<State, string>>> = {
-    '^': () =>
-      startsHere(state)
-        ? anchored(state, '^')
-        : Result.succeed(pushed(state, atom('\\^'))),
-    $: () =>
-      endsHere(next)
-        ? anchored(state, '$')
-        : Result.succeed(pushed(state, atom('\\$'))),
-    '.': () => Result.succeed(pushed(state, atom('.'))),
-    '(': () =>
-      Result.succeed({
-        ...state,
-        frames: [...state.frames, { items: [], opener: raw }],
-      }),
-    '%(': () =>
-      Result.succeed({
-        ...state,
-        frames: [...state.frames, { items: [], opener: raw }],
-      }),
-    ')': () => closed(state, raw),
-    '|': () =>
-      Result.succeed(
-        pushed(state, {
-          source: '|',
-          kind: 'Alt',
-          repeats: false,
-          alternates: false,
-          varies: false,
-          letter: '',
-          plain: false,
-        }),
-      ),
-    '<': () => anchored(state, `(?<!${word})(?=${word})`),
-    '>': () => anchored(state, `(?<=${word})(?!${word})`),
-    c: () => Result.succeed({ ...state, ignoreCase: true }),
-    C: () => Result.succeed(state),
-    t: () => Result.succeed(pushed(state, atom('\\t'))),
+  const named = namedClasses[char]
+  if (named !== undefined) {
+    return Result.succeed(withItem(state, itemOf(named)))
   }
-  const handler = simple[c]
-  if (handler !== undefined) {
-    return handler()
+  switch (char) {
+    case '^':
+      return state.frame.items.length === 0 || token.anchorsAnywhere
+        ? anchored(state, 'LineStart')
+        : Result.succeed(withItem(state, letterItem('^')))
+    case '$':
+      return closesPattern(tokens, index + 1) || token.anchorsAnywhere
+        ? anchored(state, 'LineEnd')
+        : Result.succeed(withItem(state, letterItem('$')))
+    case '.':
+      return Result.succeed(withItem(state, itemOf({ _tag: 'Any' })))
+    case '(':
+    case '%(':
+      return opened(state, raw)
+    case ')':
+      return closed(state, raw)
+    case '|':
+      return alternated(state)
+    case '<':
+      return anchored(state, 'WordStart')
+    case '>':
+      return anchored(state, 'WordEnd')
+    case 'c':
+      return Result.succeed({ ...state, ignoreCase: true })
+    case 'C':
+      return Result.succeed(state)
+    case 't':
+      return Result.succeed(withItem(state, letterItem('\t')))
+    default:
+      return unsupported(raw)
   }
-  const set = classes[c]
-  return set === undefined
-    ? unsupported(raw)
-    : Result.succeed(pushed(state, atom(set)))
 }
 
 const translated = (
   state: State,
   token: Token,
-  next: Token | undefined,
-): Result.Result<State, string> => {
-  return Match.value(token).pipe(
+  tokens: ReadonlyArray<Token>,
+  index: number,
+): Result.Result<State, string> =>
+  Match.value(token).pipe(
     Match.tagsExhaustive({
       Letter: letter =>
-        Result.succeed(
-          pushed(state, {
-            ...atom(escapeLetter(letter.text)),
-            letter: letter.text.toLowerCase(),
-          }),
-        ),
-      Magic: magical => magic(state, magical, next),
+        Result.succeed(withItem(state, letterItem(letter.text))),
+      Magic: magical => magic(state, magical, tokens, index),
       Refused: refused => unsupported(refused.raw),
       Collection: collection =>
-        Result.map(collectionClass(collection.body, collection.raw), source =>
-          pushed(state, atom(source)),
+        Result.map(collectionNode(collection.body, collection.raw), node =>
+          withItem(state, itemOf(node)),
         ),
       Brace: brace =>
         Option.match(countsOf(brace.body), {
           onNone: () => syntax('E554: Syntax error in \\{...}'),
-          onSome: ({ suffix, repeating }) =>
-            quantified(state, '\\{', suffix, repeating, Option.none()),
+          onSome: how => repeated(state, '\\{', how, false),
         }),
     }),
   )
-}
 
-const compiled = (pattern: string): Result.Result<RegExp, string> => {
-  const { tokens } = tokenize(pattern, '')
+export const compile = (pattern: string): Result.Result<Matcher, string> => {
+  const { tokens } = tokenize(pattern, Option.none())
   const initial: Result.Result<State, string> = Result.succeed({
-    frames: [{ items: [], opener: '' }],
+    outer: [],
+    frame: emptyFrame(''),
     ignoreCase: false,
+    captures: 0,
   })
   const folded = Array.reduce(tokens, initial, (state, token, index) =>
-    Result.flatMap(state, current =>
-      translated(current, token, tokens[index + 1]),
-    ),
+    Result.flatMap(state, current => translated(current, token, tokens, index)),
   )
   return Result.flatMap(folded, state => {
-    if (state.frames.length > 1) {
-      const opener = lastFrame(state).opener
+    const { opener } = state.frame
+    if (state.outer.length > 0) {
       return syntax(
         opener.endsWith('%(')
           ? `E53: Unmatched ${opener.replace('%(', '')}%(`
           : `E54: Unmatched ${opener}`,
       )
     }
-    const source = Array.map(
-      state.frames[0]?.items ?? [],
-      item => item.source,
-    ).join('')
-    try {
-      return Result.succeed(
-        new RegExp(source, state.ignoreCase ? 'gsui' : 'gsu'),
-      )
-    } catch (error) {
-      return syntax(
-        error instanceof Error && /out of order/u.test(error.message)
-          ? 'E944: Reverse range in character class'
-          : `E383: Invalid search string: ${pattern}`,
-      )
-    }
+    return build(alternation(state.frame), state.ignoreCase)
   })
 }
-
-const last: { pattern: string; result: Result.Result<RegExp, string> } = {
-  pattern: '',
-  result: Result.fail('E35: No previous regular expression'),
-}
-
-export const compile = (pattern: string): Result.Result<RegExp, string> => {
-  if (last.pattern !== pattern || Result.isFailure(last.result)) {
-    last.pattern = pattern
-    last.result = compiled(pattern)
-  }
-  return last.result
-}
-
-export const wordCharacter = new RegExp(`^${word}$`, 'u')

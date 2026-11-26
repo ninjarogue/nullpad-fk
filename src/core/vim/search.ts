@@ -1,9 +1,13 @@
-import { Option, Result, Schema } from 'effect'
+import { Array, Match, Option, Result, Schema } from 'effect'
 
 import type * as Buffer from '../buffer'
-import { cellAt, cellCount, cellEnd, cellStart, cellText } from './cells'
+import { cellAt, cellCount, cellEnd, cellStart } from './cells'
+import { type Matcher, type Span, classOfCodePoint } from './matcher'
 import { type Spot, decl, incl, positionOf, spotAt } from './motions'
-import { wordCharacter } from './pattern'
+import { notSupported } from './pattern'
+
+export const Way = Schema.Literals(['Forward', 'Backward'])
+export type Way = typeof Way.Type
 
 export const Offset = Schema.Struct({
   kind: Schema.Literals(['Line', 'Start', 'End']),
@@ -33,184 +37,194 @@ export const parseOffset = (text: string): Result.Result<Offset, string> => {
         ? { kind: letter[1] === 'e' ? 'End' : 'Start', by: byOf(letter[2]) }
         : noOffset
   return text.slice(used.length).startsWith(';')
-    ? Result.fail('not supported in a search: ;')
+    ? Result.fail(notSupported(';'))
     : Result.succeed(offset)
 }
 
-type Match = Readonly<{ start: number; end: number }>
-
 type Place = Readonly<{ line: number; column: number }>
 
-const matchAt = (
-  regex: RegExp,
-  text: string,
-  at: number,
-): Option.Option<Match> => {
-  regex.lastIndex = at
-  const found = regex.exec(text)
-  return found === null
-    ? Option.none()
-    : Option.some({ start: found.index, end: found.index + found[0].length })
-}
+type Start =
+  | Readonly<{ _tag: 'At'; place: Place }>
+  | Readonly<{ _tag: 'BeforeNote' }>
+  | Readonly<{ _tag: 'AfterNote' }>
 
-const nextColumn = (text: string, { start, end }: Match): number =>
+const at = (place: Place): Start => ({ _tag: 'At', place })
+
+const advanced = (text: string, { start, end }: Span): number =>
   end > start || end >= text.length
     ? end
     : end + String.fromCodePoint(text.codePointAt(end) ?? 0).length
 
 const firstAfter = (
-  regex: RegExp,
+  matcher: Matcher,
   text: string,
   column: number,
-  extra: number,
-  usesEnd: boolean,
-): Option.Option<Match> => {
+  cursorCellWidth: number,
+  landsOnEnd: boolean,
+): Option.Option<Span> => {
   let from = 0
-  while (from <= text.length) {
-    const found = matchAt(regex, text, from)
+  for (;;) {
+    const found = matcher.find(text, from)
     if (Option.isNone(found)) {
       return found
     }
     const { start, end } = found.value
-    const rejected = usesEnd
-      ? end - 1 < column + extra
-      : start - (start === text.length ? 1 : 0) < column + extra
+    const rejected = landsOnEnd
+      ? end - 1 < column + cursorCellWidth
+      : start - (start === text.length ? 1 : 0) < column + cursorCellWidth
     if (!rejected) {
       return found
     }
-    from = nextColumn(text, found.value)
+    from = advanced(text, found.value)
     if (from >= text.length) {
       return Option.none()
     }
   }
-  return Option.none()
 }
 
 const lastBefore = (
-  regex: RegExp,
+  matcher: Matcher,
   text: string,
   column: number,
-  usesEnd: boolean,
-): Option.Option<Match> => {
+  landsOnEnd: boolean,
+): Option.Option<Span> => {
   let from = 0
-  let best: Option.Option<Match> = Option.none()
-  while (from <= text.length) {
-    const found = matchAt(regex, text, from)
+  let best: Option.Option<Span> = Option.none()
+  for (;;) {
+    const found = matcher.find(text, from)
     if (Option.isNone(found)) {
-      break
+      return best
     }
     const { start, end } = found.value
-    if (!(usesEnd ? end - 1 < column : start < column)) {
-      break
+    if (!(landsOnEnd ? end - 1 < column : start < column)) {
+      return best
     }
     best = found
-    from = nextColumn(text, found.value)
+    from = advanced(text, found.value)
     if (from >= text.length) {
-      break
+      return best
     }
   }
-  return best
 }
 
-const lastIn = (regex: RegExp, text: string): Option.Option<Match> =>
-  lastBefore(regex, text, Infinity, false)
-
-type Hit = Readonly<{ line: number; match: Match }>
+type Hit = Readonly<{ line: number; match: Span }>
 
 type Stepped = Option.Option<Readonly<{ hit: Hit; wrapped: boolean }>>
 
 const textOf = (buffer: Buffer.Buffer, line: number): string =>
   buffer.lines[line]?.text ?? ''
 
+const scanned = (
+  buffer: Buffer.Buffer,
+  forward: boolean,
+  from: number,
+  to: number,
+  wrapped: boolean,
+  probe: (text: string) => Option.Option<Span>,
+): Stepped => {
+  for (
+    let line = from;
+    forward ? line <= to : line >= to;
+    line += forward ? 1 : -1
+  ) {
+    const found = probe(textOf(buffer, line))
+    if (Option.isSome(found)) {
+      return Option.some({ hit: { line, match: found.value }, wrapped })
+    }
+  }
+  return Option.none()
+}
+
+const orElse = (first: Stepped, second: () => Stepped): Stepped =>
+  Option.isSome(first) ? first : second()
+
 const forwardStep = (
   buffer: Buffer.Buffer,
-  regex: RegExp,
-  from: Place,
-  usesEnd: boolean,
+  matcher: Matcher,
+  start: Start,
+  landsOnEnd: boolean,
   firstOfCount: boolean,
 ): Stepped => {
-  const count = buffer.lines.length
-  const line = buffer.lines[from.line]
-  const cell = line === undefined ? 0 : cellAt(line, from.column)
-  const extra =
-    line === undefined
-      ? 1
-      : Math.max(1, cellEnd(line, cell) - cellStart(line, cell))
-  const here =
-    from.line < 0
-      ? Option.none()
-      : firstAfter(
-          regex,
-          textOf(buffer, from.line),
-          from.column,
-          extra,
-          usesEnd && firstOfCount,
+  const last = buffer.lines.length - 1
+  const earliest = (text: string) => matcher.find(text, 0)
+  return Match.value(start).pipe(
+    Match.tagsExhaustive({
+      BeforeNote: () => scanned(buffer, true, 0, last, false, earliest),
+      AfterNote: () => scanned(buffer, true, 0, last, true, earliest),
+      At: ({ place }) => {
+        const row = buffer.lines[place.line]
+        const cell = row === undefined ? 0 : cellAt(row, place.column)
+        const cursorCellWidth =
+          row === undefined
+            ? 1
+            : Math.max(1, cellEnd(row, cell) - cellStart(row, cell))
+        const here = firstAfter(
+          matcher,
+          textOf(buffer, place.line),
+          place.column,
+          cursorCellWidth,
+          landsOnEnd && firstOfCount,
         )
-  if (Option.isSome(here)) {
-    return Option.some({
-      hit: { line: from.line, match: here.value },
-      wrapped: false,
-    })
-  }
-  const scanned = (first: number, last: number, wrapped: boolean): Stepped => {
-    for (let index = first; index <= last; index += 1) {
-      const found = matchAt(regex, textOf(buffer, index), 0)
-      if (Option.isSome(found)) {
-        return Option.some({
-          hit: { line: index, match: found.value },
-          wrapped,
-        })
-      }
-    }
-    return Option.none()
-  }
-  const below = scanned(from.line + 1, count - 1, false)
-  return Option.isSome(below) ? below : scanned(0, from.line, true)
+        return orElse(
+          Option.map(here, match => ({
+            hit: { line: place.line, match },
+            wrapped: false,
+          })),
+          () =>
+            orElse(
+              scanned(buffer, true, place.line + 1, last, false, earliest),
+              () => scanned(buffer, true, 0, place.line, true, earliest),
+            ),
+        )
+      },
+    }),
+  )
 }
 
 const backwardStep = (
   buffer: Buffer.Buffer,
-  regex: RegExp,
-  from: Place,
-  usesEnd: boolean,
+  matcher: Matcher,
+  start: Start,
+  landsOnEnd: boolean,
 ): Stepped => {
-  const here =
-    from.column === 0 || from.line >= buffer.lines.length
-      ? Option.none()
-      : lastBefore(regex, textOf(buffer, from.line), from.column, usesEnd)
-  if (Option.isSome(here)) {
-    return Option.some({
-      hit: { line: from.line, match: here.value },
-      wrapped: false,
-    })
-  }
-  const scanned = (first: number, last: number, wrapped: boolean): Stepped => {
-    for (let index = first; index >= last; index -= 1) {
-      const found = lastIn(regex, textOf(buffer, index))
-      if (Option.isSome(found)) {
-        return Option.some({
-          hit: { line: index, match: found.value },
-          wrapped,
-        })
-      }
-    }
-    return Option.none()
-  }
-  const above = scanned(from.line - 1, 0, false)
-  return Option.isSome(above)
-    ? above
-    : scanned(buffer.lines.length - 1, from.line, true)
+  const last = buffer.lines.length - 1
+  const latest = (text: string) => lastBefore(matcher, text, Infinity, false)
+  return Match.value(start).pipe(
+    Match.tagsExhaustive({
+      BeforeNote: () => scanned(buffer, false, last, 0, true, latest),
+      AfterNote: () => scanned(buffer, false, last, 0, false, latest),
+      At: ({ place }) => {
+        const here =
+          place.column === 0
+            ? Option.none()
+            : lastBefore(
+                matcher,
+                textOf(buffer, place.line),
+                place.column,
+                landsOnEnd,
+              )
+        return orElse(
+          Option.map(here, match => ({
+            hit: { line: place.line, match },
+            wrapped: false,
+          })),
+          () =>
+            orElse(
+              scanned(buffer, false, place.line - 1, 0, false, latest),
+              () => scanned(buffer, false, last, place.line, true, latest),
+            ),
+        )
+      },
+    }),
+  )
 }
 
 const placeOfHit = (
   buffer: Buffer.Buffer,
   { line, match }: Hit,
-  usesEnd: boolean,
+  landsOnEnd: boolean,
 ): Place => {
-  if (!usesEnd) {
-    return { line, column: match.start }
-  }
-  if (match.end === match.start) {
+  if (!landsOnEnd || match.end === match.start) {
     return { line, column: match.start }
   }
   const row = buffer.lines[line]
@@ -240,9 +254,9 @@ const times = <A>(count: number, start: A, step: (a: A) => A): A => {
   return value
 }
 
-const undone = (buffer: Buffer.Buffer, from: Spot, offset: Offset): Place => {
+const undone = (buffer: Buffer.Buffer, from: Spot, offset: Offset): Start => {
   if (offset.kind === 'Line' || offset.by === 0) {
-    return positionOf(buffer, from)
+    return at(positionOf(buffer, from))
   }
   const walk = offset.by > 0 ? decl : incl
   const moved = times(Math.abs(offset.by), Option.some(from), spot =>
@@ -254,11 +268,9 @@ const undone = (buffer: Buffer.Buffer, from: Spot, offset: Offset): Place => {
     }),
   )
   return Option.match(moved, {
-    onNone: () => ({
-      line: offset.by > 0 ? -1 : buffer.lines.length,
-      column: 0,
-    }),
-    onSome: spot => positionOf(buffer, spot),
+    onNone: (): Start =>
+      offset.by > 0 ? { _tag: 'BeforeNote' } : { _tag: 'AfterNote' },
+    onSome: spot => at(positionOf(buffer, spot)),
   })
 }
 
@@ -288,82 +300,94 @@ const withOffset = (
   return { spot, reach: offset.kind === 'End' ? 'Inclusive' : 'Exclusive' }
 }
 
+type Progress = Readonly<{ place: Place; wrapped: boolean }>
+
 export const find = (
   buffer: Buffer.Buffer,
   from: Spot,
-  regex: RegExp,
-  forward: boolean,
+  matcher: Matcher,
+  way: Way,
   count: number,
   offset: Offset,
 ): Option.Option<Found> => {
-  const usesEnd = offset.kind === 'End'
-  let place: Place = undone(buffer, from, offset)
-  let wrapped = false
-  for (let left = count; left > 0; left -= 1) {
-    const stepped = forward
-      ? forwardStep(buffer, regex, place, usesEnd, left === count)
-      : backwardStep(buffer, regex, place, usesEnd)
-    if (Option.isNone(stepped)) {
-      return Option.none()
-    }
-    wrapped = wrapped || stepped.value.wrapped
-    place = placeOfHit(buffer, stepped.value.hit, usesEnd)
-  }
-  const landed = withOffset(buffer, place, offset)
-  return Option.some({ ...landed, wrapped })
+  const landsOnEnd = offset.kind === 'End'
+  const stepFrom = (start: Start, firstOfCount: boolean) =>
+    Option.map(
+      way === 'Forward'
+        ? forwardStep(buffer, matcher, start, landsOnEnd, firstOfCount)
+        : backwardStep(buffer, matcher, start, landsOnEnd),
+      ({ hit, wrapped }): Progress => ({
+        place: placeOfHit(buffer, hit, landsOnEnd),
+        wrapped,
+      }),
+    )
+  const first = stepFrom(undone(buffer, from, offset), true)
+  return Option.map(
+    times(count - 1, first, progress =>
+      Option.flatMap(progress, ({ place, wrapped }) =>
+        Option.map(stepFrom(at(place), false), next => ({
+          place: next.place,
+          wrapped: wrapped || next.wrapped,
+        })),
+      ),
+    ),
+    ({ place, wrapped }) => ({ ...withOffset(buffer, place, offset), wrapped }),
+  )
 }
 
 type Under = Readonly<{ start: Spot; pattern: string }>
 
-const classOf = (text: string): 0 | 1 | 2 =>
-  /^\s*$/u.test(text)
-    ? 0
-    : wordCharacter.test(Array.from(text)[0] ?? '') ||
-        /^\p{Extended_Pictographic}/u.test(text)
-      ? 2
-      : 1
-
 const escapedForSearch = (text: string): string =>
   text.replace(/[/.*~[^$\\]/gu, '\\$&')
+
+const blankClass = 0
+const punctuationClass = 1
+
+const isWordClass = (kind: number): boolean => kind > punctuationClass
 
 export const wordUnder = (
   buffer: Buffer.Buffer,
   { line, cell }: Spot,
 ): Option.Option<Under> => {
   const row = buffer.lines[line]
-  if (row === undefined) {
+  const cells = row === undefined ? 0 : cellCount(row)
+  if (row === undefined || cells === 0) {
     return Option.none()
   }
-  const cells = cellCount(row)
-  const classes = (index: number): 0 | 1 | 2 =>
-    index < cells ? classOf(cellText(row, index)) : 0
-  const startOf = (pass: 0 | 1): number => {
-    let at = cell
-    while (
-      at < cells &&
-      !(classes(at) !== 0 && (pass === 1 || classes(at) !== 1))
-    ) {
-      at += 1
-    }
-    const kind = classes(at)
-    while (at > 0 && kind !== 0 && classes(at - 1) === kind) {
-      at -= 1
-    }
-    return at
-  }
-  const first = startOf(0)
-  const start = classes(first) === 2 ? first : startOf(1)
+  const kinds = Array.makeBy(cells, index =>
+    classOfCodePoint(row.text.codePointAt(cellStart(row, index)) ?? -1),
+  )
+  const runStart = (at: number): number =>
+    at >= cells
+      ? at
+      : Array.findLastIndex(
+          kinds.slice(0, at),
+          kind => kind !== kinds[at],
+        ).pipe(Option.match({ onNone: () => 0, onSome: index => index + 1 }))
+  const firstAtOrAfter = (anyNonBlank: boolean): number =>
+    Array.findFirstIndex(
+      kinds,
+      (kind, index) =>
+        index >= cell &&
+        kind !== blankClass &&
+        (anyNonBlank || kind !== punctuationClass),
+    ).pipe(Option.getOrElse(() => cells))
+  const wordFirst = runStart(firstAtOrAfter(false))
+  const start = isWordClass(kinds[wordFirst] ?? blankClass)
+    ? wordFirst
+    : runStart(firstAtOrAfter(true))
   if (start >= cells) {
     return Option.none()
   }
-  const kind = classes(start)
-  const isWord = kind === 2
-  let end = start
-  while (end < cells && (isWord ? classes(end) === kind : classes(end) !== 0)) {
-    end += 1
-  }
+  const kind = kinds[start] ?? blankClass
+  const isWord = isWordClass(kind)
+  const end = Array.findFirstIndex(
+    kinds,
+    (next, index) =>
+      index >= start && (isWord ? next !== kind : next === blankClass),
+  ).pipe(Option.getOrElse(() => cells))
   const text = row.text.slice(cellStart(row, start), cellStart(row, end))
-  const lastIsWord = classes(end - 1) === 2
+  const lastIsWord = isWordClass(kinds[end - 1] ?? blankClass)
   return Option.some({
     start: { line, cell: start },
     pattern: `${isWord ? '\\<' : ''}${escapedForSearch(text)}${lastIsWord ? '\\>' : ''}`,

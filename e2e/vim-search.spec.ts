@@ -7905,44 +7905,67 @@ test('a ; offset is refused with a notice and the cursor stays', async ({
   await expectUntouched(nullpad, '/two/;/five', noteB, 1, 1)
 })
 
-test('a repeat inside a repeated group is refused with its own notice', async ({
-  nullpad,
-}) => {
-  await begin(nullpad, noteB)
-  await play(nullpad, '/\\(x\\+\\)\\+<CR>')
-  expect(await noticeOf(nullpad), 'the notice').toBe(
-    'not supported in a search: a repeat inside a repeated group',
-  )
-  await expectUntouched(nullpad, 'a repeat inside a group', noteB, 1, 1)
-})
+const noteC = 'aab abc\nxxy xy\nabab c\nfoo'
 
-const refusedGroups: ReadonlyArray<readonly [string, string]> = [
-  ['\\(a\\|a\\)*b', 'a star on a group with a bar'],
-  ['\\(x\\|xx\\)\\+y', 'a plus on a group with a bar'],
-  [
-    '\\c\\(a\\|A\\)*b',
-    'a star on a group whose bars share a first letter in two cases under \\c',
-  ],
+const repeatedGroups: ReadonlyArray<
+  readonly [pattern: string, line: number, column: number, notice: string]
+> = [
+  ['\\(a\\|a\\)*b', 1, 5, ''],
+  ['\\(x\\|xx\\)\\+y', 2, 1, ''],
+  ['\\(a\\|ab\\)*c', 1, 5, ''],
   [
     '\\(a\\|ab\\)\\{2,3}c',
-    'a counted repeat on a group whose bars share a first letter',
+    1,
+    1,
+    'E486: Pattern not found: \\(a\\|ab\\)\\{2,3}c',
   ],
-  [
-    '\\(\\(a\\|b\\)\\=\\)\\+c',
-    'a repeat on a group that holds a group with a bar',
-  ],
+  ['\\c\\(a\\|A\\)*b', 1, 5, ''],
+  ['\\(\\(a\\|b\\)\\=\\)\\+c', 1, 5, ''],
+  ['\\(x\\+\\)\\+', 2, 1, ''],
+  ['\\v(a?){20}c', 1, 7, ''],
+  ['\\([ab]\\|a\\)*c', 1, 5, ''],
+  ['\\(x\\+x\\+\\)\\+y', 2, 1, ''],
+  ['a*a*a*a*a*b', 1, 5, ''],
+  ['.*.*.*.*x', 2, 1, ''],
 ]
 
-for (const [pattern, name] of refusedGroups) {
-  test(`${name} is refused with its own notice and the cursor stays`, async ({
+for (const [pattern, line, column, notice] of repeatedGroups) {
+  test(`the repeated pattern ${pattern} finds what Vim finds`, async ({
     nullpad,
   }) => {
-    await begin(nullpad, noteB)
+    await begin(nullpad, noteC)
     await play(nullpad, `/${pattern}<CR>`)
-    expect(await noticeOf(nullpad), 'the notice').toBe(
-      'not supported in a search: a repeat of a group with \\|',
+    expect(await nullpad.status(), 'cursor').toMatchObject({ line, column })
+    expect(await noticeOf(nullpad), 'notice').toBe(notice)
+  })
+}
+
+const freezing: ReadonlyArray<readonly [pattern: string, letter: string]> = [
+  ['a*a*a*a*a*b', 'a'],
+  ['\\(a\\|a\\)*b', 'a'],
+  ['\\(x\\+x\\+\\)\\+y', 'x'],
+  ['[a-z]\\+ing', 'a'],
+  ['.*.*.*.*x', 'a'],
+]
+
+for (const [pattern, letter] of freezing) {
+  test(`${pattern} on one line of 5,000 letters answers at once`, async ({
+    nullpad,
+  }) => {
+    test.setTimeout(30_000)
+    await begin(nullpad, 'q')
+    await play(nullpad, 'i')
+    await nullpad.paste(letter.repeat(5000))
+    await play(nullpad, '<Esc>gg0/')
+    await nullpad.page.keyboard.insertText(pattern)
+    const started = Date.now()
+    await nullpad.page.keyboard.press('Enter')
+    await nullpad.page.locator('.status .notice').waitFor({ timeout: 25_000 })
+    const took = Date.now() - started
+    expect(await noticeOf(nullpad), 'no match').toBe(
+      `E486: Pattern not found: ${pattern}`,
     )
-    await expectUntouched(nullpad, `/${pattern}`, noteB, 1, 1)
+    expect(took, 'milliseconds from Enter to the notice').toBeLessThan(1000)
   })
 }
 

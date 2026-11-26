@@ -6,8 +6,8 @@ import type { Spot } from './motions'
 import * as Pattern from './pattern'
 import * as Search from './search'
 
-export const Way = Schema.Literals(['Forward', 'Backward'])
-export type Way = typeof Way.Type
+export const Way = Search.Way
+export type Way = Search.Way
 
 export const Find = Schema.Struct({
   way: Way,
@@ -148,19 +148,12 @@ const searched = (
 ): Sought =>
   Result.match(Pattern.compile(request.pattern), {
     onFailure: notice => failed(memory, notice),
-    onSuccess: regex => {
+    onSuccess: matcher => {
       const kept: Memory = remembers
         ? { ...memory, search: Option.some(request) }
         : memory
       return Option.match(
-        Search.find(
-          buffer,
-          from,
-          regex,
-          way === 'Forward',
-          count,
-          request.offset,
-        ),
+        Search.find(buffer, from, matcher, way, count, request.offset),
         {
           onNone: () => ({
             memory: kept,
@@ -184,7 +177,7 @@ const typed = (
   way: Way,
   last: Option.Option<Searched>,
 ): Result.Result<Searched, string> => {
-  const noPrevious = Result.fail('E35: No previous regular expression')
+  const noPrevious = Result.fail(Pattern.noPrevious)
   if (text === '') {
     return Option.match(last, {
       onNone: () => noPrevious,
@@ -264,7 +257,7 @@ export const sought = (
       }),
     Next: ({ reverse }): Sought =>
       Option.match(memory.search, {
-        onNone: () => failed(memory, 'E35: No previous regular expression'),
+        onNone: () => failed(memory, Pattern.noPrevious),
         onSome: last =>
           searched(
             buffer,

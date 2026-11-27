@@ -373,21 +373,31 @@ const unshownAt = (time: number): number =>
     time < shownAt ? pixels + distance : pixels,
   )
 
+const shiftToShow = (
+  span: Readonly<{ top: number; bottom: number }>,
+  view: Readonly<{ top: number; bottom: number }>,
+  align: Align,
+): number => {
+  const below = span.bottom - view.bottom
+  const above = view.top - span.top
+  return align === 'Top'
+    ? span.top - view.top
+    : below > 0
+      ? below
+      : above > 0
+        ? -above
+        : 0
+}
+
 const bringOnScreen = (
   sheet: Sheet,
   span: Readonly<{ top: number; bottom: number }>,
-  align: Align = 'Nearest',
 ): number => {
-  const below = span.bottom - sheet.viewBottom
-  const above = sheet.viewTop - span.top
-  const delta =
-    align === 'Top'
-      ? span.top - sheet.viewTop
-      : below > 0
-        ? below
-        : above > 0
-          ? -above
-          : 0
+  const delta = shiftToShow(
+    span,
+    { top: sheet.viewTop, bottom: sheet.viewBottom },
+    'Nearest',
+  )
   return delta === 0
     ? 0
     : scrollSurface(sheet.surface, sheet.surface.scrollTop + delta, 'App')
@@ -1229,23 +1239,63 @@ const lineById = (
     surface.querySelector<HTMLElement>(`.line[data-line-id="${id}"]`),
   )
 
-const applyAim = (surface: HTMLElement, { place }: Aim): void =>
+type Wish = Readonly<
+  | {
+      _tag: 'Show'
+      span: Readonly<{ top: number; bottom: number }>
+      align: Align
+    }
+  | { _tag: 'ReachEnd' }
+>
+
+const wishOf = (
+  surface: HTMLElement,
+  sheet: Sheet,
+  scroll: number,
+  { place }: Aim,
+): Option.Option<Wish> =>
   Place.match(place, {
-    At: ({ anchor, align }) => {
+    At: ({ anchor, align }) =>
       Option.map(lineById(surface, anchor.lineId), line => {
         const { top } = caretBox(
           line,
           Math.min(anchor.column, lineText(line).length),
           anchor.atRowEnd,
         )
-        const sheet = sheetOf(surface)
-        bringOnScreen(sheet, { top, bottom: top + sheet.rowHeight }, align)
-      })
-    },
-    End: () => {
-      scrollSurface(surface, surface.scrollHeight, 'App')
-    },
+        const inContent = top + scroll
+        const wish: Wish = {
+          _tag: 'Show',
+          span: { top: inContent, bottom: inContent + sheet.rowHeight },
+          align,
+        }
+        return wish
+      }),
+    End: () => Option.some<Wish>({ _tag: 'ReachEnd' }),
   })
+
+const scrollAfter = (
+  sheet: Sheet,
+  mostScroll: number,
+  scroll: number,
+  wish: Wish,
+): number =>
+  wish._tag === 'ReachEnd'
+    ? mostScroll
+    : Math.min(
+        mostScroll,
+        Math.max(
+          0,
+          scroll +
+            shiftToShow(
+              wish.span,
+              {
+                top: sheet.viewTop + scroll,
+                bottom: sheet.viewBottom + scroll,
+              },
+              wish.align,
+            ),
+        ),
+      )
 
 const applyTarget = (surface: HTMLElement): boolean => {
   const written = surface.dataset['target'] ?? ''
@@ -1257,10 +1307,20 @@ const applyTarget = (surface: HTMLElement): boolean => {
   if (target.serial <= seenTarget.serial) {
     return false
   }
-  for (const aim of target.aims) {
-    if (aim.serial > seenTarget.serial) {
-      applyAim(surface, aim)
-    }
+  const sheet = sheetOf(surface)
+  const start = surface.scrollTop
+  const mostScroll = surface.scrollHeight - surface.clientHeight
+  const end = Array.reduce(
+    Array.filter(target.aims, aim => aim.serial > seenTarget.serial),
+    start,
+    (scroll, aim) =>
+      Option.match(wishOf(surface, sheet, start, aim), {
+        onNone: () => scroll,
+        onSome: wish => scrollAfter(sheet, mostScroll, scroll, wish),
+      }),
+  )
+  if (end !== start) {
+    scrollSurface(surface, end, 'App')
   }
   seenTarget.serial = target.serial
   return true

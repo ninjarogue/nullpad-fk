@@ -365,7 +365,7 @@ const withLineDrawn = (editor: Editor, line: number): Editor =>
 const withCaretDrawn = (editor: Editor): Editor =>
   withLineDrawn(editor, editor.buffer.caret.line)
 
-const mostAims = 16
+const mostAimsKept = 256
 
 const nearest: Option.Option<Align> = Option.some('Nearest')
 
@@ -384,7 +384,7 @@ const aimAt = (editor: Editor, place: Place): Editor => {
     ...editor,
     target: {
       serial,
-      aims: [...unapplied, { serial, place }].slice(-mostAims),
+      aims: [...unapplied, { serial, place }].slice(-mostAimsKept),
     },
   }
 }

@@ -1298,6 +1298,7 @@ const observe = (surface: HTMLElement): Stream.Stream<SurfaceMessage> =>
                 rows: Math.floor(
                   (sheet.viewBottom - sheet.viewTop) / sheet.rowHeight + 0.01,
                 ),
+                columns: Math.floor(surface.clientWidth / cellWidth(surface)),
               }),
             )
             draw(surface)

@@ -1053,8 +1053,8 @@ const handle = (model: Model, message: Message) =>
       }
     },
     CompletedScrollSurfaceToEnd: () => ({ model }),
-    ResizedScreen: ({ rows }) =>
-      respond(model, Editor.resized(model.editor, rows)),
+    ResizedScreen: ({ rows, columns }) =>
+      respond(model, Editor.resized(model.editor, rows, columns)),
     CompletedRevealCaret: () => ({
       model: modifyFields(model, { editor: Editor.revealed }),
     }),

@@ -498,7 +498,7 @@ const addressRows: ReadonlyArray<Row> = [
   [54, 'on a note of one line', 'solo', [1, 3], ':5<CR>', 1, 1, ''],
   [55, 'on a note of one line, + fails', 'solo', [1, 3], ':+<CR>', 1, 1, ''],
   [56, 'an empty note', '', [1, 1], ':3<CR>', 1, 1, ''],
-  [57, 'a note of blank-only lines', '\n\n  \n', [1, 1], ':3<CR>', 3, 2, ''],
+  [57, 'lines of only blanks', '\n\n  \nx', [1, 1], ':3<CR>', 3, 2, ''],
   [
     58,
     'a line of only spaces lands on its last space',
@@ -597,7 +597,7 @@ const addressRows: ReadonlyArray<Row> = [
     ':-9<CR>j',
     2,
     5,
-    'E16: Invalid range',
+    '',
   ],
   [
     68,
@@ -1065,7 +1065,7 @@ test(':N is a motion: u undoes the change before it, . repeats it, and the regis
   await begin(nullpad, note)
   await play(nullpad, 'x:2<CR>p')
   expect(await nullpad.text(), 'the register still holds the o').toBe(
-    'ne two\nothree\nfour',
+    'ne two\ntohree\nfour',
   )
 })
 

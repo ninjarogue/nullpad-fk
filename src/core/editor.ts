@@ -93,7 +93,8 @@ type JumpAsking = Extract<Asking, { _tag: 'Jump' }>
 export const Serial = Schema.Int.pipe(Schema.brand('Serial'))
 export type Serial = typeof Serial.Type
 
-const Align = Schema.Literals(['Nearest', 'Top'])
+export const Align = Schema.Literals(['Nearest', 'Top'])
+export type Align = typeof Align.Type
 
 const Anchor = Schema.Struct({
   lineId: Buffer.LineId,
@@ -107,14 +108,21 @@ export const Place = Schema.TaggedUnion({
 })
 export type Place = typeof Place.Type
 
-export const Step = Schema.Struct({ serial: Serial, place: Place })
-export type Step = typeof Step.Type
+export const Aim = Schema.Struct({ serial: Serial, place: Place })
+export type Aim = typeof Aim.Type
 
 export const Target = Schema.Struct({
   serial: Serial,
-  steps: Schema.Array(Step),
+  aims: Schema.Array(Aim),
 })
 export type Target = typeof Target.Type
+
+export const Scroll = Schema.Struct({
+  top: Schema.Int,
+  atEnd: Schema.Boolean,
+  serial: Serial,
+})
+export type Scroll = typeof Scroll.Type
 
 export const Editor = Schema.Struct({
   buffer: Buffer.Buffer,
@@ -131,12 +139,11 @@ export const Editor = Schema.Struct({
   locating: Schema.Option(Locating),
   asked: Schema.Int,
   target: Target,
+  applied: Serial,
   notice: Schema.Option(Schema.String),
   asking: Schema.Option(Asking),
 })
 export type Editor = typeof Editor.Type
-
-export type Reveal = 'None' | typeof Align.Type
 
 export type Outcome = Readonly<{
   editor: Editor
@@ -208,7 +215,8 @@ export const open = (text: string, vim = false): Editor => {
     drawnRevision: 0,
     locating: Option.none(),
     asked: 0,
-    target: { serial: Serial.make(0), steps: [] },
+    target: { serial: Serial.make(0), aims: [] },
+    applied: Serial.make(0),
     notice: Option.none(),
     asking: Option.none(),
   }
@@ -265,21 +273,25 @@ export const reopen = (
     ...open(text),
     vim: vimAfterReopen(editor, landing),
   }
-  return {
-    ...opened,
-    kept: editor.kept,
-    discards: editor.discards,
-    buffer: atRest(
-      opened,
-      caretAt === 'End'
-        ? Buffer.moveTo(opened.buffer, Buffer.documentEnd(opened.buffer))
-        : opened.buffer,
-    ),
-    screenRows: editor.screenRows,
-    drawnRevision: editor.drawnRevision + 1,
-    asked: editor.asked,
-    target: { serial: editor.target.serial, steps: [] },
-  }
+  return aimAtCaret(
+    withCaretDrawn({
+      ...opened,
+      kept: editor.kept,
+      discards: editor.discards,
+      buffer: atRest(
+        opened,
+        caretAt === 'End'
+          ? Buffer.moveTo(opened.buffer, Buffer.documentEnd(opened.buffer))
+          : opened.buffer,
+      ),
+      screenRows: editor.screenRows,
+      drawnRevision: editor.drawnRevision + 1,
+      asked: editor.asked,
+      target: editor.target,
+      applied: editor.target.serial,
+    }),
+    'Nearest',
+  )
 }
 
 export const sameText = (a: Editor, b: Editor): boolean =>
@@ -353,24 +365,32 @@ const withLineDrawn = (editor: Editor, line: number): Editor =>
 const withCaretDrawn = (editor: Editor): Editor =>
   withLineDrawn(editor, editor.buffer.caret.line)
 
-const mostSteps = 16
+const mostAims = 16
 
-const aim = (editor: Editor, place: Place): Editor => {
+const nearest: Option.Option<Align> = Option.some('Nearest')
+
+const replacesEarlierAims = (place: Place): boolean =>
+  Place.match(place, {
+    At: ({ align }) => align === 'Top',
+    End: () => true,
+  })
+
+const aimAt = (editor: Editor, place: Place): Editor => {
   const serial = Serial.make(editor.target.serial + 1)
-  const isTop = place._tag === 'At' && place.align === 'Top'
+  const unapplied = replacesEarlierAims(place)
+    ? []
+    : Array.filter(editor.target.aims, aim => aim.serial > editor.applied)
   return {
     ...editor,
     target: {
       serial,
-      steps: [...(isTop ? [] : editor.target.steps), { serial, place }].slice(
-        -mostSteps,
-      ),
+      aims: [...unapplied, { serial, place }].slice(-mostAims),
     },
   }
 }
 
-const aimed = (editor: Editor, align: typeof Align.Type): Editor =>
-  aim(
+const aimAtCaret = (editor: Editor, align: Align): Editor =>
+  aimAt(
     editor,
     Place.cases.At.make({
       anchor: {
@@ -382,10 +402,16 @@ const aimed = (editor: Editor, align: typeof Align.Type): Editor =>
     }),
   )
 
-const done = (unrested: Editor, reveal: Reveal = 'Nearest'): Outcome => {
+const done = (
+  unrested: Editor,
+  reveal: Option.Option<Align> = nearest,
+): Outcome => {
   const editor = rested(unrested)
   return {
-    editor: reveal === 'None' ? editor : aimed(withCaretDrawn(editor), reveal),
+    editor: Option.match(reveal, {
+      onNone: () => editor,
+      onSome: align => aimAtCaret(withCaretDrawn(editor), align),
+    }),
     need: Option.none(),
     writeClipboard: Option.none(),
     save: false,
@@ -415,7 +441,7 @@ type Plan =
 
 const now = (
   editor: Editor,
-  reveal: Reveal = 'Nearest',
+  reveal: Option.Option<Align> = nearest,
   began: Option.Option<Buffer.Position> = Option.none(),
 ): Settled => ({
   _tag: 'Done',
@@ -526,7 +552,7 @@ const landingPosition = (
   })
 
 const landMove =
-  (editor: Editor, reveal: Reveal = 'Nearest') =>
+  (editor: Editor, reveal: Option.Option<Align> = nearest) =>
   ({ landing }: Answer): Outcome =>
     done(
       Option.match(landingPosition(editor, landing), {
@@ -663,13 +689,13 @@ const page =
         atRowEnd: editor.caretAtRowEnd,
         direction,
       }),
-      landMove(editor, 'Top'),
+      landMove(editor, Option.some('Top')),
     )
 
 const plainKeys: Readonly<
   Record<NamedKey, (editor: Editor, modifiers: Modifiers) => Plan>
 > = {
-  Escape: editor => now(editor, 'None'),
+  Escape: editor => now(editor, Option.none()),
   Enter: editor => now(breakLine(editor)),
   Tab: editor => now(typeText('  ')(editor)),
   Backspace: editor =>
@@ -718,7 +744,7 @@ const travelPlan = (
       ? History.travel(editor.history, editor.buffer, way, count)
       : Option.none()
   return Option.match(last, {
-    onNone: () => now(editor, 'None'),
+    onNone: () => now(editor, Option.none()),
     onSome: stepped => ({
       ...now(
         changeDrawn(
@@ -744,7 +770,7 @@ const chordPlan = (editor: Editor, char: string, shift: boolean): Plan => {
   const chord = Option.isNone(editor.vim)
     ? plainChords[shift ? char.toUpperCase() : char.toLowerCase()]
     : undefined
-  return chord === undefined ? now(editor, 'None') : chord(editor)
+  return chord === undefined ? now(editor, Option.none()) : chord(editor)
 }
 
 const plainPlan = (editor: Editor, input: Input): Plan =>
@@ -797,7 +823,7 @@ const vimDone = (
       },
       moved ? { buffer: step.buffer, caretAtRowEnd: false } : {},
     ),
-    moved ? 'Nearest' : 'None',
+    moved ? nearest : Option.none(),
     step.began,
   )
   return {
@@ -837,7 +863,7 @@ const vimPlan = (
     Replay: ({ steps }): Plan => ({
       _tag: 'Done',
       outcome: replay(
-        done(counted, 'None'),
+        done(counted, Option.none()),
         Array.map(steps, again => Queued.cases.Again.make({ step: again })),
       ),
       began: Option.none(),
@@ -867,7 +893,7 @@ const vimPlan = (
             Asking.cases.Prompt.make({ prompt: Prompt.open, resume }),
           ),
         },
-        'None',
+        Option.none(),
       ),
     OpenJump: ({ operator, register }): Plan =>
       ask(
@@ -886,7 +912,7 @@ const vimPlan = (
                 ),
               ),
             },
-            'None',
+            Option.none(),
           ),
       ),
     Done: () => vimDone(editor, step, swallowed),
@@ -939,7 +965,7 @@ const jumpPlan = (editor: Editor, asking: JumpAsking, input: Input): Plan => {
             Asking.cases.Jump.make({ ...asking, jump: act.jump }),
           ),
         },
-        'None',
+        Option.none(),
       )
     : act._tag === 'End'
       ? now(
@@ -948,7 +974,7 @@ const jumpPlan = (editor: Editor, asking: JumpAsking, input: Input): Plan => {
             asking: Option.none(),
             vim: Option.map(editor.vim, Vim.idle),
           },
-          'None',
+          Option.none(),
         )
       : Option.match(
           Option.flatMap(editor.vim, vim =>
@@ -965,7 +991,7 @@ const jumpPlan = (editor: Editor, asking: JumpAsking, input: Input): Plan => {
                   asking: Option.none(),
                   vim: Option.map(editor.vim, Vim.idle),
                 },
-                'None',
+                Option.none(),
               ),
             onSome: ({ vim, step }) =>
               vimPlan(
@@ -1001,7 +1027,7 @@ const promptPlan = (
           ...editor,
           asking: Option.some(Asking.cases.Prompt.make({ ...asking, prompt })),
         },
-        'None',
+        Option.none(),
       ),
     Close: () =>
       now(
@@ -1011,7 +1037,7 @@ const promptPlan = (
           kept: remembering(),
           vim: Option.map(editor.vim, Vim.idle),
         },
-        'None',
+        Option.none(),
       ),
     Run: () => {
       const kept = remembering()
@@ -1031,7 +1057,10 @@ const promptPlan = (
         ),
         {
           onNone: () =>
-            now({ ...closed, vim: Option.map(editor.vim, Vim.idle) }, 'None'),
+            now(
+              { ...closed, vim: Option.map(editor.vim, Vim.idle) },
+              Option.none(),
+            ),
           onSome: ({ vim, step }) => vimPlan(closed, vim, step, 0),
         },
       )
@@ -1061,7 +1090,7 @@ const inputPlan = (editor: Editor, input: Input): Plan =>
 
 const againPlan = (editor: Editor, step: Vim.Replayed): Plan =>
   Option.match(editor.vim, {
-    onNone: () => now(editor, 'None'),
+    onNone: () => now(editor, Option.none()),
     onSome: vim =>
       vimPlan(editor, vim, Vim.again(vim, editor.buffer, editor.kept, step), 0),
   })
@@ -1248,7 +1277,7 @@ const run = (editor: Editor, queued: Queued): Outcome => {
     plan.query._tag === 'Point' ||
     drawn === editor
       ? drawn
-      : aimed(drawn, 'Nearest')
+      : aimAtCaret(drawn, 'Nearest')
   return {
     editor: {
       ...shown,
@@ -1281,7 +1310,7 @@ const enqueue = (editor: Editor, queued: Queued): Outcome =>
             queued: [...locating.queued, queued],
           }),
         },
-        'None',
+        Option.none(),
       ),
   })
 
@@ -1356,7 +1385,7 @@ export const overwrite = (
       changeDrawn(editor, {
         buffer: Buffer.overwrite(editor.buffer, at, text),
       }),
-      'None',
+      Option.none(),
     ),
     { ...alone, began: Option.none() },
   )
@@ -1367,10 +1396,10 @@ const answered = (
   land: (plan: Plan) => Option.Option<Outcome>,
 ): Outcome =>
   Option.match(editor.locating, {
-    onNone: () => done(editor, 'None'),
+    onNone: () => done(editor, Option.none()),
     onSome: ({ ticket: out, cause, queued }) => {
       if (out !== ticket) {
-        return done(editor, 'None')
+        return done(editor, Option.none())
       }
       const asked = { ...editor, locating: Option.none() }
       const landed = Option.getOrElse(land(planOf(asked, cause)), () =>
@@ -1416,27 +1445,15 @@ const undrawsAwaitedLine = (editor: Editor, moved: Editor): boolean =>
     line => isDrawn(editor, line) && !isDrawn(moved, line),
   )
 
-export type Scrolled = Readonly<{ top: number; atEnd: boolean; serial: Serial }>
-
-const withoutStepsThrough = (editor: Editor, serial: Serial): Editor =>
-  editor.target.steps.some(step => step.serial <= serial)
-    ? {
-        ...editor,
-        target: {
-          ...editor.target,
-          steps: editor.target.steps.filter(step => step.serial > serial),
-        },
-      }
-    : editor
-
 export const scrolled = (
   editor: Editor,
-  { top, atEnd, serial }: Scrolled,
+  { top, atEnd, serial }: Scroll,
 ): Editor => {
   if (serial < editor.target.serial) {
     return editor
   }
-  const seen = withoutStepsThrough(editor, serial)
+  const seen =
+    serial === editor.applied ? editor : { ...editor, applied: serial }
   if (top === editor.topLine) {
     return seen
   }
@@ -1444,14 +1461,14 @@ export const scrolled = (
   return undrawsAwaitedLine(editor, moved)
     ? seen
     : atEnd
-      ? aim(moved, Place.cases.End.make({}))
+      ? aimAt(moved, Place.cases.End.make({}))
       : moved
 }
 
 export const resized = (editor: Editor, rows: number): Outcome => {
   const size = Math.max(1, Math.floor(rows))
   return {
-    editor: aimed(
+    editor: aimAtCaret(
       size === editor.screenRows
         ? editor
         : changeDrawn(editor, { screenRows: size }),

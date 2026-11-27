@@ -214,15 +214,15 @@ const listen = (
         Effect.sync(() => {
           const controller = new AbortController()
           const { signal } = controller
-          const offerInput = (input: Input): boolean =>
-            Queue.offerUnsafe(queue, Message.ReceivedInput({ input }))
+          const offerInput = (input: Input, at: number): boolean =>
+            Queue.offerUnsafe(queue, Message.ReceivedInput({ input, at }))
           const keepFocus = () => port.focus({ preventScroll: true })
           /** Giving the port its EditContext again makes Chrome end the composition then and there, with a compositionend. */
           const commitComposition = () => {
             Reflect.set(port, 'editContext', context)
           }
           const state: {
-            lastKey: Option.Option<string>
+            lastKey: Option.Option<Readonly<{ key: string; at: number }>>
             isControlVDown: boolean
             selection: Span
             composition: Option.Option<Span>
@@ -244,10 +244,10 @@ const listen = (
             context.updateSelection(caret, caret)
             state.selection = { start: caret, end: caret }
           }
-          const endComposition = (text: string) => {
+          const endComposition = (text: string, event: Event) => {
             state.composition = Option.none()
             holdSurrounding()
-            offerInput(Input.cases.Commit.make({ text }))
+            offerInput(Input.cases.Commit.make({ text }), event.timeStamp)
           }
           const surroundingChanges = new MutationObserver(holdSurrounding)
           surroundingChanges.observe(port, {
@@ -268,13 +268,16 @@ const listen = (
           port.addEventListener(
             'keydown',
             event => {
-              state.lastKey = Option.some(event.key)
+              state.lastKey = Option.some({
+                key: event.key,
+                at: event.timeStamp,
+              })
               state.isControlVDown = isControlAlone(event, 'v')
               Option.map(
                 fromKeyDown(event, port.dataset['chords'] ?? ''),
                 input => {
                   event.preventDefault()
-                  offerInput(input)
+                  offerInput(input, event.timeStamp)
                 },
               )
             },
@@ -290,32 +293,42 @@ const listen = (
               }
               Option.match(state.composition, {
                 onNone: () => {
-                  Option.map(
-                    eraseOutside(state.selection, replaced),
-                    offerInput,
+                  const at = Option.match(state.lastKey, {
+                    onNone: () => event.timeStamp,
+                    onSome: pressed => pressed.at,
+                  })
+                  Option.map(eraseOutside(state.selection, replaced), input =>
+                    offerInput(input, at),
                   )
                   if (text !== '') {
                     offerInput(
                       Input.cases.Text.make({
                         text,
-                        byKey: Option.contains(state.lastKey, text),
+                        byKey: Option.exists(
+                          state.lastKey,
+                          pressed => pressed.key === text,
+                        ),
                       }),
+                      at,
                     )
                   }
                   state.lastKey = Option.none()
                 },
                 onSome: composed => {
-                  Option.map(eraseOutside(composed, replaced), offerInput)
+                  Option.map(eraseOutside(composed, replaced), input =>
+                    offerInput(input, event.timeStamp),
+                  )
                   const { start, end } = composedAfter(composed, replaced, text)
                   /** Chrome's EditContext holds no empty composition: an empty one ends it, and an empty commit ends it with no compositionend. */
                   if (start === end) {
-                    endComposition('')
+                    endComposition('', event)
                   } else {
                     state.composition = Option.some({ start, end })
                     offerInput(
                       Input.cases.Preedit.make({
                         text: context.text.slice(start, end),
                       }),
+                      event.timeStamp,
                     )
                   }
                 },
@@ -341,6 +354,7 @@ const listen = (
               if (Option.isSome(state.composition)) {
                 endComposition(
                   event instanceof CompositionEvent ? event.data : '',
+                  event,
                 )
               }
             },
@@ -376,6 +390,7 @@ const listen = (
                   text: event.clipboardData?.getData('text/plain') ?? '',
                   byKey: state.isControlVDown,
                 }),
+                event.timeStamp,
               )
               state.isControlVDown = false
             },

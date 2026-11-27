@@ -3,6 +3,8 @@ import { Mount, Render } from 'foldkit'
 import { type Html, type HtmlBuilder, createKeyedLazy } from 'foldkit/html'
 
 import {
+  type Aim,
+  type Align,
   type Answer,
   type Frame,
   type Landing,
@@ -13,7 +15,6 @@ import {
   Query,
   type Selection,
   Serial,
-  type Step,
   Target,
   graphemeReach,
 } from './core/editor'
@@ -372,14 +373,30 @@ const unshownAt = (time: number): number =>
     time < shownAt ? pixels + distance : pixels,
   )
 
-const bringOnScreen = (sheet: Sheet, y: number): number => {
-  const below = y - (sheet.viewBottom - 1)
-  const above = sheet.viewTop + 1 - y
-  const delta = below > 0 ? below : above > 0 ? -above : 0
+const bringOnScreen = (
+  sheet: Sheet,
+  span: Readonly<{ top: number; bottom: number }>,
+  align: Align = 'Nearest',
+): number => {
+  const below = span.bottom - sheet.viewBottom
+  const above = sheet.viewTop - span.top
+  const delta =
+    align === 'Top'
+      ? span.top - sheet.viewTop
+      : below > 0
+        ? below
+        : above > 0
+          ? -above
+          : 0
   return delta === 0
-    ? y
-    : y - scrollSurface(sheet.surface, sheet.surface.scrollTop + delta, 'App')
+    ? 0
+    : scrollSurface(sheet.surface, sheet.surface.scrollTop + delta, 'App')
 }
+
+const aroundPoint = (y: number): Readonly<{ top: number; bottom: number }> => ({
+  top: y - 1,
+  bottom: y + 1,
+})
 
 const stay = (aimFromTextLeft: number): Answer => ({
   landing: { _tag: 'Stay' },
@@ -436,7 +453,7 @@ const verticalAnswer = (
   ) {
     return { landing: { _tag: 'TextEnd' }, aimFromTextLeft: aim }
   }
-  const y = bringOnScreen(sheet, target)
+  const y = target - bringOnScreen(sheet, aroundPoint(target))
   return Option.match(pointAt(start + aim, y), {
     onNone: () => stay(aim),
     onSome: found => ({
@@ -621,7 +638,8 @@ const pointAnswer = (
   yInLine: number,
 ): Answer => {
   const box = line.getBoundingClientRect()
-  const row = bringOnScreen(sheet, box.top + Math.min(yInLine, box.height - 1))
+  const pointY = box.top + Math.min(yInLine, box.height - 1)
+  const row = pointY - bringOnScreen(sheet, aroundPoint(pointY))
   const edges = textEdges(line)
   const clampedX = Math.min(edges.right - 0.5, Math.max(edges.left, x))
   return Option.match(pointAt(clampedX, row), {
@@ -668,7 +686,9 @@ const screenAnswer = (sheet: Sheet, from: Position): Answer =>
     onSome: line => {
       bringOnScreen(
         sheet,
-        caretBox(line, from.column, false).top + sheet.rowHeight / 2,
+        aroundPoint(
+          caretBox(line, from.column, false).top + sheet.rowHeight / 2,
+        ),
       )
       const top = rowEnds(sheet, sheet.viewTop + sheet.rowHeight / 2)
       const bottom = rowEnds(sheet, sheet.viewBottom - sheet.rowHeight / 2)
@@ -1197,16 +1217,7 @@ const redrawSelectionAfterScroll = (surface: HTMLElement): void => {
   }
 }
 
-const aiming = {
-  applied: Serial.make(0),
-  handled: '',
-  isUnreported: false,
-  askedAt: 0,
-}
-
-export const markAimed: Effect.Effect<void> = Effect.sync(() => {
-  aiming.askedAt = performance.now()
-})
+const seenTarget = { serial: Serial.make(0), written: '' }
 
 const decodeTarget = Schema.decodeUnknownSync(Schema.fromJsonString(Target))
 
@@ -1218,22 +1229,7 @@ const lineById = (
     surface.querySelector<HTMLElement>(`.line[data-line-id="${id}"]`),
   )
 
-const bringRowOnScreen = (
-  sheet: Sheet,
-  top: number,
-  align: 'Nearest' | 'Top',
-): void => {
-  const bottom = top + sheet.rowHeight
-  const delta =
-    align === 'Top' || top < sheet.viewTop
-      ? top - sheet.viewTop
-      : Math.max(0, bottom - sheet.viewBottom)
-  if (delta !== 0) {
-    scrollSurface(sheet.surface, sheet.surface.scrollTop + delta, 'App')
-  }
-}
-
-const applyStep = (surface: HTMLElement, { place }: Step): void =>
+const applyAim = (surface: HTMLElement, { place }: Aim): void =>
   Place.match(place, {
     At: ({ anchor, align }) => {
       Option.map(lineById(surface, anchor.lineId), line => {
@@ -1242,7 +1238,8 @@ const applyStep = (surface: HTMLElement, { place }: Step): void =>
           Math.min(anchor.column, lineText(line).length),
           anchor.atRowEnd,
         )
-        bringRowOnScreen(sheetOf(surface), top, align)
+        const sheet = sheetOf(surface)
+        bringOnScreen(sheet, { top, bottom: top + sheet.rowHeight }, align)
       })
     },
     End: () => {
@@ -1250,23 +1247,23 @@ const applyStep = (surface: HTMLElement, { place }: Step): void =>
     },
   })
 
-const applyTarget = (surface: HTMLElement): void => {
+const applyTarget = (surface: HTMLElement): boolean => {
   const written = surface.dataset['target'] ?? ''
-  if (written === aiming.handled) {
-    return
+  if (written === seenTarget.written) {
+    return false
   }
-  aiming.handled = written
+  seenTarget.written = written
   const target = decodeTarget(written)
-  if (target.serial <= aiming.applied) {
-    return
+  if (target.serial <= seenTarget.serial) {
+    return false
   }
-  for (const step of target.steps) {
-    if (step.serial > aiming.applied) {
-      applyStep(surface, step)
+  for (const aim of target.aims) {
+    if (aim.serial > seenTarget.serial) {
+      applyAim(surface, aim)
     }
   }
-  aiming.applied = target.serial
-  aiming.isUnreported = true
+  seenTarget.serial = target.serial
+  return true
 }
 
 const topLine = (surface: HTMLElement, sheet: Sheet): number => {
@@ -1355,15 +1352,19 @@ const observe = (surface: HTMLElement): Stream.Stream<SurfaceMessage> =>
           const resizes = new ResizeObserver(measure)
           resizes.observe(surface)
           const wheel = { pending: 0, turnedAt: 0 }
-          const dropTurnsBeforeReveal = () => {
-            if (wheel.turnedAt < aiming.askedAt) {
+          const dropTurnsBeforeAim = () => {
+            if (wheel.turnedAt <= Number(surface.dataset['aimedAt'])) {
               wheel.pending = 0
             }
           }
           const report = (top: number, atEnd: boolean) =>
             Queue.offerUnsafe(
               queue,
-              Message.ScrolledSurface({ top, atEnd, serial: aiming.applied }),
+              Message.ScrolledSurface({
+                top,
+                atEnd,
+                serial: seenTarget.serial,
+              }),
             )
           const thumb = { isHeld: false, isAtEnd: false }
           const reportTop = () => {
@@ -1390,13 +1391,14 @@ const observe = (surface: HTMLElement): Stream.Stream<SurfaceMessage> =>
           /**
            * Chrome scrolls a wheel turn on its compositor, ahead of the drawn lines, and paints blank screen until they arrive;
            * scrolled here, every painted frame shows drawn lines. Chrome hands over a wheel turn at the next frame, after keys
-           * pressed later than it, so a turn made before an input last asked for the caret on screen is dropped: that input's
-           * reveal is the later scroll.
+           * pressed later than it, so a turn made before the key that last aimed is dropped: that key's aim is the later scroll.
            */
-          const scrollPending = (whenUndrawn: 'AskCore' | 'Drop') => {
-            dropTurnsBeforeReveal()
+          const scrollPending = (
+            whenUndrawn: 'AskCore' | 'Drop',
+          ): 'Reported' | 'Silent' => {
+            dropTurnsBeforeAim()
             if (wheel.pending === 0) {
-              return
+              return 'Silent'
             }
             const before = surface.scrollTop
             const wanted = Math.min(
@@ -1409,10 +1411,12 @@ const observe = (surface: HTMLElement): Stream.Stream<SurfaceMessage> =>
               wanted <= Math.max(drawn.max, before)
             if (isDrawn) {
               wheel.pending = 0
-              if (wanted !== before) {
-                scrollSurface(surface, wanted, 'Person')
-                reportTop()
+              if (wanted === before) {
+                return 'Silent'
               }
+              scrollSurface(surface, wanted, 'Person')
+              reportTop()
+              return 'Reported'
             } else if (whenUndrawn === 'AskCore') {
               const sheet = sheetOf(surface)
               const shift = wanted - before
@@ -1424,16 +1428,16 @@ const observe = (surface: HTMLElement): Stream.Stream<SurfaceMessage> =>
                 }),
                 false,
               )
-            } else {
-              wheel.pending = 0
+              return 'Reported'
             }
+            wheel.pending = 0
+            return 'Silent'
           }
           const patched = () => {
-            applyTarget(surface)
+            const isAimed = applyTarget(surface)
             draw(surface)
-            scrollPending('Drop')
-            if (aiming.isUnreported) {
-              aiming.isUnreported = false
+            const reported = scrollPending(isAimed ? 'AskCore' : 'Drop')
+            if (isAimed && reported === 'Silent') {
               reportTop()
             }
           }
@@ -1467,7 +1471,7 @@ const observe = (surface: HTMLElement): Stream.Stream<SurfaceMessage> =>
                 return
               }
               event.preventDefault()
-              dropTurnsBeforeReveal()
+              dropTurnsBeforeAim()
               wheel.pending += wheelPixels(surface, event)
               wheel.turnedAt = event.timeStamp
               scrollPending('AskCore')
@@ -1495,6 +1499,7 @@ const observe = (surface: HTMLElement): Stream.Stream<SurfaceMessage> =>
                 Message.ClickedText({
                   x: event.clientX,
                   ...lineAt(sheet, y - unshownAt(event.timeStamp)),
+                  at: event.timeStamp,
                 }),
               )
             },
@@ -1578,6 +1583,7 @@ const spacer = (lines: number, h: HtmlBuilder<Message>): Html =>
 export const surface = (
   frame: Frame,
   keyboard: Keyboard,
+  aimedAt: number,
   h: HtmlBuilder<Message>,
 ): Html =>
   h.div(
@@ -1596,6 +1602,7 @@ export const surface = (
       h.DataAttribute('caret-end', String(frame.caret.atRowEnd)),
       h.DataAttribute('caret-shape', frame.caret.shape),
       h.DataAttribute('target', JSON.stringify(frame.target)),
+      h.DataAttribute('aimed-at', String(aimedAt)),
       h.DataAttribute('last-line', String(frame.status.lineCount - 1)),
       ...Option.match(frame.jump, {
         onNone: () => [],

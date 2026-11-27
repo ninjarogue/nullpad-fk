@@ -31,7 +31,7 @@ import {
 import { Message } from './message'
 import { readBounds, reading, reveal, scrollReading } from './reading'
 import * as Storage from './storage'
-import { locate, markAimed, statusLine, surface } from './surface'
+import { locate, statusLine, surface } from './surface'
 
 export { Message }
 
@@ -117,6 +117,8 @@ export const Model = Schema.Struct({
   created: Schema.Int,
   now: Schema.Finite,
   persistence: Schema.Literals(['Unrequested', 'Requested']),
+  inputAt: Schema.Finite,
+  aimedAt: Schema.Finite,
   pane: Pane,
 })
 export type Model = typeof Model.Type
@@ -185,11 +187,6 @@ const ask = (need: Editor.Need) =>
       Locate({ ticket, query, revision }),
     ReadClipboard: ({ ticket }) => ReadClipboard({ ticket }),
   })
-
-const MarkAimed = Command.define('MarkAimed', {
-  messages: [Message.CompletedMarkAimed],
-  execute: markAimed.pipe(Effect.as(Message.CompletedMarkAimed())),
-})
 
 const autosaveDelay = '800 millis'
 
@@ -548,6 +545,10 @@ const adopt = (model: Model, outcome: Editor.Outcome): UpdateReturn => {
     model: modifyFields(model, {
       editor: () => outcome.editor,
       edits: () => edits,
+      aimedAt: aimedAt =>
+        outcome.editor.target.serial === model.editor.target.serial
+          ? aimedAt
+          : model.inputAt,
     }),
     commands: [
       ...Option.match(outcome.writeClipboard, {
@@ -558,9 +559,6 @@ const adopt = (model: Model, outcome: Editor.Outcome): UpdateReturn => {
         onNone: () => [],
         onSome: need => [ask(need)],
       }),
-      ...(outcome.editor.target.serial === model.editor.target.serial
-        ? []
-        : [MarkAimed()]),
       ...(changed ? [WaitBeforeSave({ edits })] : []),
     ],
   }
@@ -990,6 +988,8 @@ export const init: Runtime.ApplicationInit<
     created: 1,
     now,
     persistence: 'Unrequested',
+    inputAt: 0,
+    aimedAt: 0,
     pane,
   }
   const opened = Option.match(Notes.newest(notes), {
@@ -1018,6 +1018,11 @@ const withoutNotice = (model: Model, message: Message): Model =>
       })
     : model
 
+const heardInput = (model: Model, message: Message): Model =>
+  message._tag === 'ReceivedInput' || message._tag === 'ClickedText'
+    ? modifyFields(model, { inputAt: () => message.at })
+    : model
+
 const handle = (model: Model, message: Message) =>
   Message.match<UpdateReturn>(message, {
     ReceivedInput: ({ input }) => receiveInput(model, input),
@@ -1031,10 +1036,9 @@ const handle = (model: Model, message: Message) =>
     FailedWriteClipboard: () => ({
       model: modifyFields(model, { editor: Editor.clipboardBlocked }),
     }),
-    CompletedMarkAimed: () => ({ model }),
-    ScrolledSurface: ({ top, atEnd, serial }) => ({
+    ScrolledSurface: scroll => ({
       model: modifyFields(model, {
-        editor: editor => Editor.scrolled(editor, { top, atEnd, serial }),
+        editor: editor => Editor.scrolled(editor, scroll),
       }),
     }),
     ResizedScreen: ({ rows }) =>
@@ -1126,10 +1130,10 @@ const handle = (model: Model, message: Message) =>
   })
 
 export const update = (model: Model, message: Message): UpdateReturn => {
-  const next = Update.combine(withoutNotice(model, message), [
-    stepModel => handle(stepModel, message),
-    finishOpening,
-  ])
+  const next = Update.combine(
+    heardInput(withoutNotice(model, message), message),
+    [stepModel => handle(stepModel, message), finishOpening],
+  )
   const isOn = Editor.isVimOn(next.model.editor)
   return Editor.isVimOn(model.editor) === isOn
     ? next
@@ -1272,6 +1276,7 @@ const screenView = (
     Option.isSome(model.finder) || isPrompting(frame)
       ? 'Blurred'
       : model.keyboard,
+    model.aimedAt,
     h,
   )
   return h.div(

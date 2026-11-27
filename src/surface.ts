@@ -786,24 +786,101 @@ const shiftOf = (surface: HTMLElement): Shift => {
   }
 }
 
+const lineBreakBoxOf = (surface: HTMLElement, element: HTMLElement): Box =>
+  lineBreakBox(
+    element,
+    lineText(element),
+    textEdges(element),
+    sheetOf(surface).rowHeight,
+    cellWidth(surface),
+    viewRight(surface),
+  )
+
 const caretPlace = (surface: HTMLElement): Option.Option<Box> =>
   Option.map(
     lineElement(surface, Number(surface.dataset['caretLine'])),
     element => {
       const column = Number(surface.dataset['caretColumn'])
-      const text = lineText(element)
-      return surface.dataset['selected'] !== '' && column >= text.length
-        ? lineBreakBox(
-            element,
-            text,
-            textEdges(element),
-            sheetOf(surface).rowHeight,
-            cellWidth(surface),
-            viewRight(surface),
-          )
+      return surface.dataset['selected'] !== '' &&
+        column >= lineText(element).length
+        ? lineBreakBoxOf(surface, element)
         : caretBox(element, column, surface.dataset['caretEnd'] === 'true')
     },
   )
+
+const cellBox = (
+  surface: HTMLElement,
+  element: HTMLElement,
+  column: number,
+): Box => {
+  const text = lineText(element)
+  if (column >= text.length) {
+    return lineBreakBoxOf(surface, element)
+  }
+  const box = caretBox(element, column, false)
+  return text[column] === '\t' ? { ...box, width: cellWidth(surface) } : box
+}
+
+type LabelPlace = Readonly<{ element: HTMLElement; box: Box }>
+
+const labelPlaces = (surface: HTMLElement): ReadonlyArray<LabelPlace> =>
+  Array.getSomes(
+    Array.map(
+      Array.fromIterable(
+        surface.querySelectorAll<HTMLElement>('#jump > [data-label]'),
+      ),
+      element =>
+        Option.map(
+          lineElement(surface, Number(element.dataset['line'])),
+          line => ({
+            element,
+            box: cellBox(surface, line, Number(element.dataset['from'])),
+          }),
+        ),
+    ),
+  )
+
+const placeLabels = (places: ReadonlyArray<LabelPlace>, shift: Shift): void => {
+  for (const { element, box } of places) {
+    element.style.left = `${box.left + shift.left}px`
+    element.style.top = `${box.top + shift.top}px`
+    element.style.width = `${box.width}px`
+  }
+}
+
+const jumpHighlight = new Highlight()
+
+CSS.highlights.set('jump-match', jumpHighlight)
+
+const markMatches = (surface: HTMLElement): void => {
+  const written = surface.dataset['jumpMatches']
+  const highlight = jumpHighlight
+  highlight.clear()
+  if (written === undefined || written === '') {
+    return
+  }
+  const lines = new Map<number, HTMLElement>()
+  for (const line of surface.querySelectorAll<HTMLElement>('.line')) {
+    lines.set(indexOf(line), line)
+  }
+  for (const match of written.split(';')) {
+    const [index, from, to] = match.split(',').map(Number)
+    const line = lines.get(index ?? -1)
+    if (line === undefined || from === undefined || to === undefined) {
+      continue
+    }
+    const start = domPoint(line, from, 'After')
+    const stop = domPoint(line, to)
+    highlight.add(
+      new StaticRange({
+        startContainer: start.node,
+        startOffset: start.offset,
+        endContainer: stop.node,
+        endOffset: stop.offset,
+      }),
+    )
+  }
+}
 
 const placeCaret = (
   surface: HTMLElement,
@@ -1097,8 +1174,11 @@ const placeSelection = (
 const draw = (surface: HTMLElement): void => {
   const boxes = selectionPlaces(surface)
   const caret = caretPlace(surface)
+  const labels = labelPlaces(surface)
   const shift = shiftOf(surface)
   placeSelection(surface, boxes, shift)
+  placeLabels(labels, shift)
+  markMatches(surface)
   placeCaret(surface, caret, shift)
 }
 
@@ -1313,6 +1393,7 @@ const observe = (surface: HTMLElement): Stream.Stream<SurfaceMessage> =>
               'data-caret-end',
               'data-caret-shape',
               'data-selected',
+              'data-jump-matches',
             ],
           })
           surface.addEventListener(
@@ -1445,7 +1526,13 @@ export const surface = (
 ): Html =>
   h.div(
     [
-      h.Class(keyboard === 'Focused' ? 'surface focused' : 'surface'),
+      h.Class(
+        [
+          'surface',
+          ...(keyboard === 'Focused' ? ['focused'] : []),
+          ...(Option.isSome(frame.jump) ? ['jumping'] : []),
+        ].join(' '),
+      ),
       h.Style({ '--gutter': String(frame.gutter) }),
       h.DataAttribute('revision', String(frame.revision)),
       h.DataAttribute('caret-line', String(frame.caret.line)),
@@ -1453,6 +1540,21 @@ export const surface = (
       h.DataAttribute('caret-end', String(frame.caret.atRowEnd)),
       h.DataAttribute('caret-shape', frame.caret.shape),
       h.DataAttribute('last-line', String(frame.status.lineCount - 1)),
+      ...Option.match(frame.jump, {
+        onNone: () => [],
+        onSome: ({ matches }) => [
+          h.DataAttribute(
+            'jump-matches',
+            Array.join(
+              Array.map(
+                matches,
+                ({ line, from, to }) => `${line},${from},${to}`,
+              ),
+              ';',
+            ),
+          ),
+        ],
+      }),
       h.DataAttribute(
         'selected',
         Option.match(frame.selection, {
@@ -1490,6 +1592,28 @@ export const surface = (
           spacer(frame.undrawnBelow, h),
         ],
       ),
+      ...Option.match(frame.jump, {
+        onNone: () => [],
+        onSome: ({ labels }) => [
+          h.keyed('div')(
+            'jump',
+            [h.Id('jump'), h.AriaHidden(true)],
+            Array.map(labels, ({ letter, line, column, over }) =>
+              h.keyed('div')(
+                letter,
+                [
+                  h.DataAttribute('label', letter),
+                  h.DataAttribute('line', String(line)),
+                  h.DataAttribute('column', String(column)),
+                  h.DataAttribute('from', String(over.from)),
+                  h.DataAttribute('to', String(over.to)),
+                ],
+                [letter],
+              ),
+            ),
+          ),
+        ],
+      }),
       h.div(
         [h.Id('caret'), h.Class('cur'), h.AriaHidden(true)],
         [

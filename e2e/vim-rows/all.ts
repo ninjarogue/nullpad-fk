@@ -2,6 +2,7 @@ import { type VimDifference } from './differences.ts'
 import * as dot from './dot.ts'
 import * as registers from './registers.ts'
 import * as undo from './undo.ts'
+import * as vimCommand from './vim-command.ts'
 import * as vimFind from './vim-find.ts'
 import * as vimReplace from './vim-replace.ts'
 import * as vimSearch from './vim-search.ts'
@@ -200,6 +201,16 @@ export const oracleRows: ReadonlyArray<OracleRow> = [
     ],
     selectionUnchecked: false,
   })),
+  ...vimCommand.addressRows.map(
+    ([id, why, text, at, keys, line, column]): OracleRow => ({
+      spec: 'vim-command',
+      id: `row ${id} (${why})`,
+      text,
+      at,
+      checkpoints: [{ keys, text, cursor: { line, column }, mode: 'NORMAL' }],
+      selectionUnchecked: false,
+    }),
+  ),
   ...grouped(vimReplace.groups).map(([, row]): OracleRow => ({
     spec: 'vim-replace',
     id: `row ${row.id} (${row.why})`,

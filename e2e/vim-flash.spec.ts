@@ -255,16 +255,16 @@ test('a pattern with no match ends the jump silently and swallows that key', asy
   nullpad,
 }) => {
   await begin(nullpad, plain, [1, 2])
-  await keys(nullpad, 'sz')
+  await keys(nullpad, 'sq')
   await expectJumping(nullpad, false, 'jumping after no match')
-  await expectPending(nullpad, '', 'z was swallowed, not taken as a command')
+  await expectPending(nullpad, '', 'q was swallowed, not taken as a command')
   expect(await nullpad.status(), 'cursor after no match').toMatchObject({
     line: 1,
     column: 2,
   })
   expect(await modeOf(nullpad), 'mode after no match').toBe('NORMAL')
   expect(await nullpad.notice(), 'no notice').toBe('')
-  await keys(nullpad, 'sq')
+  await keys(nullpad, 'sw')
   expect(await nullpad.text(), 'q key did nothing').toBe(plain)
 })
 

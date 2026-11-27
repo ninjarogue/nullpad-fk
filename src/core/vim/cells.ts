@@ -76,6 +76,18 @@ export const cellAt = (line: Buffer.Line, column: number): number => {
     : Math.min(firstEdgeAfter(edges, column, 1, edges.length) - 1, last)
 }
 
+const beforeCombining = 0x300
+
+export const cellLengthAt = (line: Buffer.Line, column: number): number => {
+  const { text } = line
+  const next = column + 1 < text.length ? text.charCodeAt(column + 1) : 0
+  if (text.charCodeAt(column) < beforeCombining && next < beforeCombining) {
+    return 1
+  }
+  const cell = cellAt(line, column)
+  return Math.max(1, cellEnd(line, cell) - cellStart(line, cell))
+}
+
 const wide =
   /^(?:\p{Emoji_Presentation}|.️|[\u{1100}-\u{115F}\u{2E80}-\u{303E}\u{3041}-\u{33FF}\u{3400}-\u{4DBF}\u{4E00}-\u{9FFF}\u{A000}-\u{A4CF}\u{A960}-\u{A97F}\u{AC00}-\u{D7A3}\u{F900}-\u{FAFF}\u{FE10}-\u{FE19}\u{FE30}-\u{FE6F}\u{FF00}-\u{FF60}\u{FFE0}-\u{FFE6}\u{1B000}-\u{1B2FF}\u{20000}-\u{3FFFD}])/u
 

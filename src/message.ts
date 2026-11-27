@@ -11,7 +11,7 @@ export const Message = defineMessageUnion({
   ReceivedInput: { input: Input },
   ClickedText: { x: Schema.Finite, line: Schema.Int, yInLine: Schema.Finite },
   ScrolledSurface: { top: Schema.Int, atEnd: Schema.Boolean },
-  ResizedScreen: { rows: Schema.Int },
+  ResizedScreen: { rows: Schema.Int, columns: Schema.Int },
   CompletedLocate: { ticket: Schema.Int, answer: Answer },
   CompletedReadClipboard: {
     ticket: Schema.Int,
@@ -25,6 +25,7 @@ export const Message = defineMessageUnion({
   BlurredKeyboard: {},
   FoundBrowserUnsupported: {},
   CompletedWaitBeforeSave: { edits: Schema.Int },
+  CompletedWaitBeforeHints: { timer: Schema.Int },
   SucceededSaveNote: { note: Note },
   FailedSaveNote: {
     draft: Draft,

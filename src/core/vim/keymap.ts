@@ -79,7 +79,11 @@ export const VisualCommand = Schema.TaggedUnion({
 })
 export type VisualCommand = typeof VisualCommand.Type
 
-export type Binding<C> = Readonly<{ keys: ReadonlyArray<Key>; about: string }> &
+export type Binding<C> = Readonly<{
+  keys: ReadonlyArray<Key>
+  about: string
+  hint: string
+}> &
   (
     | Readonly<{ command: C }>
     | Readonly<{ takes: (argument: Key) => Option.Option<C> }>
@@ -88,17 +92,24 @@ export type Binding<C> = Readonly<{ keys: ReadonlyArray<Key>; about: string }> &
 export const keysOf = (notation: string): ReadonlyArray<Key> =>
   notation.match(/<[^>]+>|./gu) ?? []
 
-const bind = <C>(notation: string, command: C, about: string): Binding<C> => ({
+const bind = <C>(
+  notation: string,
+  command: C,
+  about: string,
+  hint: string = about,
+): Binding<C> => ({
   keys: keysOf(notation),
   command,
   about,
+  hint,
 })
 
-const anyKey: Key = '<Any>'
+export const anyKey: Key = '<Any>'
 
 export const longerText: Key = '<Text>'
 
-const isNamedKey = (key: Key): boolean => key.length > 1 && key.startsWith('<')
+export const isNamedKey = (key: Key): boolean =>
+  key.length > 1 && key.startsWith('<')
 
 const namedLetters: Readonly<Record<Key, string>> = {
   '<Tab>': '\t',
@@ -116,6 +127,7 @@ const takeLetter = <C>(
   keys: keysOf(notation + anyKey),
   takes: key => Option.map(letterOf(key), command),
   about,
+  hint: about,
 })
 
 const lifted = <A, B>(
@@ -126,11 +138,12 @@ const lifted = <A, B>(
 ): Binding<B> => {
   const keys = [...keysOf(prefix), ...binding.keys]
   return 'command' in binding
-    ? { keys, command: to(binding.command), about }
+    ? { keys, command: to(binding.command), about, hint: binding.hint }
     : {
         keys,
         takes: key => Option.map(binding.takes(key), to),
         about,
+        hint: binding.hint,
       }
 }
 
@@ -200,8 +213,9 @@ const operate = (
   operator: OperatorName,
   target: TargetName,
   about: string,
+  hint: string = about,
 ): Binding<Command> =>
-  bind(notation, Command.cases.Operate.make({ operator, target }), about)
+  bind(notation, Command.cases.Operate.make({ operator, target }), about, hint)
 
 const motionRows: ReadonlyArray<
   readonly [notation: string, motion: MotionName, about: string]
@@ -284,7 +298,7 @@ const operatorRows = (
   const verb = verbs[operator]
   return [
     ...Array.map(motionRows, ([notation, motion, about]) =>
-      operate(key + notation, operator, motion, `${verb} to ${about}`),
+      operate(key + notation, operator, motion, `${verb} to ${about}`, about),
     ),
     ...Array.map(seekRows, row =>
       lifted(
@@ -310,10 +324,11 @@ const operatorRows = (
       key + jumpKey,
       Command.cases.OpenJump.make({ operator: Option.some(operator) }),
       `${verb} to a match on screen`,
+      'to a match on screen',
     ),
-    operate(key + key, operator, 'Lines', `${verb} lines`),
+    operate(key + key, operator, 'Lines', `${verb} lines`, 'lines'),
     ...Array.map(objectRows, ([notation, target, about]) =>
-      operate(key + notation, operator, target, `${verb} ${about}`),
+      operate(key + notation, operator, target, `${verb} ${about}`, about),
     ),
   ]
 }
@@ -425,6 +440,7 @@ export const visual: ReadonlyArray<Binding<VisualCommand>> = [
       notation,
       VisualCommand.cases.Pick.make({ object }),
       `select ${about}`,
+      about,
     ),
   ),
   bind('o', VisualCommand.cases.Swap.make({}), 'go to the other end'),
@@ -494,7 +510,7 @@ export const visual: ReadonlyArray<Binding<VisualCommand>> = [
   bind('<C-c>', leave, 'leave'),
   ...Array.map(screenKeys, key => bind(key, leave, 'leave')),
   ...Array.map(keysWithAnArgument, key =>
-    bind(key + anyKey, VisualCommand.cases.Ignore.make({}), 'not built'),
+    bind(key + anyKey, VisualCommand.cases.Ignore.make({}), 'not built', ''),
   ),
 ]
 
@@ -545,7 +561,7 @@ const reachable = <C>(
 ): ReadonlyArray<Binding<C>> =>
   Array.filter(bindings, binding => startsWith(binding.keys, keys))
 
-const isOperatorKey = (key: Key | undefined): boolean =>
+export const isOperatorKey = (key: Key | undefined): boolean =>
   Object.values(operatorKeys).includes(key ?? '')
 
 const countSlot = (
@@ -673,14 +689,50 @@ export const awaitsArgument = <C>(
     binding => binding.keys[pending.keys.length] === anyKey,
   )
 
-export const next = <C>(
+export type Following = Readonly<{
+  key: Key
+  hint: string
+  leads: 'Nowhere' | 'Keys'
+}>
+
+export const groupHints: Readonly<Record<Key, string>> = {
+  i: 'inside',
+  a: 'around',
+}
+
+export const groupHintFallback = 'more'
+
+export const following = <C>(
   bindings: ReadonlyArray<Binding<C>>,
   pending: Pending,
-): ReadonlyArray<Readonly<{ key: Key; about: string }>> =>
-  Array.map(reachable(bindings, pending.keys), binding => ({
-    key: binding.keys[pending.keys.length] ?? '',
-    about: binding.about,
-  }))
+): ReadonlyArray<Following> => {
+  const depth = pending.keys.length
+  const rows = Array.filter(
+    reachable(bindings, pending.keys),
+    row => row.keys.length > depth,
+  )
+  return Array.map(
+    Array.filter(
+      rows,
+      (row, index) =>
+        rows.findIndex(other => other.keys[depth] === row.keys[depth]) ===
+        index,
+    ),
+    (row): Following => ({
+      key: row.keys[depth] ?? '',
+      hint: row.hint,
+      leads: Array.some(
+        rows,
+        other =>
+          other.keys[depth] === row.keys[depth] &&
+          other.keys.length > depth + 1 &&
+          other.keys[depth + 1] !== anyKey,
+      )
+        ? 'Keys'
+        : 'Nowhere',
+    }),
+  )
+}
 
 export const shown = ({
   outerCount,

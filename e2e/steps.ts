@@ -356,7 +356,7 @@ export const parseSteps = (json: string): ReadonlyArray<Step> => {
   if (value.length === 0) {
     throw new Error('steps is empty: nothing to prove')
   }
-  return value.map(parseStep)
+  return value.map((step: unknown, index) => parseStep(step, index))
 }
 
 export const statusText = ({ status }: Screen): string =>

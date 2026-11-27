@@ -23,6 +23,8 @@
   --jump-match: light-dark(#e6d58a, #5a4a14);
   --jump-label: light-dark(#c2410c, #f59e42);
   --jump-label-fg: light-dark(#fffaf0, #1a1205);
+  --hint-edge: light-dark(#b3b0a6, #4a4945);
+  --hint-key: light-dark(#86651a, #c9b37e);
   --row: 22px;
   color-scheme: light dark;
   scrollbar-color: var(--dim) var(--bg);
@@ -931,4 +933,64 @@ body:has(.finder) #caret {
 
 .stage.reading > .surface {
   visibility: hidden;
+}
+
+.which-key {
+  position: absolute;
+  right: 20px;
+  bottom: 0;
+  box-sizing: border-box;
+  max-width: calc(100% - 40px);
+  padding: 0 1ch;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--fg);
+  border: 1px solid var(--hint-edge);
+  pointer-events: none;
+}
+
+.which-key[data-side='top'] {
+  top: 0;
+  bottom: auto;
+}
+
+.which-key-heading {
+  color: var(--dim);
+}
+
+.which-key-entries {
+  display: grid;
+  grid-auto-flow: column;
+  grid-template-rows: repeat(var(--which-key-rows), var(--row));
+  column-gap: 3ch;
+}
+
+.which-key-entry {
+  display: flex;
+  gap: 1ch;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.which-key-entry .key {
+  min-width: 9ch;
+  color: var(--hint-key);
+}
+
+.which-key .more {
+  color: var(--dim);
+}
+
+@media (forced-colors: active) {
+  .which-key {
+    border-color: CanvasText;
+    background: Canvas;
+    color: CanvasText;
+  }
+
+  .which-key-entry .key,
+  .which-key-heading,
+  .which-key .more {
+    color: CanvasText;
+  }
 }

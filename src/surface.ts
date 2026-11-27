@@ -5,6 +5,7 @@ import { type Html, type HtmlBuilder, createKeyedLazy } from 'foldkit/html'
 import {
   type Answer,
   type Frame,
+  type Hints,
   type Landing,
   type Mode,
   type PaintedLine,
@@ -1168,11 +1169,28 @@ const placeSelection = (
   }
 }
 
+const whichKeySide = (
+  surface: HTMLElement,
+  caret: Option.Option<Box>,
+  shift: Shift,
+): 'top' | 'bottom' =>
+  Option.exists(
+    caret,
+    box => box.top + shift.top - shift.scrollTop > surface.clientHeight / 2,
+  )
+    ? 'top'
+    : 'bottom'
+
 const draw = (surface: HTMLElement): void => {
   const boxes = selectionPlaces(surface)
   const caret = caretPlace(surface)
   const labels = labelPlaces(surface)
   const shift = shiftOf(surface)
+  const side = whichKeySide(surface, caret, shift)
+  const panel = surface.parentElement?.querySelector<HTMLElement>('.which-key')
+  if (panel) {
+    panel.dataset['side'] = side
+  }
   placeSelection(surface, boxes, shift)
   placeLabels(labels, shift)
   markMatches(surface)
@@ -1298,6 +1316,7 @@ const observe = (surface: HTMLElement): Stream.Stream<SurfaceMessage> =>
                 rows: Math.floor(
                   (sheet.viewBottom - sheet.viewTop) / sheet.rowHeight + 0.01,
                 ),
+                columns: Math.floor(surface.clientWidth / cellWidth(surface)),
               }),
             )
             draw(surface)
@@ -1391,6 +1410,7 @@ const observe = (surface: HTMLElement): Stream.Stream<SurfaceMessage> =>
               'data-caret-shape',
               'data-selected',
               'data-jump-matches',
+              'data-hints',
             ],
           })
           surface.addEventListener(
@@ -1516,9 +1536,53 @@ const lazyLine = createKeyedLazy()
 const spacer = (lines: number, h: HtmlBuilder<Message>): Html =>
   h.div([h.Class('spacer'), h.Style({ '--lines': String(lines) })])
 
+const hintsAbout = (kind: 'Key' | 'Group' | 'Letter', about: string): string =>
+  kind === 'Group' ? `+${about}` : about
+
+export const whichKey = (hints: Hints, h: HtmlBuilder<Message>): Html =>
+  h.div(
+    [
+      h.Class('which-key'),
+      h.DataAttribute('pending', hints.pending),
+      h.DataAttribute('side', 'bottom'),
+      h.AriaHidden(true),
+      h.Style({ '--which-key-rows': String(hints.rows) }),
+    ],
+    [
+      h.div([h.Class('which-key-heading')], [hints.pending]),
+      h.div(
+        [h.Class('which-key-entries')],
+        [
+          ...Array.map(hints.entries, entry =>
+            h.div(
+              [
+                h.Class('which-key-entry'),
+                h.DataAttribute('key', entry.key),
+                ...(entry.kind === 'Group'
+                  ? [h.DataAttribute('group', '')]
+                  : []),
+              ],
+              [
+                h.span([h.Class('key')], [entry.key]),
+                h.span(
+                  [h.Class('about')],
+                  [hintsAbout(entry.kind, entry.about)],
+                ),
+              ],
+            ),
+          ),
+          ...(hints.more > 0
+            ? [h.div([h.Class('more')], [`… ${hints.more} more`])]
+            : []),
+        ],
+      ),
+    ],
+  )
+
 export const surface = (
   frame: Frame,
   keyboard: Keyboard,
+  shownHints: Option.Option<Hints>,
   h: HtmlBuilder<Message>,
 ): Html =>
   h.div(
@@ -1537,6 +1601,13 @@ export const surface = (
       h.DataAttribute('caret-end', String(frame.caret.atRowEnd)),
       h.DataAttribute('caret-shape', frame.caret.shape),
       h.DataAttribute('last-line', String(frame.status.lineCount - 1)),
+      h.DataAttribute(
+        'hints',
+        Option.match(shownHints, {
+          onNone: () => '',
+          onSome: ({ pending }) => pending,
+        }),
+      ),
       ...Option.match(frame.jump, {
         onNone: () => [],
         onSome: ({ matches }) => [

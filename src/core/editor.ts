@@ -101,6 +101,7 @@ export const Editor = Schema.Struct({
   caretAtRowEnd: Schema.Boolean,
   topLine: Schema.Int,
   screenRows: Schema.Int,
+  screenColumns: Schema.Int,
   drawnRevision: Schema.Int,
   locating: Schema.Option(Locating),
   asked: Schema.Int,
@@ -131,6 +132,8 @@ export type PaintedLine = Readonly<{
 
 export type Selection = Vim.Shown
 
+export type Hints = Vim.Hints
+
 export type PromptLine = Readonly<{
   lead: string
   before: string
@@ -152,6 +155,7 @@ export type Frame = Readonly<{
   }>
   selection: Option.Option<Selection>
   jump: Option.Option<Vim.JumpMarks>
+  hints: Option.Option<Vim.Hints>
   surrounding: Readonly<{ text: string; caret: number }>
   discards: number
   status: Readonly<{
@@ -179,6 +183,7 @@ export const open = (text: string, vim = false): Editor => {
     caretAtRowEnd: false,
     topLine: 0,
     screenRows: 24,
+    screenColumns: 80,
     drawnRevision: 0,
     locating: Option.none(),
     asked: 0,
@@ -250,6 +255,7 @@ export const reopen = (
         : opened.buffer,
     ),
     screenRows: editor.screenRows,
+    screenColumns: editor.screenColumns,
     drawnRevision: editor.drawnRevision + 1,
     asked: editor.asked,
   }
@@ -1398,13 +1404,22 @@ export const scrolled = (editor: Editor, topLine: number): Editor => {
   return undrawsAwaitedLine(editor, moved) ? editor : moved
 }
 
-export const resized = (editor: Editor, rows: number): Outcome => {
+export const resized = (
+  editor: Editor,
+  rows: number,
+  columns: number,
+): Outcome => {
   const size = Math.max(1, Math.floor(rows))
+  const width = Math.max(1, Math.floor(columns))
+  const sized =
+    size === editor.screenRows
+      ? editor
+      : changeDrawn(editor, { screenRows: size })
   return countPendingReveal({
     editor:
-      size === editor.screenRows
-        ? editor
-        : changeDrawn(editor, { screenRows: size }),
+      width === sized.screenColumns
+        ? sized
+        : { ...sized, screenColumns: width },
     need: Option.none(),
     reveal: 'Nearest',
     writeClipboard: Option.none(),
@@ -1486,6 +1501,27 @@ const jumpOf = (editor: Editor): Option.Option<JumpAsking> =>
 
 const surroundingReach = 1000
 
+export const awaitsHints = (editor: Editor): boolean =>
+  Option.isNone(editor.asking) &&
+  Option.isNone(editor.locating) &&
+  Option.exists(editor.vim, Vim.awaitsHints)
+
+export const pendingKeys = (editor: Editor): string =>
+  Option.match(editor.vim, {
+    onNone: () => '',
+    onSome: Vim.pendingKeys,
+  })
+
+const hintsOf = (editor: Editor): Option.Option<Vim.Hints> =>
+  awaitsHints(editor)
+    ? Option.flatMap(editor.vim, vim =>
+        Vim.hints(vim, editor.kept, {
+          rows: editor.screenRows,
+          columns: editor.screenColumns,
+        }),
+      )
+    : Option.none()
+
 export const paint = (editor: Editor): Frame => {
   const { buffer } = editor
   const { caret, lines } = buffer
@@ -1524,6 +1560,7 @@ export const paint = (editor: Editor): Frame => {
           Option.some(Vim.jumpMarks(buffer, jumping, { first, last })),
       }),
     ),
+    hints: hintsOf(editor),
     surrounding: Option.match(promptOf(editor), {
       onSome: ({ prompt }) => Prompt.surrounding(prompt),
       onNone: () => ({
@@ -1567,22 +1604,40 @@ export const paint = (editor: Editor): Frame => {
   }
 }
 
+const dumpHints = (hints: Vim.Hints): ReadonlyArray<string> => [
+  `[${hints.pending}] ${hints.rows} rows`,
+  ...Array.map(
+    hints.entries,
+    entry => `${entry.kind === 'Group' ? '+' : ' '}${entry.key} ${entry.about}`,
+  ),
+  ...(hints.more > 0 ? [`… ${hints.more} more`] : []),
+]
+
+const dumpLines = (frame: Frame): ReadonlyArray<string> =>
+  Array.map(frame.lines, line => {
+    const text = Array.join(
+      Array.map(line.parts, part => part.text),
+      '',
+    )
+    if (line.index !== frame.caret.line) {
+      return text
+    }
+    const { column } = frame.caret
+    const after = Array.fromIterable(
+      Buffer.segmenter.segment(text.slice(column)),
+    )[0]?.segment
+    return `${text.slice(0, column)}[${after ?? ' '}]${text.slice(column + (after?.length ?? 0))}`
+  })
+
 export const dump = (frame: Frame): string =>
   Array.join(
-    Array.map(frame.lines, line => {
-      const text = Array.join(
-        Array.map(line.parts, part => part.text),
-        '',
-      )
-      if (line.index !== frame.caret.line) {
-        return text
-      }
-      const { column } = frame.caret
-      const after = Array.fromIterable(
-        Buffer.segmenter.segment(text.slice(column)),
-      )[0]?.segment
-      return `${text.slice(0, column)}[${after ?? ' '}]${text.slice(column + (after?.length ?? 0))}`
-    }),
+    [
+      ...dumpLines(frame),
+      ...Option.match(frame.hints, {
+        onNone: () => [],
+        onSome: dumpHints,
+      }),
+    ],
     '\n',
   )
 

@@ -515,7 +515,11 @@ const tools: ReadonlyArray<Tool> = [
           'batch steps takes a list of steps, such as [{"type":"abc"},{"press":"Enter"}]',
         )
       }
-      return playAll(steps.map(parseStep), args['detail'] === true, say)
+      return playAll(
+        steps.map((step, index) => parseStep(step, index)),
+        args['detail'] === true,
+        say,
+      )
     },
   },
   {

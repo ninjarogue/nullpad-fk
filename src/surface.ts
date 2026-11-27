@@ -27,6 +27,8 @@ const segmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' })
 
 type Box = Readonly<{ left: number; top: number; width: number }>
 
+type Position = Readonly<{ line: number; column: number }>
+
 const jetBrainsMonoAdvanceEm = 0.6
 
 const minCaretWidthPx = 2
@@ -623,6 +625,65 @@ const pointAnswer = (
   })
 }
 
+const isBefore = (a: Position, b: Position): boolean =>
+  a.line < b.line || (a.line === b.line && a.column < b.column)
+
+const rowEnds = (
+  sheet: Sheet,
+  y: number,
+): Option.Option<ReadonlyArray<Position>> => {
+  const { line: index } = lineAt(sheet, y)
+  const lastIndex = lastLineIndex(sheet.surface)
+  return Option.flatMap(
+    lineElement(sheet.surface, Math.min(index, lastIndex)),
+    line => {
+      if (index > lastIndex) {
+        const end = { line: lastIndex, column: lineText(line).length }
+        return Option.some([end])
+      }
+      const edges = textEdges(line)
+      return Option.all([
+        pointAt(edges.left + 0.5, y),
+        pointAt(edges.right - 0.5, y),
+      ]).pipe(
+        Option.map(found =>
+          Array.map(found, ({ line: hit, column }) => ({
+            line: indexOf(hit),
+            column,
+          })),
+        ),
+      )
+    },
+  )
+}
+
+const screenAnswer = (sheet: Sheet, from: Position): Answer =>
+  Option.match(lineElement(sheet.surface, from.line), {
+    onNone: () => stay(0),
+    onSome: line => {
+      bringOnScreen(
+        sheet,
+        caretBox(line, from.column, false).top + sheet.rowHeight / 2,
+      )
+      const top = rowEnds(sheet, sheet.viewTop + sheet.rowHeight / 2)
+      const bottom = rowEnds(sheet, sheet.viewBottom - sheet.rowHeight / 2)
+      return Option.match(Option.all([top, bottom]), {
+        onNone: () => stay(0),
+        onSome: ([upper, lower]) => {
+          const first = Array.reduce(upper, upper[0] ?? from, (a, b) =>
+            isBefore(b, a) ? b : a,
+          )
+          const last = Array.reduce(lower, lower[0] ?? from, (a, b) =>
+            isBefore(a, b) ? b : a,
+          )
+          return isBefore(last, first)
+            ? stay(0)
+            : { landing: { _tag: 'Screen', first, last }, aimFromTextLeft: 0 }
+        },
+      })
+    },
+  })
+
 /** Chrome pages a text box by seven eighths of its client height in whole pixels, a whole row at a time. */
 const pageDistance = (sheet: Sheet): number =>
   Math.max(
@@ -639,6 +700,7 @@ const answer = (sheet: Sheet, query: Query): Answer =>
         onNone: () => stay(0),
         onSome: element => pointAnswer(sheet, element, x, yInLine),
       }),
+    Screen: ({ at: from }) => screenAnswer(sheet, from),
     Step: ({ at: from, direction }) =>
       Option.match(lineElement(sheet.surface, from.line), {
         onNone: () => stay(0),
@@ -724,24 +786,98 @@ const shiftOf = (surface: HTMLElement): Shift => {
   }
 }
 
+const lineBreakBoxOf = (surface: HTMLElement, element: HTMLElement): Box =>
+  lineBreakBox(
+    element,
+    lineText(element),
+    textEdges(element),
+    sheetOf(surface).rowHeight,
+    cellWidth(surface),
+    viewRight(surface),
+  )
+
 const caretPlace = (surface: HTMLElement): Option.Option<Box> =>
   Option.map(
     lineElement(surface, Number(surface.dataset['caretLine'])),
     element => {
       const column = Number(surface.dataset['caretColumn'])
-      const text = lineText(element)
-      return surface.dataset['selected'] !== '' && column >= text.length
-        ? lineBreakBox(
-            element,
-            text,
-            textEdges(element),
-            sheetOf(surface).rowHeight,
-            cellWidth(surface),
-            viewRight(surface),
-          )
+      return surface.dataset['selected'] !== '' &&
+        column >= lineText(element).length
+        ? lineBreakBoxOf(surface, element)
         : caretBox(element, column, surface.dataset['caretEnd'] === 'true')
     },
   )
+
+const cellBox = (
+  surface: HTMLElement,
+  element: HTMLElement,
+  column: number,
+): Box => {
+  const text = lineText(element)
+  if (column >= text.length) {
+    return lineBreakBoxOf(surface, element)
+  }
+  const box = caretBox(element, column, false)
+  return text[column] === '\t' ? { ...box, width: cellWidth(surface) } : box
+}
+
+type LabelPlace = Readonly<{ element: HTMLElement; box: Box }>
+
+const labelPlaces = (surface: HTMLElement): ReadonlyArray<LabelPlace> =>
+  Array.getSomes(
+    Array.map(
+      Array.fromIterable(
+        surface.querySelectorAll<HTMLElement>('#jump > [data-label]'),
+      ),
+      element =>
+        Option.map(
+          lineElement(surface, Number(element.dataset['line'])),
+          line => ({
+            element,
+            box: cellBox(surface, line, Number(element.dataset['from'])),
+          }),
+        ),
+    ),
+  )
+
+const placeLabels = (places: ReadonlyArray<LabelPlace>, shift: Shift): void => {
+  for (const { element, box } of places) {
+    element.style.left = `${box.left + shift.left}px`
+    element.style.top = `${box.top + shift.top}px`
+    element.style.width = `${box.width}px`
+  }
+}
+
+const markMatches = (surface: HTMLElement): void => {
+  const written = surface.dataset['jumpMatches']
+  if (written === undefined || written === '') {
+    CSS.highlights.delete('jump-match')
+    return
+  }
+  const ranges: Array<StaticRange> = []
+  const lines = new Map<number, HTMLElement>()
+  for (const line of surface.querySelectorAll<HTMLElement>('.line')) {
+    lines.set(indexOf(line), line)
+  }
+  for (const match of written.split(';')) {
+    const [index, from, to] = match.split(',').map(Number)
+    const line = lines.get(index ?? -1)
+    if (line === undefined || from === undefined || to === undefined) {
+      continue
+    }
+    const start = domPoint(line, from, 'After')
+    const stop = domPoint(line, to)
+    ranges.push(
+      new StaticRange({
+        startContainer: start.node,
+        startOffset: start.offset,
+        endContainer: stop.node,
+        endOffset: stop.offset,
+      }),
+    )
+  }
+  CSS.highlights.set('jump-match', new Highlight(...ranges))
+}
 
 const placeCaret = (
   surface: HTMLElement,
@@ -1035,8 +1171,11 @@ const placeSelection = (
 const draw = (surface: HTMLElement): void => {
   const boxes = selectionPlaces(surface)
   const caret = caretPlace(surface)
+  const labels = labelPlaces(surface)
   const shift = shiftOf(surface)
   placeSelection(surface, boxes, shift)
+  placeLabels(labels, shift)
+  markMatches(surface)
   placeCaret(surface, caret, shift)
 }
 
@@ -1251,6 +1390,7 @@ const observe = (surface: HTMLElement): Stream.Stream<SurfaceMessage> =>
               'data-caret-end',
               'data-caret-shape',
               'data-selected',
+              'data-jump-matches',
             ],
           })
           surface.addEventListener(
@@ -1383,7 +1523,13 @@ export const surface = (
 ): Html =>
   h.div(
     [
-      h.Class(keyboard === 'Focused' ? 'surface focused' : 'surface'),
+      h.Class(
+        [
+          'surface',
+          ...(keyboard === 'Focused' ? ['focused'] : []),
+          ...(Option.isSome(frame.jump) ? ['jumping'] : []),
+        ].join(' '),
+      ),
       h.Style({ '--gutter': String(frame.gutter) }),
       h.DataAttribute('revision', String(frame.revision)),
       h.DataAttribute('caret-line', String(frame.caret.line)),
@@ -1391,6 +1537,21 @@ export const surface = (
       h.DataAttribute('caret-end', String(frame.caret.atRowEnd)),
       h.DataAttribute('caret-shape', frame.caret.shape),
       h.DataAttribute('last-line', String(frame.status.lineCount - 1)),
+      ...Option.match(frame.jump, {
+        onNone: () => [],
+        onSome: ({ matches }) => [
+          h.DataAttribute(
+            'jump-matches',
+            Array.join(
+              Array.map(
+                matches,
+                ({ line, from, to }) => `${line},${from},${to}`,
+              ),
+              ';',
+            ),
+          ),
+        ],
+      }),
       h.DataAttribute(
         'selected',
         Option.match(frame.selection, {
@@ -1428,6 +1589,28 @@ export const surface = (
           spacer(frame.undrawnBelow, h),
         ],
       ),
+      ...Option.match(frame.jump, {
+        onNone: () => [],
+        onSome: ({ labels }) => [
+          h.keyed('div')(
+            'jump',
+            [h.Id('jump'), h.AriaHidden(true)],
+            Array.map(labels, ({ letter, line, column, over }) =>
+              h.keyed('div')(
+                letter,
+                [
+                  h.DataAttribute('label', letter),
+                  h.DataAttribute('line', String(line)),
+                  h.DataAttribute('column', String(column)),
+                  h.DataAttribute('from', String(over.from)),
+                  h.DataAttribute('to', String(over.to)),
+                ],
+                [letter],
+              ),
+            ),
+          ),
+        ],
+      }),
       h.div(
         [h.Id('caret'), h.Class('cur'), h.AriaHidden(true)],
         [

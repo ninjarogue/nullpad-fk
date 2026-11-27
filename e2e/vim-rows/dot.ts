@@ -250,7 +250,7 @@ export const groups: ReadonlyArray<Group> = [
     ],
   },
   {
-    name: 'dot after changes: ciw cw cc s S C ci( cj c$ ce',
+    name: 'dot after changes: ciw cw cc cl S C ci( cj c$ ce',
     rows: [
       {
         text: 'F',
@@ -351,7 +351,7 @@ export const groups: ReadonlyArray<Group> = [
       {
         text: 'E',
         at: [1, 1],
-        keys: 'sQ<Esc>l.',
+        keys: 'clQ<Esc>l.',
         after: 'QQcdefgh\nijklmnop\nqrstuvwx\nyz012345',
         line: 1,
         column: 2,
@@ -359,7 +359,7 @@ export const groups: ReadonlyArray<Group> = [
       {
         text: 'E',
         at: [1, 1],
-        keys: 'sQ<Esc>j.',
+        keys: 'clQ<Esc>j.',
         after: 'Qbcdefgh\nQjklmnop\nqrstuvwx\nyz012345',
         line: 2,
         column: 1,
@@ -1448,7 +1448,7 @@ export const groups: ReadonlyArray<Group> = [
     ],
   },
   {
-    name: 'counts on changes belong to the operator: 3cw 2S 3s 2C',
+    name: 'counts on changes belong to the operator: 3cw 2S 3cl 2C',
     rows: [
       {
         text: 'G',
@@ -1533,7 +1533,7 @@ export const groups: ReadonlyArray<Group> = [
       {
         text: 'E',
         at: [1, 3],
-        keys: '3sX<Esc>',
+        keys: '3clX<Esc>',
         after: 'abXfgh\nijklmnop\nqrstuvwx\nyz012345',
         line: 1,
         column: 3,
@@ -1541,7 +1541,7 @@ export const groups: ReadonlyArray<Group> = [
       {
         text: 'E',
         at: [1, 3],
-        keys: '3sX<Esc>l.',
+        keys: '3clX<Esc>l.',
         after: 'abXX\nijklmnop\nqrstuvwx\nyz012345',
         line: 1,
         column: 4,

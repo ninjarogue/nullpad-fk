@@ -437,7 +437,7 @@ export const groups: ReadonlyArray<Group> = [
     ],
   },
   {
-    name: 'operators d x Delete y c s X D Y C S R on forward, backward and linewise selections',
+    name: 'operators d x Delete y c X D Y C S R on forward, backward and linewise selections',
     rows: [
       {
         text: 'A',
@@ -474,7 +474,7 @@ export const groups: ReadonlyArray<Group> = [
       {
         text: 'A',
         at: [2, 6],
-        keys: 'vjsZ<Esc>Go<Esc>p',
+        keys: 'vjcZ<Esc>Go<Esc>p',
         after: 'one two three\nfour Zeight\nnine\nfive six\nseven ',
         line: 4,
         column: 1,
@@ -574,7 +574,7 @@ export const groups: ReadonlyArray<Group> = [
       {
         text: 'A',
         at: [1, 4],
-        keys: 'VjjsZ<Esc>Go<Esc>p',
+        keys: 'VjjcZ<Esc>Go<Esc>p',
         after: 'Z\nnine\n\none two three\nfour five six\nseven eight',
         line: 4,
         column: 1,

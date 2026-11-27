@@ -1210,7 +1210,7 @@ export const groups: ReadonlyArray<Group> = [
     ],
   },
   {
-    name: 'c s C S R change the block',
+    name: 'c C S R change the block',
     rows: [
       {
         note: 'T1',

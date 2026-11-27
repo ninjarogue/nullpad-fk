@@ -5,6 +5,7 @@ import * as History from './history'
 import { Input, type NamedKey, isControlAlone, noModifiers } from './input'
 import { cellAt, cellCount, cellStart } from './vim/cells'
 import * as Ex from './vim/command'
+import * as Jump from './vim/jump'
 import * as Keymap from './vim/keymap'
 import {
   type Spot,
@@ -30,6 +31,7 @@ import {
   type TargetName,
   byKind,
   isObject,
+  rangeToJump,
   rangeToLanding,
   targetFor,
 } from './vim/targets'
@@ -261,6 +263,10 @@ export const Fate = Schema.TaggedUnion({
   Replay: { steps: Schema.Array(Replayed) },
   ReadClipboard: { put: Put },
   OpenPrompt: { resume: Resume },
+  OpenJump: {
+    operator: Schema.Option(OperatorName),
+    register: Operators.RegisterName,
+  },
 })
 export type Fate = typeof Fate.Type
 
@@ -871,6 +877,44 @@ const opening = (unchanged: Step, vim: Vim, resume: Resume): Step => ({
   fate: Fate.cases.OpenPrompt.make({ resume }),
 })
 
+const operate = (
+  vim: Vim,
+  buffer: Buffer.Buffer,
+  kept: Kept,
+  operator: OperatorName,
+  target: TargetName | 'Selection',
+  range: Range,
+  register: Operators.RegisterName,
+  recorded: Option.Option<Repeat>,
+): Step => {
+  const normal: Vim = { ...idle(vim), want: 'Unset' }
+  const applied = Operators.operators[operator](
+    buffer,
+    range,
+    kept.registers,
+    register,
+  )
+  const after = applied.inserting
+    ? { ...normal, mode: insertMode(recorded) }
+    : normal
+  return stepOf(
+    after,
+    rest(after, applied.buffer, false),
+    {
+      ...kept,
+      registers: applied.registers,
+      dot:
+        operator === 'Delete'
+          ? Option.orElse(recorded, () => kept.dot)
+          : kept.dot,
+    },
+    {
+      began: Option.some(changeBegan(buffer, operator, target, range)),
+      clipboard: applied.clipboard,
+    },
+  )
+}
+
 const run = (
   vim: Vim,
   buffer: Buffer.Buffer,
@@ -895,28 +939,8 @@ const run = (
     operator: OperatorName,
     target: TargetName | 'Selection',
     range: Range,
-  ): Step => {
-    const applied = Operators.operators[operator](
-      buffer,
-      range,
-      kept.registers,
-      register,
-    )
-    const after = applied.inserting ? recordingStay : normal
-    return stepOf(
-      after,
-      rest(after, applied.buffer, false),
-      {
-        ...kept,
-        registers: applied.registers,
-        dot: operator === 'Delete' ? repeat : kept.dot,
-      },
-      {
-        began: Option.some(changeBegan(buffer, operator, target, range)),
-        clipboard: applied.clipboard,
-      },
-    )
-  }
+  ): Step =>
+    operate(vim, buffer, kept, operator, target, range, register, repeat)
   return Keymap.Command.match(command, {
     Cancel: () => unchanged,
     Move: ({ motion }) => {
@@ -945,6 +969,11 @@ const run = (
       ),
     OpenCommand: () =>
       opening(unchanged, cleared, Resume.cases.Command.make({})),
+    OpenJump: ({ operator }) => ({
+      ...unchanged,
+      vim,
+      fate: Fate.cases.OpenJump.make({ operator, register }),
+    }),
     Seek: ({ seek }) => {
       const sought = Seek.sought(
         buffer,
@@ -1493,6 +1522,11 @@ const runVisual = (
           register,
         }),
       ),
+    OpenJump: (): Step => ({
+      ...unchanged,
+      vim,
+      fate: Fate.cases.OpenJump.make({ operator: Option.none(), register }),
+    }),
     Seek: ({ seek }): Step => {
       const sought = Seek.sought(
         buffer,
@@ -2065,6 +2099,91 @@ const searched = (
           Keymap.VisualCommand.cases.Seek.make({ seek }),
           count,
           register,
+        ),
+      ),
+  })
+}
+
+export const Jumping = Schema.Struct({
+  jump: Jump.Jump,
+  operator: Schema.Option(OperatorName),
+  register: Operators.RegisterName,
+})
+export type Jumping = typeof Jumping.Type
+
+export type JumpRegion = Jump.Region
+
+export type JumpMarks = Jump.Marks
+
+export type JumpAct = Jump.Act
+
+export const startJumping = (
+  region: JumpRegion,
+  operator: Option.Option<OperatorName>,
+  register: Operators.RegisterName,
+): Jumping => ({ jump: Jump.open(region), operator, register })
+
+export const jumpFed = (
+  buffer: Buffer.Buffer,
+  { jump }: Jumping,
+  input: Input,
+): JumpAct => Jump.feed(buffer, jump, input)
+
+export const jumpMarks = (
+  buffer: Buffer.Buffer,
+  { jump }: Jumping,
+  drawn: Readonly<{ first: number; last: number }>,
+): JumpMarks => Jump.marks(buffer, jump, drawn)
+
+export const jumpPending = (vim: Vim, { jump }: Jumping): string =>
+  Keymap.shown(vim) + Keymap.jumpKey + jump.pattern
+
+export const jumped = (
+  vim: Vim,
+  buffer: Buffer.Buffer,
+  kept: Kept,
+  { operator, register }: Jumping,
+  at: Buffer.Position,
+): Option.Option<Step> => {
+  const cleared = idle(vim)
+  return Mode.match(vim.mode, {
+    Normal: () =>
+      Option.some(
+        Option.match(operator, {
+          onNone: () =>
+            stepOf(
+              { ...cleared, want: 'Unset' },
+              Buffer.moveTo(buffer, at),
+              kept,
+            ),
+          onSome: operator =>
+            operate(
+              vim,
+              buffer,
+              kept,
+              operator,
+              'Selection',
+              rangeToJump(
+                buffer,
+                spotOf(buffer),
+                spotAt(buffer, at, 'LastLetter'),
+              ),
+              register,
+              Option.none(),
+            ),
+        }),
+      ),
+    Insert: () => Option.none(),
+    Visual: visual =>
+      Option.some(
+        stepOf(
+          {
+            ...cleared,
+            mode: visualMode(visual.kind, visual.anchor, 'AsInVisual'),
+            want: 'Unset',
+          },
+          Buffer.moveTo(buffer, at),
+          kept,
         ),
       ),
   })

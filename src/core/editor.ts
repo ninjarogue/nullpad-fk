@@ -90,6 +90,40 @@ export type Asking = typeof Asking.Type
 type PromptAsking = Extract<Asking, { _tag: 'Prompt' }>
 type JumpAsking = Extract<Asking, { _tag: 'Jump' }>
 
+export const Serial = Schema.Int.pipe(Schema.brand('Serial'))
+export type Serial = typeof Serial.Type
+
+export const Align = Schema.Literals(['Nearest', 'Top'])
+export type Align = typeof Align.Type
+
+const Anchor = Schema.Struct({
+  lineId: Buffer.LineId,
+  column: Schema.Int,
+  atRowEnd: Schema.Boolean,
+})
+
+export const Place = Schema.TaggedUnion({
+  At: { anchor: Anchor, align: Align },
+  End: {},
+})
+export type Place = typeof Place.Type
+
+export const Aim = Schema.Struct({ serial: Serial, place: Place })
+export type Aim = typeof Aim.Type
+
+export const Target = Schema.Struct({
+  serial: Serial,
+  aims: Schema.Array(Aim),
+})
+export type Target = typeof Target.Type
+
+export const Scroll = Schema.Struct({
+  top: Schema.Int,
+  atEnd: Schema.Boolean,
+  serial: Serial,
+})
+export type Scroll = typeof Scroll.Type
+
 export const Editor = Schema.Struct({
   buffer: Buffer.Buffer,
   history: History.History,
@@ -104,18 +138,16 @@ export const Editor = Schema.Struct({
   drawnRevision: Schema.Int,
   locating: Schema.Option(Locating),
   asked: Schema.Int,
-  pendingReveals: Schema.Int,
+  target: Target,
+  applied: Serial,
   notice: Schema.Option(Schema.String),
   asking: Schema.Option(Asking),
 })
 export type Editor = typeof Editor.Type
 
-export type Reveal = 'None' | 'Nearest' | 'Top'
-
 export type Outcome = Readonly<{
   editor: Editor
   need: Option.Option<Need>
-  reveal: Reveal
   writeClipboard: Option.Option<string>
   save: boolean
 }>
@@ -153,6 +185,7 @@ export type Frame = Readonly<{
   selection: Option.Option<Selection>
   jump: Option.Option<Vim.JumpMarks>
   surrounding: Readonly<{ text: string; caret: number }>
+  target: Target
   discards: number
   status: Readonly<{
     mode: Mode
@@ -182,7 +215,8 @@ export const open = (text: string, vim = false): Editor => {
     drawnRevision: 0,
     locating: Option.none(),
     asked: 0,
-    pendingReveals: 0,
+    target: { serial: Serial.make(0), aims: [] },
+    applied: Serial.make(0),
     notice: Option.none(),
     asking: Option.none(),
   }
@@ -239,20 +273,25 @@ export const reopen = (
     ...open(text),
     vim: vimAfterReopen(editor, landing),
   }
-  return {
-    ...opened,
-    kept: editor.kept,
-    discards: editor.discards,
-    buffer: atRest(
-      opened,
-      caretAt === 'End'
-        ? Buffer.moveTo(opened.buffer, Buffer.documentEnd(opened.buffer))
-        : opened.buffer,
-    ),
-    screenRows: editor.screenRows,
-    drawnRevision: editor.drawnRevision + 1,
-    asked: editor.asked,
-  }
+  return aimAtCaret(
+    withCaretDrawn({
+      ...opened,
+      kept: editor.kept,
+      discards: editor.discards,
+      buffer: atRest(
+        opened,
+        caretAt === 'End'
+          ? Buffer.moveTo(opened.buffer, Buffer.documentEnd(opened.buffer))
+          : opened.buffer,
+      ),
+      screenRows: editor.screenRows,
+      drawnRevision: editor.drawnRevision + 1,
+      asked: editor.asked,
+      target: editor.target,
+      applied: editor.target.serial,
+    }),
+    'Nearest',
+  )
 }
 
 export const sameText = (a: Editor, b: Editor): boolean =>
@@ -326,12 +365,54 @@ const withLineDrawn = (editor: Editor, line: number): Editor =>
 const withCaretDrawn = (editor: Editor): Editor =>
   withLineDrawn(editor, editor.buffer.caret.line)
 
-const done = (unrested: Editor, reveal: Reveal = 'Nearest'): Outcome => {
+const mostAimsKept = 256
+
+const nearest: Option.Option<Align> = Option.some('Nearest')
+
+const replacesEarlierAims = (place: Place): boolean =>
+  Place.match(place, {
+    At: ({ align }) => align === 'Top',
+    End: () => true,
+  })
+
+const aimAt = (editor: Editor, place: Place): Editor => {
+  const serial = Serial.make(editor.target.serial + 1)
+  const unapplied = replacesEarlierAims(place)
+    ? []
+    : Array.filter(editor.target.aims, aim => aim.serial > editor.applied)
+  return {
+    ...editor,
+    target: {
+      serial,
+      aims: [...unapplied, { serial, place }].slice(-mostAimsKept),
+    },
+  }
+}
+
+const aimAtCaret = (editor: Editor, align: Align): Editor =>
+  aimAt(
+    editor,
+    Place.cases.At.make({
+      anchor: {
+        lineId: Buffer.lineAt(editor.buffer, editor.buffer.caret.line).id,
+        column: editor.buffer.caret.column,
+        atRowEnd: editor.caretAtRowEnd,
+      },
+      align,
+    }),
+  )
+
+const done = (
+  unrested: Editor,
+  reveal: Option.Option<Align> = nearest,
+): Outcome => {
   const editor = rested(unrested)
   return {
-    editor: reveal === 'None' ? editor : withCaretDrawn(editor),
+    editor: Option.match(reveal, {
+      onNone: () => editor,
+      onSome: align => aimAtCaret(withCaretDrawn(editor), align),
+    }),
     need: Option.none(),
-    reveal,
     writeClipboard: Option.none(),
     save: false,
   }
@@ -360,7 +441,7 @@ type Plan =
 
 const now = (
   editor: Editor,
-  reveal: Reveal = 'Nearest',
+  reveal: Option.Option<Align> = nearest,
   began: Option.Option<Buffer.Position> = Option.none(),
 ): Settled => ({
   _tag: 'Done',
@@ -471,7 +552,7 @@ const landingPosition = (
   })
 
 const landMove =
-  (editor: Editor, reveal: Reveal = 'Nearest') =>
+  (editor: Editor, reveal: Option.Option<Align> = nearest) =>
   ({ landing }: Answer): Outcome =>
     done(
       Option.match(landingPosition(editor, landing), {
@@ -608,13 +689,13 @@ const page =
         atRowEnd: editor.caretAtRowEnd,
         direction,
       }),
-      landMove(editor, 'Top'),
+      landMove(editor, Option.some('Top')),
     )
 
 const plainKeys: Readonly<
   Record<NamedKey, (editor: Editor, modifiers: Modifiers) => Plan>
 > = {
-  Escape: editor => now(editor, 'None'),
+  Escape: editor => now(editor, Option.none()),
   Enter: editor => now(breakLine(editor)),
   Tab: editor => now(typeText('  ')(editor)),
   Backspace: editor =>
@@ -663,7 +744,7 @@ const travelPlan = (
       ? History.travel(editor.history, editor.buffer, way, count)
       : Option.none()
   return Option.match(last, {
-    onNone: () => now(editor, 'None'),
+    onNone: () => now(editor, Option.none()),
     onSome: stepped => ({
       ...now(
         changeDrawn(
@@ -689,7 +770,7 @@ const chordPlan = (editor: Editor, char: string, shift: boolean): Plan => {
   const chord = Option.isNone(editor.vim)
     ? plainChords[shift ? char.toUpperCase() : char.toLowerCase()]
     : undefined
-  return chord === undefined ? now(editor, 'None') : chord(editor)
+  return chord === undefined ? now(editor, Option.none()) : chord(editor)
 }
 
 const plainPlan = (editor: Editor, input: Input): Plan =>
@@ -742,7 +823,7 @@ const vimDone = (
       },
       moved ? { buffer: step.buffer, caretAtRowEnd: false } : {},
     ),
-    moved ? 'Nearest' : 'None',
+    moved ? nearest : Option.none(),
     step.began,
   )
   return {
@@ -782,7 +863,7 @@ const vimPlan = (
     Replay: ({ steps }): Plan => ({
       _tag: 'Done',
       outcome: replay(
-        done(counted, 'None'),
+        done(counted, Option.none()),
         Array.map(steps, again => Queued.cases.Again.make({ step: again })),
       ),
       began: Option.none(),
@@ -812,7 +893,7 @@ const vimPlan = (
             Asking.cases.Prompt.make({ prompt: Prompt.open, resume }),
           ),
         },
-        'None',
+        Option.none(),
       ),
     OpenJump: ({ operator, register }): Plan =>
       ask(
@@ -831,7 +912,7 @@ const vimPlan = (
                 ),
               ),
             },
-            'None',
+            Option.none(),
           ),
       ),
     Done: () => vimDone(editor, step, swallowed),
@@ -884,7 +965,7 @@ const jumpPlan = (editor: Editor, asking: JumpAsking, input: Input): Plan => {
             Asking.cases.Jump.make({ ...asking, jump: act.jump }),
           ),
         },
-        'None',
+        Option.none(),
       )
     : act._tag === 'End'
       ? now(
@@ -893,7 +974,7 @@ const jumpPlan = (editor: Editor, asking: JumpAsking, input: Input): Plan => {
             asking: Option.none(),
             vim: Option.map(editor.vim, Vim.idle),
           },
-          'None',
+          Option.none(),
         )
       : Option.match(
           Option.flatMap(editor.vim, vim =>
@@ -910,7 +991,7 @@ const jumpPlan = (editor: Editor, asking: JumpAsking, input: Input): Plan => {
                   asking: Option.none(),
                   vim: Option.map(editor.vim, Vim.idle),
                 },
-                'None',
+                Option.none(),
               ),
             onSome: ({ vim, step }) =>
               vimPlan(
@@ -946,7 +1027,7 @@ const promptPlan = (
           ...editor,
           asking: Option.some(Asking.cases.Prompt.make({ ...asking, prompt })),
         },
-        'None',
+        Option.none(),
       ),
     Close: () =>
       now(
@@ -956,7 +1037,7 @@ const promptPlan = (
           kept: remembering(),
           vim: Option.map(editor.vim, Vim.idle),
         },
-        'None',
+        Option.none(),
       ),
     Run: () => {
       const kept = remembering()
@@ -976,7 +1057,10 @@ const promptPlan = (
         ),
         {
           onNone: () =>
-            now({ ...closed, vim: Option.map(editor.vim, Vim.idle) }, 'None'),
+            now(
+              { ...closed, vim: Option.map(editor.vim, Vim.idle) },
+              Option.none(),
+            ),
           onSome: ({ vim, step }) => vimPlan(closed, vim, step, 0),
         },
       )
@@ -1006,7 +1090,7 @@ const inputPlan = (editor: Editor, input: Input): Plan =>
 
 const againPlan = (editor: Editor, step: Vim.Replayed): Plan =>
   Option.match(editor.vim, {
-    onNone: () => now(editor, 'None'),
+    onNone: () => now(editor, Option.none()),
     onSome: vim =>
       vimPlan(editor, vim, Vim.again(vim, editor.buffer, editor.kept, step), 0),
   })
@@ -1188,9 +1272,15 @@ const run = (editor: Editor, queued: Queued): Outcome => {
   const ticket = editor.asked + 1
   const drawn =
     plan._tag === 'Locate' ? withQueriedLineDrawn(editor, plan.query) : editor
+  const shown =
+    plan._tag === 'ReadClipboard' ||
+    plan.query._tag === 'Point' ||
+    drawn === editor
+      ? drawn
+      : aimAtCaret(drawn, 'Nearest')
   return {
     editor: {
-      ...drawn,
+      ...shown,
       locating: Option.some({ ticket, cause: queued, queued: [] }),
       asked: ticket,
     },
@@ -1203,12 +1293,6 @@ const run = (editor: Editor, queued: Queued): Outcome => {
           })
         : Need.cases.ReadClipboard.make({ ticket }),
     ),
-    reveal:
-      plan._tag === 'ReadClipboard' ||
-      plan.query._tag === 'Point' ||
-      drawn === editor
-        ? 'None'
-        : 'Nearest',
     writeClipboard: Option.none(),
     save: false,
   }
@@ -1226,11 +1310,9 @@ const enqueue = (editor: Editor, queued: Queued): Outcome =>
             queued: [...locating.queued, queued],
           }),
         },
-        'None',
+        Option.none(),
       ),
   })
-
-const strongest = (a: Reveal, b: Reveal): Reveal => (b === 'None' ? a : b)
 
 const held = (editor: Editor, queued: ReadonlyArray<Queued>): Editor => ({
   ...editor,
@@ -1253,7 +1335,6 @@ const replay = (start: Outcome, queued: ReadonlyArray<Queued>): Outcome => {
         outcome: {
           editor: result.editor,
           need: Option.orElse(result.need, () => reached.outcome.need),
-          reveal: strongest(reached.outcome.reveal, result.reveal),
           writeClipboard: Option.orElse(
             result.writeClipboard,
             () => reached.outcome.writeClipboard,
@@ -1269,22 +1350,6 @@ const replay = (start: Outcome, queued: ReadonlyArray<Queued>): Outcome => {
     : { ...outcome, editor: held(outcome.editor, queued.slice(ran)) }
 }
 
-const countPendingReveal = (outcome: Outcome): Outcome =>
-  outcome.reveal === 'None'
-    ? outcome
-    : {
-        ...outcome,
-        editor: {
-          ...outcome.editor,
-          pendingReveals: outcome.editor.pendingReveals + 1,
-        },
-      }
-
-export const revealed = (editor: Editor): Editor => ({
-  ...editor,
-  pendingReveals: Math.max(0, editor.pendingReveals - 1),
-})
-
 export const noticed = (editor: Editor, notice: string): Editor => ({
   ...editor,
   notice: Option.some(notice),
@@ -1293,21 +1358,18 @@ export const noticed = (editor: Editor, notice: string): Editor => ({
 export const withoutNotice = (editor: Editor): Editor =>
   Option.isNone(editor.notice) ? editor : { ...editor, notice: Option.none() }
 
-const receive = (editor: Editor, queued: Queued): Outcome =>
-  countPendingReveal(enqueue(editor, queued))
-
 export const feed = (editor: Editor, input: Input): Outcome =>
-  receive(editor, Queued.cases.Fed.make({ input }))
+  enqueue(editor, Queued.cases.Fed.make({ input }))
 
 export const click = (
   editor: Editor,
   x: number,
   line: number,
   yInLine: number,
-): Outcome => receive(editor, Queued.cases.Clicked.make({ x, line, yInLine }))
+): Outcome => enqueue(editor, Queued.cases.Clicked.make({ x, line, yInLine }))
 
 export const toggledVim = (editor: Editor): Outcome =>
-  receive(editor, Queued.cases.ToggledVim.make({}))
+  enqueue(editor, Queued.cases.ToggledVim.make({}))
 
 export const togglesVim = (input: Input): boolean =>
   input._tag === 'Chord' && input.char === ',' && input.modifiers.ctrl
@@ -1323,7 +1385,7 @@ export const overwrite = (
       changeDrawn(editor, {
         buffer: Buffer.overwrite(editor.buffer, at, text),
       }),
-      'None',
+      Option.none(),
     ),
     { ...alone, began: Option.none() },
   )
@@ -1334,16 +1396,16 @@ const answered = (
   land: (plan: Plan) => Option.Option<Outcome>,
 ): Outcome =>
   Option.match(editor.locating, {
-    onNone: () => done(editor, 'None'),
+    onNone: () => done(editor, Option.none()),
     onSome: ({ ticket: out, cause, queued }) => {
       if (out !== ticket) {
-        return done(editor, 'None')
+        return done(editor, Option.none())
       }
       const asked = { ...editor, locating: Option.none() }
       const landed = Option.getOrElse(land(planOf(asked, cause)), () =>
         run(asked, cause),
       )
-      return countPendingReveal(replay(landed, queued))
+      return replay(landed, queued)
     },
   })
 
@@ -1368,21 +1430,14 @@ export const clipboardRead = (
   )
 
 const awaitedLine = (editor: Editor): Option.Option<number> =>
-  Option.match(editor.locating, {
-    onNone: () =>
-      editor.pendingReveals > 0
-        ? Option.some(editor.buffer.caret.line)
-        : Option.none(),
-    onSome: ({ cause }) =>
-      Option.some(
-        Queued.match(cause, {
-          Fed: () => editor.buffer.caret.line,
-          Clicked: ({ line }) => line,
-          ToggledVim: () => editor.buffer.caret.line,
-          Again: () => editor.buffer.caret.line,
-        }),
-      ),
-  })
+  Option.map(editor.locating, ({ cause }) =>
+    Queued.match(cause, {
+      Fed: () => editor.buffer.caret.line,
+      Clicked: ({ line }) => line,
+      ToggledVim: () => editor.buffer.caret.line,
+      Again: () => editor.buffer.caret.line,
+    }),
+  )
 
 const undrawsAwaitedLine = (editor: Editor, moved: Editor): boolean =>
   Option.exists(
@@ -1390,26 +1445,39 @@ const undrawsAwaitedLine = (editor: Editor, moved: Editor): boolean =>
     line => isDrawn(editor, line) && !isDrawn(moved, line),
   )
 
-export const scrolled = (editor: Editor, topLine: number): Editor => {
-  if (topLine === editor.topLine) {
+export const scrolled = (
+  editor: Editor,
+  { top, atEnd, serial }: Scroll,
+): Editor => {
+  if (serial < editor.target.serial) {
     return editor
   }
-  const moved = changeDrawn(editor, { topLine })
-  return undrawsAwaitedLine(editor, moved) ? editor : moved
+  const seen =
+    serial === editor.applied ? editor : { ...editor, applied: serial }
+  if (top === editor.topLine) {
+    return seen
+  }
+  const moved = changeDrawn(seen, { topLine: top })
+  return undrawsAwaitedLine(editor, moved)
+    ? seen
+    : atEnd
+      ? aimAt(moved, Place.cases.End.make({}))
+      : moved
 }
 
 export const resized = (editor: Editor, rows: number): Outcome => {
   const size = Math.max(1, Math.floor(rows))
-  return countPendingReveal({
-    editor:
+  return {
+    editor: aimAtCaret(
       size === editor.screenRows
         ? editor
         : changeDrawn(editor, { screenRows: size }),
+      'Nearest',
+    ),
     need: Option.none(),
-    reveal: 'Nearest',
     writeClipboard: Option.none(),
     save: false,
-  })
+  }
 }
 
 const minLineNumberDigits = 4
@@ -1534,6 +1602,7 @@ export const paint = (editor: Editor): Frame => {
         caret: caret.column - near.from.column,
       }),
     }),
+    target: editor.target,
     discards: editor.discards,
     status: {
       mode: Option.match(editor.vim, {

@@ -585,7 +585,7 @@ export const groups: ReadonlyArray<Group> = [
       {
         text: 'K',
         at: [1, 1],
-        keys: 'xjs<Esc>P',
+        keys: 'xjcl<Esc>P',
         after: 'bc\na\nd',
         line: 2,
         column: 1,

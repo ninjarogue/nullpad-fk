@@ -945,6 +945,7 @@ const run = (
       ),
     OpenCommand: () =>
       opening(unchanged, cleared, Resume.cases.Command.make({})),
+    OpenJump: () => unchanged,
     Seek: ({ seek }) => {
       const sought = Seek.sought(
         buffer,
@@ -1493,6 +1494,7 @@ const runVisual = (
           register,
         }),
       ),
+    OpenJump: (): Step => unchanged,
     Seek: ({ seek }): Step => {
       const sought = Seek.sought(
         buffer,

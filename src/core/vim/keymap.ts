@@ -33,6 +33,7 @@ export const Command = Schema.TaggedUnion({
   Seek: { seek: Seek },
   OpenSearch: { way: Way, operator: Schema.Option(OperatorName) },
   OpenCommand: {},
+  OpenJump: { operator: Schema.Option(OperatorName) },
   Operate: { operator: OperatorName, target: TargetName },
   OperateSeek: { operator: OperatorName, seek: Seek },
   OperateAmount: { operator: OperatorName, amount: Amount },
@@ -64,6 +65,7 @@ export const VisualCommand = Schema.TaggedUnion({
   Move: { motion: MotionName },
   Seek: { seek: Seek },
   OpenSearch: { way: Way },
+  OpenJump: {},
   Operate: { operator: OperatorName, reach: Reach },
   Replace: { side: Side },
   ReplaceLetters: { letter: Schema.String },
@@ -143,6 +145,8 @@ const findRow = (
     letter => Seek.cases.Find.make({ way, till, letter }),
     about,
   )
+
+export const jumpKey: Key = 's'
 
 const openRows: ReadonlyArray<Binding<Way>> = [
   bind('/', 'Forward', 'search forward'),
@@ -302,6 +306,11 @@ const operatorRows = (
         `${verb} ${row.about}`,
       ),
     ),
+    bind(
+      key + jumpKey,
+      Command.cases.OpenJump.make({ operator: Option.some(operator) }),
+      `${verb} to a match on screen`,
+    ),
     operate(key + key, operator, 'Lines', `${verb} lines`),
     ...Array.map(objectRows, ([notation, target, about]) =>
       operate(key + notation, operator, target, `${verb} ${about}`),
@@ -331,7 +340,11 @@ export const normal: ReadonlyArray<Binding<Command>> = [
   operate('X', 'Delete', 'Left', 'delete character before'),
   operate('D', 'Delete', 'LineEnd', 'delete to line end'),
   operate('C', 'Change', 'LineEnd', 'change to line end'),
-  operate('s', 'Change', 'Right', 'change character'),
+  bind(
+    jumpKey,
+    Command.cases.OpenJump.make({ operator: Option.none() }),
+    'jump to a match on screen',
+  ),
   operate('S', 'Change', 'Lines', 'change line'),
   operate('Y', 'Yank', 'Lines', 'yank line'),
   bind('p', Command.cases.Put.make({ side: 'After' }), 'put after'),
@@ -440,7 +453,11 @@ export const visual: ReadonlyArray<Binding<VisualCommand>> = [
   operateOn('<Del>', 'Delete', 'AsSelected'),
   operateOn('y', 'Yank', 'AsSelected'),
   operateOn('c', 'Change', 'AsSelected'),
-  operateOn('s', 'Change', 'AsSelected'),
+  bind(
+    jumpKey,
+    VisualCommand.cases.OpenJump.make({}),
+    'move the cursor end to a match on screen',
+  ),
   operateOn('X', 'Delete', 'LinesOrBlock'),
   operateOn('D', 'Delete', 'LinesOrBlockToLineEnds'),
   operateOn('Y', 'Yank', 'LinesOrBlock'),

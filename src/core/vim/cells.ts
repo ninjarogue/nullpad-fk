@@ -76,6 +76,17 @@ export const cellAt = (line: Buffer.Line, column: number): number => {
     : Math.min(firstEdgeAfter(edges, column, 1, edges.length) - 1, last)
 }
 
+export const isCellEdge = (line: Buffer.Line, column: number): boolean => {
+  if (column <= 0 || column >= line.text.length) {
+    return column === 0 || column === line.text.length
+  }
+  const edges = edgesOf(line)
+  return (
+    edges === 'OneUnitEach' ||
+    edges[firstEdgeAfter(edges, column, 1, edges.length) - 1] === column
+  )
+}
+
 const beforeCombining = 0x300
 
 export const cellLengthAt = (line: Buffer.Line, column: number): number => {

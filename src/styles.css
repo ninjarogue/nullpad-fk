@@ -19,6 +19,10 @@
   --ins: light-dark(#86651a, #c9b37e);
   --sel: light-dark(#dedacd, #33322e);
   --accent: light-dark(#26251f, #e8e3d6);
+  --jump-dim: light-dark(#a8a59b, #55534e);
+  --jump-match: light-dark(#e6d58a, #5a4a14);
+  --jump-label: light-dark(#c2410c, #f59e42);
+  --jump-label-fg: light-dark(#fffaf0, #1a1205);
   --row: 22px;
   color-scheme: light dark;
   scrollbar-color: var(--dim) var(--bg);
@@ -145,6 +149,46 @@ body {
   #selection > div {
     forced-color-adjust: none;
     background: color-mix(in srgb, Highlight 40%, Canvas);
+  }
+}
+
+.surface.jumping .line {
+  color: var(--jump-dim);
+}
+
+::highlight(jump-match) {
+  color: var(--fg);
+  background-color: var(--jump-match);
+}
+
+#jump {
+  position: absolute;
+  inset: 0 auto auto 0;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+  overflow-anchor: none;
+}
+
+#jump > div {
+  position: absolute;
+  height: var(--row);
+  box-sizing: border-box;
+  text-align: center;
+  font-weight: 800;
+  background: var(--jump-label);
+  color: var(--jump-label-fg);
+}
+
+@media (forced-colors: active) {
+  #jump > div {
+    forced-color-adjust: none;
+    background: Highlight;
+    color: HighlightText;
+  }
+
+  .surface.jumping .line {
+    color: GrayText;
   }
 }
 

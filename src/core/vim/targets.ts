@@ -286,3 +286,9 @@ export const rangeToLanding = (
   )
   return operator === 'Delete' ? linewiseWhenBlankAround(buffer, range) : range
 }
+
+export const rangeToJump = (
+  buffer: Buffer.Buffer,
+  from: Spot,
+  to: Spot,
+): Range => rangeOf(buffer, ordered(from, to, 'Inclusive'))

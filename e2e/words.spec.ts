@@ -217,12 +217,18 @@ test('Ctrl+Left at the start of a line goes to the end of the line above, where 
 })
 
 const shards = 6
+const shardsOnEveryPush: ReadonlySet<number> = new Set([3, 4, 5])
+const onDemand = process.env['NULLPAD_ALL'] !== undefined
 
 for (let shard = 0; shard < shards; shard++) {
   test(`word moves, shard ${shard + 1} of ${shards}: Ctrl+Left and Ctrl+Right land where they land in a textarea, among letter, row and line moves`, async ({
     browser,
     baseURL,
   }) => {
+    test.skip(
+      !onDemand && !shardsOnEveryPush.has(shard + 1),
+      'runs on demand, pnpm test:all',
+    )
     test.setTimeout(180_000)
     const pair = await openPair(browser, baseURL ?? '')
     const failures: Array<string> = []

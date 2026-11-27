@@ -16,6 +16,8 @@ const note = [
 ].join('\n')
 
 const bands = 4
+const bandsOnEveryPush: ReadonlySet<number> = new Set([1, 3, 4])
+const onDemand = process.env['NULLPAD_ALL'] !== undefined
 
 type Column = Readonly<{
   left: number
@@ -80,6 +82,10 @@ for (let band = 0; band < bands; band++) {
     browser,
     baseURL,
   }) => {
+    test.skip(
+      !onDemand && !bandsOnEveryPush.has(band + 1),
+      'runs on demand, pnpm test:all',
+    )
     test.setTimeout(180_000)
     await nullpad.paste(note)
     await nullpad.press('Control+Home')

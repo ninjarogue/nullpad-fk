@@ -28,10 +28,10 @@ export const Resolved = Schema.TaggedUnion({
 })
 export type Resolved = typeof Resolved.Type
 
-const greatestNumber = 1e15
+const beyondAnyNote = 1e15
 
 const numberOf = (digits: string): number =>
-  Math.min(Number(digits), greatestNumber)
+  Math.min(Number(digits), beyondAnyNote)
 
 const tokens = (text: string): ReadonlyArray<RegExpMatchArray> =>
   Array.fromIterable(text.matchAll(/[+-]\d*|\d+|[ \t]+|[^+\-\d \t][^]*/gu))

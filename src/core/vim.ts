@@ -5,6 +5,7 @@ import * as History from './history'
 import { Input, type NamedKey, isControlAlone, noModifiers } from './input'
 import { cellAt, cellCount, cellStart } from './vim/cells'
 import * as Ex from './vim/command'
+import * as Hint from './vim/hints'
 import * as Jump from './vim/jump'
 import * as Keymap from './vim/keymap'
 import {
@@ -442,12 +443,23 @@ export const selection = (
       )
     : Option.none()
 
-export const next = (
+export type Hints = Hint.Hints
+export type HintEntry = Hint.Entry
+export type HintScreen = Hint.Screen
+
+export const awaitsHints = (vim: Vim): boolean =>
+  vim.mode._tag !== 'Insert' && Hint.pends(vim)
+
+export const hints = (
   vim: Vim,
-): ReadonlyArray<Readonly<{ key: Keymap.Key; about: string }>> =>
-  vim.mode._tag === 'Visual'
-    ? Keymap.next(Keymap.visual, vim)
-    : Keymap.next(Keymap.normal, vim)
+  kept: Kept,
+  screen: Hint.Screen,
+): Option.Option<Hint.Hints> =>
+  awaitsHints(vim)
+    ? vim.mode._tag === 'Visual'
+      ? Hint.of(Keymap.visual, vim, kept.registers, screen)
+      : Hint.of(Keymap.normal, vim, kept.registers, screen)
+    : Option.none()
 
 const placeInsert = (
   buffer: Buffer.Buffer,

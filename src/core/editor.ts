@@ -112,6 +112,7 @@ export type Outcome = Readonly<{
   need: Option.Option<Need>
   reveal: Reveal
   writeClipboard: Option.Option<string>
+  save: boolean
 }>
 
 export type Part = Readonly<{ text: string; isPreedit: boolean }>
@@ -326,6 +327,7 @@ const done = (unrested: Editor, reveal: Reveal = 'Nearest'): Outcome => {
     need: Option.none(),
     reveal,
     writeClipboard: Option.none(),
+    save: false,
   }
 }
 
@@ -737,7 +739,11 @@ const vimDone = (
   )
   return {
     ...settled,
-    outcome: { ...settled.outcome, writeClipboard: step.clipboard },
+    outcome: {
+      ...settled.outcome,
+      writeClipboard: step.clipboard,
+      save: step.save,
+    },
   }
 }
 
@@ -806,11 +812,14 @@ const promptPlan = (editor: Editor, asking: Asking, input: Input): Plan => {
   if (Vim.isScreenKey(input)) {
     return inputPlan({ ...editor, prompt: Option.none() }, input)
   }
-  const { prompt, act } = Prompt.feed(asking.prompt, editor.kept.history, input)
-  const remembering = () => ({
-    ...editor.kept,
-    history: Prompt.remembered(editor.kept.history, prompt.line.text),
-  })
+  const history = Vim.promptHistory(editor.kept, asking.resume)
+  const { prompt, act } = Prompt.feed(asking.prompt, history, input)
+  const remembering = () =>
+    Vim.withPromptHistory(
+      editor.kept,
+      asking.resume,
+      Prompt.remembered(history, prompt.line.text),
+    )
   return Prompt.Act.match(act, {
     Stay: () =>
       now({ ...editor, prompt: Option.some({ ...asking, prompt }) }, 'None'),
@@ -830,7 +839,7 @@ const promptPlan = (editor: Editor, asking: Asking, input: Input): Plan => {
       return Option.match(
         Option.flatMap(editor.vim, vim =>
           Option.map(
-            Vim.searched(
+            Vim.resumed(
               vim,
               editor.buffer,
               kept,
@@ -1072,6 +1081,7 @@ const run = (editor: Editor, queued: Queued): Outcome => {
         ? 'None'
         : 'Nearest',
     writeClipboard: Option.none(),
+    save: false,
   }
 }
 
@@ -1119,6 +1129,7 @@ const replay = (start: Outcome, queued: ReadonlyArray<Queued>): Outcome => {
             result.writeClipboard,
             () => reached.outcome.writeClipboard,
           ),
+          save: result.save || reached.outcome.save,
         },
         ran: reached.ran + 1,
       }
@@ -1143,6 +1154,11 @@ const countPendingReveal = (outcome: Outcome): Outcome =>
 export const revealed = (editor: Editor): Editor => ({
   ...editor,
   pendingReveals: Math.max(0, editor.pendingReveals - 1),
+})
+
+export const noticed = (editor: Editor, notice: string): Editor => ({
+  ...editor,
+  notice: Option.some(notice),
 })
 
 export const withoutNotice = (editor: Editor): Editor =>
@@ -1263,6 +1279,7 @@ export const resized = (editor: Editor, rows: number): Outcome => {
     need: Option.none(),
     reveal: 'Nearest',
     writeClipboard: Option.none(),
+    save: false,
   })
 }
 
@@ -1385,7 +1402,7 @@ export const paint = (editor: Editor): Frame => {
       prompt: Option.map(editor.prompt, ({ prompt: { line }, resume }) => {
         const under = Line.letterUnderCaret(line)
         return {
-          lead: resume.way === 'Forward' ? '/' : '?',
+          lead: Vim.promptLead(resume),
           before: line.text.slice(0, line.caret),
           preedit: line.preedit,
           under,

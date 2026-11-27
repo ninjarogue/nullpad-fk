@@ -36,10 +36,10 @@ const numberOf = (digits: string): number =>
 const tokens = (text: string): ReadonlyArray<RegExpMatchArray> =>
   Array.fromIterable(text.matchAll(/[+-]\d*|\d+|[ \t]+|[^+\-\d \t][^]*/gu))
 
-const isAddressToken = ([token]: RegExpMatchArray): boolean =>
+const isOffsetOrBlank = ([token]: RegExpMatchArray): boolean =>
   /^[+\-\d \t]/u.test(token)
 
-const offsetOf = ([token]: RegExpMatchArray): ReadonlyArray<number> => {
+const offsetsOf = ([token]: RegExpMatchArray): ReadonlyArray<number> => {
   const sign = token.startsWith('-') ? -1 : 1
   const digits = token.replace(/^[+-]/u, '')
   return /^[ \t]/u.test(token)
@@ -80,7 +80,7 @@ export const parse = (line: string): Command => {
     return text === '' ? Command.cases.Empty.make({}) : commandOf(text)
   }
   const { anchor, rest } = anchored(text)
-  const [addressTokens, others] = Array.span(tokens(rest), isAddressToken)
+  const [offsetTokens, others] = Array.span(tokens(rest), isOffsetOrBlank)
   const remainder = skipped(
     Array.match(others, {
       onEmpty: () => '',
@@ -89,7 +89,7 @@ export const parse = (line: string): Command => {
   )
   return remainder === ''
     ? Command.cases.Goto.make({
-        address: { anchor, offsets: Array.flatMap(addressTokens, offsetOf) },
+        address: { anchor, offsets: Array.flatMap(offsetTokens, offsetsOf) },
       })
     : Command.cases.Unknown.make({ text })
 }

@@ -50,17 +50,17 @@ export const Repeat = Schema.Struct({
 })
 export type Repeat = typeof Repeat.Type
 
-export const Lines = Schema.Struct({
+export const PromptHistories = Schema.Struct({
   search: Schema.Array(Schema.String),
   command: Schema.Array(Schema.String),
 })
-export type Lines = typeof Lines.Type
+export type PromptHistories = typeof PromptHistories.Type
 
 export const Kept = Schema.Struct({
   registers: Operators.Registers,
   dot: Schema.Option(Repeat),
   seek: Seek.Memory,
-  history: Lines,
+  history: PromptHistories,
 })
 export type Kept = typeof Kept.Type
 

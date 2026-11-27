@@ -118,7 +118,7 @@ export const Model = Schema.Struct({
   finder: Schema.Option(Finder.Finder),
   screen: Screen,
   edits: Schema.Int,
-  written: Schema.Literals(['Unowed', 'Owed']),
+  writtenNotice: Schema.Literals(['Unowed', 'Owed']),
   seed: Schema.String,
   created: Schema.Int,
   now: Schema.Finite,
@@ -141,7 +141,7 @@ const show = (
 ): Model =>
   modifyFields(model, {
     editor: editor => Editor.reopen(editor, text, caretAt, landing),
-    written: () => 'Unowed',
+    writtenNotice: () => 'Unowed',
     note: () => ({
       id: note.id,
       folder: note.folder,
@@ -385,32 +385,32 @@ const saveNow = (model: Model): UpdateReturn => {
 const saveIfDirty = (model: Model): UpdateReturn =>
   isDirty(model) ? saveNow(model) : { model }
 
-const writtenNotice = 'written'
-
 const settleWritten = (update: UpdateReturn): UpdateReturn => {
   const { model } = update
-  if (model.written === 'Unowed') {
+  if (model.writtenNotice === 'Unowed') {
     return update
   }
   if (model.store === 'Unavailable') {
     return {
       ...update,
-      model: modifyFields(model, { written: () => 'Unowed' }),
+      model: modifyFields(model, { writtenNotice: () => 'Unowed' }),
     }
   }
   return model.note.save._tag === 'Idle' && !isDirty(model)
     ? {
         ...update,
         model: modifyFields(model, {
-          written: () => 'Unowed',
-          editor: editor => Editor.noticed(editor, writtenNotice),
+          writtenNotice: () => 'Unowed',
+          editor: editor => Editor.noticed(editor, 'written'),
         }),
       }
     : update
 }
 
 const write = (model: Model): UpdateReturn =>
-  settleWritten(saveIfDirty(modifyFields(model, { written: () => 'Owed' })))
+  settleWritten(
+    saveIfDirty(modifyFields(model, { writtenNotice: () => 'Owed' })),
+  )
 
 const leave = (model: Model): UpdateReturn => {
   const { id, save } = model.note
@@ -548,19 +548,13 @@ const applyFinder = (model: Model, outcome: Finder.Outcome): UpdateReturn => {
   })
 }
 
-const respond = (model: Model, outcome: Editor.Outcome): UpdateReturn => {
-  const responded = responseTo(model, outcome)
-  if (!outcome.save) {
-    return responded
-  }
-  const written = write(responded.model)
-  return {
-    model: written.model,
-    commands: [...(responded.commands ?? []), ...(written.commands ?? [])],
-  }
-}
+const respond = (model: Model, outcome: Editor.Outcome): UpdateReturn =>
+  Update.combine(model, [
+    before => adopt(before, outcome),
+    ...(outcome.save ? [write] : []),
+  ])
 
-const responseTo = (model: Model, outcome: Editor.Outcome): UpdateReturn => {
+const adopt = (model: Model, outcome: Editor.Outcome): UpdateReturn => {
   const changed = !Editor.sameText(model.editor, outcome.editor)
   const edits = changed ? model.edits + 1 : model.edits
   return {
@@ -1004,7 +998,7 @@ export const init: Runtime.ApplicationInit<
     finder: Option.none(),
     screen: Screen.cases.Edit.make({}),
     edits: 0,
-    written: 'Unowed',
+    writtenNotice: 'Unowed',
     seed,
     created: 1,
     now,
@@ -1031,7 +1025,7 @@ const actsOfThePerson: ReadonlyArray<Message['_tag']> = [
 const withoutNotice = (model: Model, message: Message): Model =>
   actsOfThePerson.includes(message._tag)
     ? modifyFields(model, {
-        written: () => 'Unowed',
+        writtenNotice: () => 'Unowed',
         editor: editor =>
           Option.isSome(editor.notice) ? Editor.withoutNotice(editor) : editor,
       })

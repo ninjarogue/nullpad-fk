@@ -37,6 +37,7 @@ import {
   scrollToEnd,
   statusLine,
   surface,
+  whichKey,
 } from './surface'
 
 export { Message }
@@ -1286,17 +1287,26 @@ const screenView = (
   frame: Editor.Frame,
   h: HtmlBuilder<Message>,
 ): Html => {
+  const shownHints = Option.filter(
+    frame.hints,
+    () => model.screen._tag === 'Edit' && Option.isNone(model.finder),
+  )
   const editorSurface = surface(
     frame,
     Option.isSome(model.finder) || isPrompting(frame)
       ? 'Blurred'
       : model.keyboard,
+    shownHints,
     h,
   )
   return h.div(
     [h.Class(model.screen._tag === 'Read' ? 'stage reading' : 'stage')],
     [
       editorSurface,
+      ...Option.match(shownHints, {
+        onNone: () => [],
+        onSome: shown => [whichKey(shown, h)],
+      }),
       ...(model.screen._tag === 'Read'
         ? [
             reading(

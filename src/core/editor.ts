@@ -132,6 +132,8 @@ export type PaintedLine = Readonly<{
 
 export type Selection = Vim.Shown
 
+export type Hints = Vim.Hints
+
 export type PromptLine = Readonly<{
   lead: string
   before: string

@@ -4,14 +4,15 @@ import { type BrowserContext } from '@playwright/test'
 
 import {
   type ClipboardKind,
+  type Input,
   type Nullpad,
+  type Point,
   type Screen,
   driver,
   linesOf,
   settle,
 } from './nullpad.ts'
 
-type Point = Readonly<{ x: number; y: number }>
 type Spot = Readonly<{ row: number; cell: number }>
 type Expectation = Readonly<{
   text?: string
@@ -35,18 +36,17 @@ type ClipboardStep =
   | Readonly<{ copy: string }>
   | Readonly<{ hold: boolean }>
 
-export type Step =
-  | Readonly<{ type: string }>
-  | Readonly<{ press: string; times?: number }>
-  | Readonly<{ paste: string }>
-  | Readonly<{ clipboard: ClipboardStep }>
-  | Readonly<{
-      compose: string
-      replacing?: Readonly<{ start: number; end: number }>
-    }>
-  | Readonly<{ commit: string }>
+type InputStep =
+  | Exclude<Input, Readonly<{ click: Point }>>
   | Readonly<{ click: Point | Spot }>
-  | Readonly<{ wheel: number }>
+
+export type Step =
+  | InputStep
+  | Readonly<{
+      burst: ReadonlyArray<ReadonlyArray<InputStep>>
+      stall?: number
+    }>
+  | Readonly<{ clipboard: ClipboardStep }>
   | Readonly<{ drag: Readonly<{ from: Point; to: Point }> }>
   | Readonly<{ scheme: 'light' | 'dark' }>
   | Readonly<{ resize: Readonly<{ width: number; height: number }> }>
@@ -65,6 +65,7 @@ const stepKeys = [
   'commit',
   'click',
   'wheel',
+  'burst',
   'drag',
   'scheme',
   'resize',
@@ -75,29 +76,44 @@ const stepKeys = [
   'expect',
 ] as const
 
+const inputKinds = [
+  'type',
+  'press',
+  'paste',
+  'compose',
+  'commit',
+  'click',
+  'wheel',
+] as const
+
 const captionLimit = 60
 const noteLimit = 90
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value)
 
-export const parseStep = (value: unknown, index: number): Step => {
+export const parseStep = (
+  value: unknown,
+  index: number,
+  accepted: ReadonlyArray<(typeof stepKeys)[number]> = stepKeys,
+): Step => {
   const fail = (why: string): never => {
     throw new Error(`step ${index + 1} ${JSON.stringify(value)}: ${why}`)
   }
   if (!isRecord(value)) {
     return fail('is not an object')
   }
-  const kinds = stepKeys.filter(key => key in value)
+  const kinds = accepted.filter(key => key in value)
   const [kind] = kinds
   if (kinds.length !== 1 || kind === undefined) {
-    return fail(`needs exactly one of ${stepKeys.join(', ')}`)
+    return fail(`needs exactly one of ${accepted.join(', ')}`)
   }
   const allowed: ReadonlyArray<string> = [
     kind,
     ...(kind === 'press' ? ['times'] : []),
     ...(kind === 'compose' ? ['replacing'] : []),
     ...(kind === 'caption' ? ['note'] : []),
+    ...(kind === 'burst' ? ['stall'] : []),
   ]
   const extra = Object.keys(value).filter(key => !allowed.includes(key))
   if (extra.length > 0) {
@@ -198,6 +214,28 @@ export const parseStep = (value: unknown, index: number): Step => {
         : fail('click takes { row, cell } or { x, y }')
     case 'wheel':
       return { wheel: number(body, 'wheel') }
+    case 'burst': {
+      const shape =
+        'burst takes a list of frames, each a list of input steps, such as [[{"press":"End"},{"type":"x"}]]'
+      const frames = Array.isArray(body)
+        ? body.map((frame: unknown) =>
+            Array.isArray(frame) && frame.length > 0
+              ? frame.map((each: unknown) => parseInputStep(each, index))
+              : fail(shape),
+          )
+        : []
+      if (frames.length === 0) {
+        return fail(shape)
+      }
+      const stall = value['stall']
+      if (stall === undefined) {
+        return { burst: frames }
+      }
+      const milliseconds = number(stall, 'stall')
+      return milliseconds > 0 && milliseconds <= 10_000
+        ? { burst: frames, stall: milliseconds }
+        : fail('stall takes milliseconds from 1 to 10000')
+    }
     case 'drag': {
       const shape = 'drag takes { from: { x, y }, to: { x, y } }'
       if (!isRecord(body)) {
@@ -306,6 +344,9 @@ export const parseStep = (value: unknown, index: number): Step => {
     }
   }
 }
+
+const parseInputStep = (value: unknown, index: number) =>
+  parseStep(value, index, inputKinds) as InputStep
 
 export const parseSteps = (json: string): ReadonlyArray<Step> => {
   const value: unknown = JSON.parse(json)
@@ -581,6 +622,16 @@ export const play = async (
     await nullpad.click(point.x, point.y)
   } else if ('wheel' in step) {
     await nullpad.wheel(step.wheel)
+  } else if ('burst' in step) {
+    const screen = await nullpad.screen()
+    await nullpad.burst(
+      step.burst.map(frame =>
+        frame.map(input =>
+          'click' in input ? { click: clickPoint(screen, input.click) } : input,
+        ),
+      ),
+      step.stall === undefined ? {} : { stall: step.stall },
+    )
   } else if ('drag' in step) {
     await drag(nullpad, step.drag.from, step.drag.to)
   } else if ('scheme' in step) {

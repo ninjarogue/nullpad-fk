@@ -1,5 +1,6 @@
 import {
   type Nullpad,
+  burst,
   expect,
   numberedLines,
   openFresh,
@@ -207,36 +208,16 @@ test('300 keys sent while the main thread is blocked land in order', async ({
           : text + step,
     '',
   )
-  await nullpad.page.evaluate(() => {
-    setTimeout(() => {
-      const start = performance.now()
-      while (performance.now() - start < 400) {}
-    }, 0)
-  })
-  const named: Readonly<Record<string, [string, number]>> = {
-    Enter: ['Enter', 13],
-    Backspace: ['Backspace', 8],
-  }
-  const sends = steps.flatMap(step => {
-    const [key, code] = named[step] ?? [step, 0]
-    const down =
-      code === 0
-        ? { type: 'keyDown' as const, key, text: key, unmodifiedText: key }
-        : {
-            type: 'rawKeyDown' as const,
-            key,
-            code: key,
-            windowsVirtualKeyCode: code,
-          }
-    return [
-      nullpad.cdp.send('Input.dispatchKeyEvent', down),
-      nullpad.cdp.send('Input.dispatchKeyEvent', {
-        type: 'keyUp' as const,
-        key,
-      }),
-    ]
-  })
-  await Promise.all(sends)
+  await nullpad.burst(
+    [
+      steps.map(step =>
+        step === 'Enter' || step === 'Backspace'
+          ? { press: step }
+          : { type: step },
+      ),
+    ],
+    { stall: 400 },
+  )
   await expect.poll(() => nullpad.text()).toBe(expected)
   expect((await nullpad.cursor())?.inside, 'cursor on screen').toBe(true)
 })
@@ -411,6 +392,27 @@ test('PageDown and PageUp move the cursor a textarea page and scroll its row to 
     { key: 'PageUp', line: 2, column: 4, row: 0, top: 2 },
     { key: 'PageUp', line: 1, column: 1, row: 0, top: 1 },
   ])
+})
+
+test('Delete, PageDown and a letter in one frame scroll the cursor’s row to the top, as PageDown alone does', async ({
+  nullpad,
+}) => {
+  test.fail(
+    true,
+    'known bug: a letter queued behind a queued PageDown leaves the screen where it was',
+  )
+  await nullpad.paste(numberedLines(200))
+  await nullpad.press('Control+Home')
+  const page = await textareaPageRows(nullpad)
+  await nullpad.burst([
+    [{ press: 'Delete' }, { press: 'PageDown' }, { type: 'x' }],
+  ])
+  expect(await pageStop(nullpad)).toEqual({
+    line: 1 + page,
+    column: 2,
+    row: 0,
+    top: 1 + page,
+  })
 })
 
 test('PageDown on the last page goes to the end of the note, and PageUp from there keeps the last page on screen', async ({
@@ -814,17 +816,17 @@ test('a burst of arrows, Home, End, Delete, Backspace and typing sent while the 
   baseURL,
 }) => {
   const pair = await openPair(browser, baseURL ?? '')
-  const named: Readonly<Record<string, number>> = {
-    Enter: 13,
-    Backspace: 8,
-    Delete: 46,
-    ArrowLeft: 37,
-    ArrowUp: 38,
-    ArrowRight: 39,
-    ArrowDown: 40,
-    Home: 36,
-    End: 35,
-  }
+  const named = new Set([
+    'Enter',
+    'Backspace',
+    'Delete',
+    'ArrowLeft',
+    'ArrowUp',
+    'ArrowRight',
+    'ArrowDown',
+    'Home',
+    'End',
+  ])
   const pattern = [
     'ab',
     'Enter',
@@ -847,55 +849,16 @@ test('a burst of arrows, Home, End, Delete, Backspace and typing sent while the 
     'ArrowUp',
     'm',
   ]
-  const steps = Array.from({ length: 6 }, () => pattern)
+  const inputs = Array.from({ length: 6 }, () => pattern)
     .flat()
-    .flatMap(step => (step in named ? [step] : [...step]))
-  const burst = async (page: typeof pair.nullpad) => {
-    const cdp = await page.context().newCDPSession(page)
-    await page.evaluate(() => {
-      setTimeout(() => {
-        const start = performance.now()
-        while (performance.now() - start < 400) {}
-      }, 0)
-    })
-    await Promise.all(
-      steps.flatMap(step => {
-        const code = named[step]
-        const down =
-          code === undefined
-            ? {
-                type: 'keyDown' as const,
-                key: step,
-                text: step,
-                unmodifiedText: step,
-              }
-            : {
-                type:
-                  step === 'Enter'
-                    ? ('keyDown' as const)
-                    : ('rawKeyDown' as const),
-                key: step,
-                code: step,
-                windowsVirtualKeyCode: code,
-                ...(step === 'Enter'
-                  ? { text: '\r', unmodifiedText: '\r' }
-                  : {}),
-              }
-        return [
-          cdp.send('Input.dispatchKeyEvent', down),
-          cdp.send('Input.dispatchKeyEvent', {
-            type: 'keyUp' as const,
-            key: step,
-          }),
-        ]
-      }),
-    )
-  }
+    .map(step => (named.has(step) ? { press: step } : { type: step }))
+  const sendBurst = async (page: typeof pair.nullpad) =>
+    burst(page, await page.context().newCDPSession(page), [inputs], 400)
   await openFresh(pair.nullpad)
   await pair.textarea.evaluate(() =>
     document.querySelector('textarea')?.focus(),
   )
-  await Promise.all([burst(pair.nullpad), burst(pair.textarea)])
+  await Promise.all([sendBurst(pair.nullpad), sendBurst(pair.textarea)])
   const expected = await pair.textarea.evaluate(() => {
     const area = document.querySelector('textarea')
     const before = area?.value.slice(0, area.selectionStart) ?? ''
@@ -1002,6 +965,33 @@ test('the cursor is drawn where the status line puts it after Backspace joins li
     'the cursor after both spaces',
   ).toEqual({ cell: 3, row: 0 })
   expect(screen.status).toEqual({ line: 1, column: 4, lineCount: 1 })
+})
+
+test('Ctrl+Home in the frame after Backspace took out the last line shows the cursor on line 1', async ({
+  nullpad,
+}) => {
+  test.fail(
+    true,
+    'known bug: the scroll Chrome reports after the note got shorter takes back the reveal of a key in the next frame',
+  )
+  await nullpad.paste(numberedLines(30))
+  for (const lineCount of [29, 28, 27]) {
+    const lastLine = `line ${lineCount + 1}`
+    await nullpad.press('Control+End')
+    await nullpad.burst([
+      [{ press: 'Backspace', times: lastLine.length + 1 }],
+      [{ press: 'Control+Home' }],
+    ])
+    const screen = await nullpad.screen()
+    expect(
+      screen.status,
+      `the cursor at the start of ${lineCount} lines`,
+    ).toEqual({ line: 1, column: 1, lineCount })
+    expect(
+      { top: screen.rows[0]?.number, cursorOnScreen: screen.cursor?.inside },
+      `line 1 at the top with the cursor on it, ${lineCount} lines`,
+    ).toEqual({ top: '1', cursorOnScreen: true })
+  }
 })
 
 test('a key sent with no gap after a big paste and Ctrl+Home is never lost', async ({

@@ -312,6 +312,20 @@ export const openFresh = async (page: Page, path = '/'): Promise<void> => {
   )
 }
 
+export type JumpLabel = Readonly<{
+  label: string
+  line: number
+  column: number
+  from: number
+  to: number
+  left: number
+  top: number
+  width: number
+  height: number
+}>
+
+export type JumpMatch = Readonly<{ line: number; from: number; to: number }>
+
 export type FinderRow = Readonly<{
   text: string
   folder: string
@@ -621,6 +635,46 @@ export const driver = (page: Page, cdp: CDPSession) => {
         }
         return isBlock ? blockLines.join('\n') : selected
       })
+    },
+    jumpLabels: async (): Promise<ReadonlyArray<JumpLabel>> => {
+      await settle(page)
+      return page.evaluate(() =>
+        [...document.querySelectorAll<HTMLElement>('#jump > [data-label]')].map(
+          element => {
+            const rect = element.getBoundingClientRect()
+            return {
+              label: element.textContent ?? '',
+              line: Number(element.dataset['line']),
+              column: Number(element.dataset['column']),
+              from: Number(element.dataset['from']),
+              to: Number(element.dataset['to']),
+              left: rect.left,
+              top: rect.top,
+              width: rect.width,
+              height: rect.height,
+            }
+          },
+        ),
+      )
+    },
+    jumpMatches: async (): Promise<ReadonlyArray<JumpMatch>> => {
+      await settle(page)
+      const value = await page.evaluate(
+        () =>
+          document
+            .querySelector('.surface')
+            ?.getAttribute('data-jump-matches') ?? '',
+      )
+      return value === ''
+        ? []
+        : value.split(';').map(item => {
+            const [line, from, to] = item.split(',').map(Number)
+            return { line: line ?? NaN, from: from ?? NaN, to: to ?? NaN }
+          })
+    },
+    isJumping: async (): Promise<boolean> => {
+      await settle(page)
+      return (await page.locator('.surface.jumping').count()) > 0
     },
     notice: async () => {
       await settle(page)

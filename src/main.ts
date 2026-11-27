@@ -1029,8 +1029,12 @@ const actsOfThePerson: ReadonlyArray<Message['_tag']> = [
 ]
 
 const withoutNotice = (model: Model, message: Message): Model =>
-  actsOfThePerson.includes(message._tag) && Option.isSome(model.editor.notice)
-    ? modifyFields(model, { editor: Editor.withoutNotice })
+  actsOfThePerson.includes(message._tag)
+    ? modifyFields(model, {
+        written: () => 'Unowed',
+        editor: editor =>
+          Option.isSome(editor.notice) ? Editor.withoutNotice(editor) : editor,
+      })
     : model
 
 const handle = (model: Model, message: Message) =>

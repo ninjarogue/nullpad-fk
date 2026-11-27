@@ -27,6 +27,8 @@ const segmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' })
 
 type Box = Readonly<{ left: number; top: number; width: number }>
 
+type Position = Readonly<{ line: number; column: number }>
+
 const jetBrainsMonoAdvanceEm = 0.6
 
 const minCaretWidthPx = 2
@@ -623,6 +625,65 @@ const pointAnswer = (
   })
 }
 
+const isBefore = (a: Position, b: Position): boolean =>
+  a.line < b.line || (a.line === b.line && a.column < b.column)
+
+const rowEnds = (
+  sheet: Sheet,
+  y: number,
+): Option.Option<ReadonlyArray<Position>> => {
+  const { line: index } = lineAt(sheet, y)
+  const lastIndex = lastLineIndex(sheet.surface)
+  return Option.flatMap(
+    lineElement(sheet.surface, Math.min(index, lastIndex)),
+    line => {
+      if (index > lastIndex) {
+        const end = { line: lastIndex, column: lineText(line).length }
+        return Option.some([end])
+      }
+      const edges = textEdges(line)
+      return Option.all([
+        pointAt(edges.left + 0.5, y),
+        pointAt(edges.right - 0.5, y),
+      ]).pipe(
+        Option.map(found =>
+          Array.map(found, ({ line: hit, column }) => ({
+            line: indexOf(hit),
+            column,
+          })),
+        ),
+      )
+    },
+  )
+}
+
+const screenAnswer = (sheet: Sheet, from: Position): Answer =>
+  Option.match(lineElement(sheet.surface, from.line), {
+    onNone: () => stay(0),
+    onSome: line => {
+      bringOnScreen(
+        sheet,
+        caretBox(line, from.column, false).top + sheet.rowHeight / 2,
+      )
+      const top = rowEnds(sheet, sheet.viewTop + sheet.rowHeight / 2)
+      const bottom = rowEnds(sheet, sheet.viewBottom - sheet.rowHeight / 2)
+      return Option.match(Option.all([top, bottom]), {
+        onNone: () => stay(0),
+        onSome: ([upper, lower]) => {
+          const first = Array.reduce(upper, upper[0] ?? from, (a, b) =>
+            isBefore(b, a) ? b : a,
+          )
+          const last = Array.reduce(lower, lower[0] ?? from, (a, b) =>
+            isBefore(a, b) ? b : a,
+          )
+          return isBefore(last, first)
+            ? stay(0)
+            : { landing: { _tag: 'Screen', first, last }, aimFromTextLeft: 0 }
+        },
+      })
+    },
+  })
+
 /** Chrome pages a text box by seven eighths of its client height in whole pixels, a whole row at a time. */
 const pageDistance = (sheet: Sheet): number =>
   Math.max(
@@ -639,7 +700,7 @@ const answer = (sheet: Sheet, query: Query): Answer =>
         onNone: () => stay(0),
         onSome: element => pointAnswer(sheet, element, x, yInLine),
       }),
-    Screen: () => stay(0),
+    Screen: ({ at: from }) => screenAnswer(sheet, from),
     Step: ({ at: from, direction }) =>
       Option.match(lineElement(sheet.surface, from.line), {
         onNone: () => stay(0),

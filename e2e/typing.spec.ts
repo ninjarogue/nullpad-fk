@@ -411,6 +411,79 @@ test('Delete, PageDown and a letter in one frame scroll the cursor’s row to th
   })
 })
 
+test('PageDown then Enter in one frame scroll the landing line to the top and move the cursor one row down, as the two keys sent apart do', async ({
+  nullpad,
+}) => {
+  await nullpad.paste(numberedLines(200))
+  await nullpad.press('Control+Home')
+  const page = await textareaPageRows(nullpad)
+  await nullpad.burst([[{ press: 'PageDown' }, { press: 'Enter' }]])
+  const screen = await nullpad.screen()
+  expect(
+    {
+      status: screen.status,
+      top: screen.rows[0]?.number,
+      row: screen.cursor?.row,
+      inside: screen.cursor?.inside,
+    },
+    `PageDown puts line ${1 + page} at the top, then Enter opens an empty line there and the cursor moves one row down without scrolling`,
+  ).toEqual({
+    status: { line: 2 + page, column: 1, lineCount: 201 },
+    top: String(1 + page),
+    row: 1,
+    inside: true,
+  })
+})
+
+test('Ctrl+End twice, x, Home and x in one frame, then Home and y in the next, end with all of the wrapped last line on screen, as the keys sent apart do', async ({
+  nullpad,
+}) => {
+  await nullpad.paste(
+    Array.from({ length: 200 }, (_, i) =>
+      i % 4 === 3 ? `line ${i + 1} ${'word '.repeat(60)}` : `line ${i + 1}`,
+    ).join('\n'),
+  )
+  await nullpad.press('Control+,')
+  await nullpad.press('Control+Home')
+  await nullpad.press('PageDown', 3)
+  await nullpad.burst([
+    [
+      { press: 'Control+End' },
+      { press: 'Control+End' },
+      { type: 'x' },
+      { press: 'Home' },
+      { type: 'x' },
+    ],
+    [{ press: 'Home' }, { type: 'y' }],
+  ])
+  const screen = await nullpad.screen()
+  const lastLine = screen.rows.filter(
+    row => row.lineId === screen.rows.at(-1)?.lineId,
+  )
+  expect(
+    {
+      status: screen.status,
+      rows: lastLine.length > 1,
+      first: lastLine[0]?.start,
+      lastRowEnds: lastLine.at(-1)?.text.trimEnd().endsWith('word'),
+      cursorRow: screen.cursor?.row,
+      cursorInside: screen.cursor?.inside,
+    },
+    'the last line, wrapped over several rows, is the last thing on screen, from its first row to its end, with the cursor on its first row',
+  ).toEqual({
+    status: { line: 200, column: 1, lineCount: 200 },
+    rows: true,
+    first: 0,
+    lastRowEnds: true,
+    cursorRow: screen.rows.length - lastLine.length,
+    cursorInside: true,
+  })
+  expect(
+    screen.rows.at(-1)?.bottom,
+    'the last row of the note is fully above the bottom of the text area',
+  ).toBeLessThanOrEqual(screen.area.bottom)
+})
+
 test('PageDown on the last page goes to the end of the note, and PageUp from there keeps the last page on screen', async ({
   nullpad,
 }) => {

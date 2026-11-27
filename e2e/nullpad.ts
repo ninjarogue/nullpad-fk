@@ -410,6 +410,29 @@ const anotherApp = async (page: Page) => {
 const isVimOff = async (page: Page): Promise<boolean> =>
   (await page.locator('.status .mode').innerText()) === 'EDIT'
 
+const sendPaste = async (
+  page: Page,
+  cdp: CDPSession,
+  text: string,
+): Promise<void> => {
+  await page.evaluate(value => navigator.clipboard.writeText(value), text)
+  const key = (await isVimOff(page))
+    ? { key: 'v', code: 'KeyV', windowsVirtualKeyCode: 86, modifiers: 2 }
+    : { key: 'V', code: 'KeyV', windowsVirtualKeyCode: 86, modifiers: 10 }
+  await cdp.send('Input.dispatchKeyEvent', {
+    type: 'rawKeyDown',
+    ...key,
+    commands: ['paste'],
+  })
+  await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', ...key })
+}
+
+const reloadApp = async (page: Page): Promise<void> => {
+  await page.reload()
+  await page.locator('#caret').waitFor()
+  await page.evaluate(() => document.fonts.ready.then(() => undefined))
+}
+
 export type Point = Readonly<{ x: number; y: number }>
 
 export type Replacing = Readonly<{ start: number; end: number }>
@@ -1021,9 +1044,7 @@ export const driver = (page: Page, cdp: CDPSession) => {
       return readFinder(page)
     },
     reload: async () => {
-      await page.reload()
-      await page.locator('#caret').waitFor()
-      await page.evaluate(() => document.fonts.ready.then(() => undefined))
+      await reloadApp(page)
       await settle(page)
     },
     text: async () => textOf(await screen()),
@@ -1040,16 +1061,7 @@ export const driver = (page: Page, cdp: CDPSession) => {
       await settle(page)
     },
     paste: async (text: string) => {
-      await page.evaluate(value => navigator.clipboard.writeText(value), text)
-      const key = (await isVimOff(page))
-        ? { key: 'v', code: 'KeyV', windowsVirtualKeyCode: 86, modifiers: 2 }
-        : { key: 'V', code: 'KeyV', windowsVirtualKeyCode: 86, modifiers: 10 }
-      await cdp.send('Input.dispatchKeyEvent', {
-        type: 'rawKeyDown',
-        ...key,
-        commands: ['paste'],
-      })
-      await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', ...key })
+      await sendPaste(page, cdp, text)
       await settle(page)
     },
     compose: async (
@@ -1464,9 +1476,8 @@ export const startVimRow = async (
   line: number,
   column: number,
 ): Promise<void> => {
-  const { page } = nullpad
+  const { page, cdp } = nullpad
   const mode = page.locator('.status .mode')
-  await settle(page)
   if ((await mode.innerText()) === 'EDIT') {
     await page.keyboard.press('Control+,')
   }
@@ -1476,7 +1487,7 @@ export const startVimRow = async (
   for (const key of ['g', 'g', 'd', 'G']) {
     await page.keyboard.press(key)
   }
-  await nullpad.paste(text)
+  await sendPaste(page, cdp, text)
   const lineCount = text.split('\n').length
   await expect
     .poll(
@@ -1487,7 +1498,7 @@ export const startVimRow = async (
       { message: 'the pasted note is in the editor before the reload' },
     )
     .toBe(lineCount <= 40 ? text : lineCount)
-  await nullpad.reload()
+  await reloadApp(page)
   const keys = [
     'g',
     'g',
@@ -1498,15 +1509,19 @@ export const startVimRow = async (
   for (const key of keys) {
     await page.keyboard.press(key)
   }
-  await settle(page)
-  const status = await statusOf(page)
-  expect(status.lineCount, 'the row starts with its line count').toBe(lineCount)
-  if (lineCount <= 40) {
-    expect(
-      await textOf(await screenOf(page)),
-      'the row starts on its note',
-    ).toBe(text)
-  }
-  expect(await mode.innerText(), 'the row starts in NORMAL').toBe('NORMAL')
-  expect(status.line, 'the row starts on its line').toBe(line)
+  await expect
+    .poll(
+      async () => {
+        const screen = lineCount <= 40 ? await screenOf(page) : null
+        const status = screen === null ? await statusOf(page) : screen.status
+        return {
+          lineCount: status.lineCount,
+          text: screen === null ? text : textOf(screen),
+          mode: await mode.innerText(),
+          line: status.line,
+        }
+      },
+      { message: 'the row starts on its note, line count and line, in NORMAL' },
+    )
+    .toEqual({ lineCount, text, mode: 'NORMAL', line })
 }

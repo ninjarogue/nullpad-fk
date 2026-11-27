@@ -118,6 +118,7 @@ export const Model = Schema.Struct({
   finder: Schema.Option(Finder.Finder),
   screen: Screen,
   edits: Schema.Int,
+  written: Schema.Literals(['Unowed', 'Owed']),
   seed: Schema.String,
   created: Schema.Int,
   now: Schema.Finite,
@@ -140,6 +141,7 @@ const show = (
 ): Model =>
   modifyFields(model, {
     editor: editor => Editor.reopen(editor, text, caretAt, landing),
+    written: () => 'Unowed',
     note: () => ({
       id: note.id,
       folder: note.folder,
@@ -383,6 +385,33 @@ const saveNow = (model: Model): UpdateReturn => {
 const saveIfDirty = (model: Model): UpdateReturn =>
   isDirty(model) ? saveNow(model) : { model }
 
+const writtenNotice = 'written'
+
+const settleWritten = (update: UpdateReturn): UpdateReturn => {
+  const { model } = update
+  if (model.written === 'Unowed') {
+    return update
+  }
+  if (model.store === 'Unavailable') {
+    return {
+      ...update,
+      model: modifyFields(model, { written: () => 'Unowed' }),
+    }
+  }
+  return model.note.save._tag === 'Idle' && !isDirty(model)
+    ? {
+        ...update,
+        model: modifyFields(model, {
+          written: () => 'Unowed',
+          editor: editor => Editor.noticed(editor, writtenNotice),
+        }),
+      }
+    : update
+}
+
+const write = (model: Model): UpdateReturn =>
+  settleWritten(saveIfDirty(modifyFields(model, { written: () => 'Owed' })))
+
 const leave = (model: Model): UpdateReturn => {
   const { id, save } = model.note
   if (!Editor.isSavable(model.editor)) {
@@ -520,6 +549,18 @@ const applyFinder = (model: Model, outcome: Finder.Outcome): UpdateReturn => {
 }
 
 const respond = (model: Model, outcome: Editor.Outcome): UpdateReturn => {
+  const responded = responseTo(model, outcome)
+  if (!outcome.save) {
+    return responded
+  }
+  const written = write(responded.model)
+  return {
+    model: written.model,
+    commands: [...(responded.commands ?? []), ...(written.commands ?? [])],
+  }
+}
+
+const responseTo = (model: Model, outcome: Editor.Outcome): UpdateReturn => {
   const changed = !Editor.sameText(model.editor, outcome.editor)
   const edits = changed ? model.edits + 1 : model.edits
   return {
@@ -759,6 +800,38 @@ const heldChange = (save: SaveState): Option.Option<Storage.NoteChange> =>
     Saving: ({ maybeHeld }) => maybeHeld,
   })
 
+const failedSave = (
+  model: Model,
+  {
+    draft,
+    expectedRevision,
+    isEdit,
+    reason,
+  }: Parameters<typeof Message.FailedSaveNote>[0],
+): UpdateReturn => {
+  const noted =
+    reason === 'Unavailable'
+      ? modifyFields(model, { store: () => 'Unavailable' })
+      : model
+  if (draft.id !== noted.note.id) {
+    if (reason === 'Unavailable') {
+      return savePending(noted, draft.id, expectedRevision)
+    }
+    return isEdit ? copyLeftNote(noted, draft) : { model: noted }
+  }
+  return reason === 'Conflict'
+    ? { model: noted, commands: [ReadStoredNote({ id: draft.id })] }
+    : {
+        model: modifyFields(noted, {
+          note: open =>
+            modifyFields(open, {
+              savedEdits: () => -1,
+              save: () => SaveState.cases.Idle.make({}),
+            }),
+        }),
+      }
+}
+
 const confirmSave = (model: Model, note: Notes.Note): UpdateReturn => {
   const confirmed = modifyFields(model, {
     note: open =>
@@ -769,14 +842,16 @@ const confirmSave = (model: Model, note: Notes.Note): UpdateReturn => {
       }),
     store: () => 'Saving',
   })
-  return Option.match(heldChange(model.note.save), {
-    onNone: () => saveIfDirty(confirmed),
-    onSome: change =>
-      Update.combine(confirmed, [
-        stepModel => applyChange(stepModel, change),
-        saveIfDirty,
-      ]),
-  })
+  return settleWritten(
+    Option.match(heldChange(model.note.save), {
+      onNone: () => saveIfDirty(confirmed),
+      onSome: change =>
+        Update.combine(confirmed, [
+          stepModel => applyChange(stepModel, change),
+          saveIfDirty,
+        ]),
+    }),
+  )
 }
 
 const savePending = (
@@ -929,6 +1004,7 @@ export const init: Runtime.ApplicationInit<
     finder: Option.none(),
     screen: Screen.cases.Edit.make({}),
     edits: 0,
+    written: 'Unowed',
     seed,
     created: 1,
     now,
@@ -1011,29 +1087,7 @@ const handle = (model: Model, message: Message) =>
           }
         : settled
     },
-    FailedSaveNote: ({ draft, expectedRevision, isEdit, reason }) => {
-      const noted =
-        reason === 'Unavailable'
-          ? modifyFields(model, { store: () => 'Unavailable' })
-          : model
-      if (draft.id !== noted.note.id) {
-        if (reason === 'Unavailable') {
-          return savePending(noted, draft.id, expectedRevision)
-        }
-        return isEdit ? copyLeftNote(noted, draft) : { model: noted }
-      }
-      return reason === 'Conflict'
-        ? { model: noted, commands: [ReadStoredNote({ id: draft.id })] }
-        : {
-            model: modifyFields(noted, {
-              note: open =>
-                modifyFields(open, {
-                  savedEdits: () => -1,
-                  save: () => SaveState.cases.Idle.make({}),
-                }),
-            }),
-          }
-    },
+    FailedSaveNote: failure => settleWritten(failedSave(model, failure)),
     CompletedReadStoredNote: ({ id, maybeNote }) => {
       if (id !== model.note.id) {
         return { model }

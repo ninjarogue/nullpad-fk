@@ -848,17 +848,13 @@ const placeLabels = (places: ReadonlyArray<LabelPlace>, shift: Shift): void => {
   }
 }
 
-const jumpHighlight = new Highlight()
-
-CSS.highlights.set('jump-match', jumpHighlight)
-
 const markMatches = (surface: HTMLElement): void => {
   const written = surface.dataset['jumpMatches']
-  const highlight = jumpHighlight
-  highlight.clear()
   if (written === undefined || written === '') {
+    CSS.highlights.delete('jump-match')
     return
   }
+  const ranges: Array<StaticRange> = []
   const lines = new Map<number, HTMLElement>()
   for (const line of surface.querySelectorAll<HTMLElement>('.line')) {
     lines.set(indexOf(line), line)
@@ -871,7 +867,7 @@ const markMatches = (surface: HTMLElement): void => {
     }
     const start = domPoint(line, from, 'After')
     const stop = domPoint(line, to)
-    highlight.add(
+    ranges.push(
       new StaticRange({
         startContainer: start.node,
         startOffset: start.offset,
@@ -880,6 +876,7 @@ const markMatches = (surface: HTMLElement): void => {
       }),
     )
   }
+  CSS.highlights.set('jump-match', new Highlight(...ranges))
 }
 
 const placeCaret = (

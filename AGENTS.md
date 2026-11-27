@@ -470,6 +470,7 @@ A row types every step before its last placement step back to back, without comp
 The sweeps today:
 
 - Up or Down, any key, Up or Down lands where a textarea lands. Runs on demand. 6 documents (three short lines, a wrapped line of words, a long word that moved to the next row, one word longer than a row, a full row that ends in spaces, and rows of emoji and accents), 7 placements, and 52 moves in each: Up or Down, then any of 13 keys, then Up or Down. 2,184 rows, about 3 minutes on 4 cores.
+- Keys sent in one frame leave the screen where the same keys sent slowly leave it: the status line, the line at the top and the cursor's row. Runs on demand, and compares nullpad with itself, not with a textarea, so `e2e/burst-sweep.spec.ts` plays it from `e2e/burst/sweeps.ts` with its own shards (`BURST_SHARDS`, 4 by default). Each row is a document and a list of frames: it plays the frames key by key and reads the screen, opens the note fresh, plays the same frames with `burst` and reads the screen again. The documents are numbered notes of 30, 40 and 200 short lines, 200 lines with every third wrapped, 200 and 3,000 lines with every fourth wrapped over six rows, with vim on and off. The frames are Page keys, arrows, Enter, Backspace, Delete, Ctrl-Z, vim `dd`, `5dd`, `gg`, `x` and `Ctrl+End`, a wheel turn, and a second frame after the first. 19 rows.
 - One Backspace, Delete, Left or Right takes what a textarea takes around emoji, flags and accents. Runs on demand, as two sweeps. The documents are twelve pieces (a letter, an accent, two flag letters, a thumbs up, a skin tone, a man, a ZWJ, a heart, a variation selector, a Devanagari letter and a virama) in every ordered pair, and seven fixed documents (two of Hangul, a keycap, a family of three, a family of four and a kiss with skin tones, which are letters of 11 and 15 UTF-16 units, and a flag split by an x). Each move is one key and then `y`.
   - Typed in order: 151 documents, 3 placements (at the end, at the start, one Right from the start). 906 rows.
   - Met at a line join, or typed one in front of the other: 302 documents, the same 3 placements and where the build left the cursor. 3,020 rows.
@@ -480,7 +481,7 @@ The second rule has 54 named scripts on every push. Add a row only for a shape t
 2. If the bug breaks another rule, add a sweep to `sweeps` with its own name, documents, placements, `scripts` and `runs`.
 3. Add the shortest failing script to `namedScripts`. The sweep finds the neighbors of the bug, and the named script keeps the bug itself.
 
-`pnpm test:sweep` plays every sweep alone.
+`pnpm test:sweep` plays every sweep alone, the typist sweeps and the burst sweep.
 
 #### Commands
 

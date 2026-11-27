@@ -387,15 +387,15 @@ On a machine without Playwright's Chromium, install it once with `pnpm exec play
 Put it in the spec file of its feature, or a new `e2e/<feature>.spec.ts`. Import `test` and `expect` from `./nullpad` and take the `nullpad` fixture. The test name says what a person sees, and each assertion message names the step. Expected values come from what the feature promises, not from a run of the app.
 
 ```ts
-test("Backspace at a line start joins it to the line above", async ({
+test('Backspace at a line start joins it to the line above', async ({
   nullpad,
 }) => {
-  await nullpad.paste("ab\ncd");
-  await nullpad.press("Home");
-  await nullpad.press("Backspace");
-  expect(await nullpad.text()).toBe("abcd");
-  expect(await nullpad.status()).toEqual({ line: 1, column: 3, lineCount: 1 });
-});
+  await nullpad.paste('ab\ncd')
+  await nullpad.press('Home')
+  await nullpad.press('Backspace')
+  expect(await nullpad.text()).toBe('abcd')
+  expect(await nullpad.status()).toEqual({ line: 1, column: 3, lineCount: 1 })
+})
 ```
 
 The fixture fails any test whose page logs an error or throws. A known bug that is not fixed yet gets a scenario marked `test.fail(true, 'known bug: ...')`. It passes while the bug stays and fails once the bug is gone, so whoever fixes it removes the mark.
@@ -410,7 +410,7 @@ The vim tables hold answers copied from Vim. `pnpm test:oracle` (`e2e/vim-oracle
 - Vim runs with `backspace=indent,eol,start`, as nullpad's Backspace deletes before the stay, and Tab in INSERT types two spaces, as nullpad's does. This Vim has no clipboard, so `"+` and `"*` become `"q`, and a row's clipboard text is put in `"q` first.
 - Vim's byte column becomes a letter column, graphemes counted as the status line counts them.
 - Not checked: the selection, since this Vim (9.1, patches 1 to 16) has no `getregion()`, and the registers beyond what a put shows. Vim does not settle its screen column between commands, as the comparison harnesses did, and the tables pass without it, but a new row whose cursor rests on a tab or a wide letter can still read another column there.
-- On 4 cores `--all` checks the 1,388 rows in about 5 s and 30 new rows take about 0.1 s: each row costs about 14 ms of one core, most of it starting Vim. With the machine busy (load average 15) the same took 26 s and 1 s.
+- On 4 cores `--all` checks the 1,638 rows in about 5 s and 30 new rows take about 0.1 s: each row costs about 14 ms of one core, most of it starting Vim. With the machine busy (load average 15) the same took 26 s and 1 s.
 
 ### Robot typist
 

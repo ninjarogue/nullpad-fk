@@ -4,6 +4,7 @@ import * as registers from './registers.ts'
 import * as undo from './undo.ts'
 import * as vimFind from './vim-find.ts'
 import * as vimReplace from './vim-replace.ts'
+import * as vimSearch from './vim-search.ts'
 import * as vim from './vim.ts'
 import * as visualBlockStay from './visual-block-stay.ts'
 import * as visualBlock from './visual-block.ts'
@@ -123,6 +124,82 @@ export const oracleRows: ReadonlyArray<OracleRow> = [
       differs,
     }),
   ),
+  ...grouped(vimSearch.groups).map(
+    ([
+      ,
+      [id, why, text, at, keys, after, line, column, mode, selection, afterP],
+    ]): OracleRow => ({
+      spec: 'vim-search',
+      id: `row ${id} (${why})`,
+      text,
+      at,
+      checkpoints: [
+        { keys, text: after ?? text, cursor: { line, column }, mode },
+        ...(afterP === null ? [] : [{ keys: 'P', text: afterP }]),
+      ],
+      selectionUnchecked: selection !== null,
+    }),
+  ),
+  ...vimSearch.defectRows.map(
+    ([why, text, at, keys, after, line, column, mode]): OracleRow => ({
+      spec: 'vim-search',
+      id: `defect: ${why}`,
+      text,
+      at,
+      checkpoints: [{ keys, text: after, cursor: { line, column }, mode }],
+      selectionUnchecked: false,
+    }),
+  ),
+  ...vimSearch.findingRows.map(
+    ([why, text, at, keys, after, line, column]): OracleRow => ({
+      spec: 'vim-search',
+      id: `finding: ${why}`,
+      text,
+      at,
+      checkpoints: [
+        { keys, text: after, cursor: { line, column }, mode: 'NORMAL' },
+      ],
+      selectionUnchecked: false,
+    }),
+  ),
+  ...vimSearch.collectionRows.map(([pattern, text, column]): OracleRow => ({
+    spec: 'vim-search',
+    id: `collection ${pattern} on ${JSON.stringify(text)}`,
+    text: `zzz\n${text}`,
+    at: [1, 1],
+    checkpoints: [
+      {
+        keys: `/${pattern}<CR>`,
+        text: `zzz\n${text}`,
+        cursor: { line: 2, column },
+        mode: 'NORMAL',
+      },
+    ],
+    selectionUnchecked: false,
+  })),
+  ...vimSearch.countRows.map(([text, at, keys, line, column]): OracleRow => ({
+    spec: 'vim-search',
+    id: `count ${keys}`,
+    text,
+    at,
+    checkpoints: [{ keys, text, cursor: { line, column }, mode: 'NORMAL' }],
+    selectionUnchecked: false,
+  })),
+  ...vimSearch.repeatedGroups.map(([pattern, line, column]): OracleRow => ({
+    spec: 'vim-search',
+    id: `repeated ${pattern}`,
+    text: vimSearch.noteC,
+    at: [1, 1],
+    checkpoints: [
+      {
+        keys: `gg0/${pattern}<CR>`,
+        text: vimSearch.noteC,
+        cursor: { line, column },
+        mode: 'NORMAL',
+      },
+    ],
+    selectionUnchecked: false,
+  })),
   ...grouped(vimReplace.groups).map(([, row]): OracleRow => ({
     spec: 'vim-replace',
     id: `row ${row.id} (${row.why})`,

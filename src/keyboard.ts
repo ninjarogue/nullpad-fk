@@ -277,6 +277,7 @@ const listen = (
                 fromKeyDown(event, port.dataset['chords'] ?? ''),
                 input => {
                   event.preventDefault()
+                  state.lastKey = Option.none()
                   offerInput(input, event.timeStamp)
                 },
               )

@@ -8,6 +8,7 @@ import {
   type Landing,
   type Mode,
   type PaintedLine,
+  type PromptLine,
   Query,
   type Selection,
   graphemeReach,
@@ -1447,6 +1448,33 @@ const modeLabels: Readonly<Record<Mode, string>> = {
   VisualBlock: 'V-BLOCK',
 }
 
+const promptView = (prompt: PromptLine, h: HtmlBuilder<Message>): Html =>
+  h.span(
+    [h.Class('prompt')],
+    [
+      h.span([h.Class('prompt-lead')], [prompt.lead]),
+      h.span(
+        [h.Class('prompt-before')],
+        [
+          prompt.before,
+          ...(prompt.preedit === ''
+            ? []
+            : [
+                h.span(
+                  [h.Class('pre'), h.DataAttribute('ghost', '')],
+                  [prompt.preedit],
+                ),
+              ]),
+        ],
+      ),
+      h.span(
+        [h.Class('prompt-caret')],
+        prompt.under === '' ? [] : [prompt.under],
+      ),
+      h.span([h.Class('prompt-after')], [prompt.after]),
+    ],
+  )
+
 export const statusLine = (
   status: Frame['status'],
   screen: 'Edit' | 'Read',
@@ -1462,7 +1490,10 @@ export const statusLine = (
         [screen === 'Read' ? 'READ' : modeLabels[status.mode]],
       ),
       h.span([h.Class('pending')], [status.pending]),
-      h.span([h.Class('file')], [path]),
+      ...Option.match(status.prompt, {
+        onNone: () => [h.span([h.Class('file')], [path])],
+        onSome: prompt => [promptView(prompt, h)],
+      }),
       ...(status.notice === ''
         ? []
         : [h.span([h.Class('notice')], [status.notice])]),

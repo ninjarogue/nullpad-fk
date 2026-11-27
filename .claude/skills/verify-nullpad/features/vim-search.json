@@ -1,0 +1,105 @@
+[
+  { "paste": "one two three\ntwo four two\nfive\nsix two" },
+  { "press": "Control+Home" },
+  { "press": "Control+," },
+  { "expect": { "mode": "NORMAL", "status": "1:1 4L" } },
+  {
+    "caption": "Type /two",
+    "note": "The status line shows the prompt. The mode still reads NORMAL."
+  },
+  { "type": "/" },
+  { "expect": { "prompt": "/", "mode": "NORMAL" } },
+  { "type": "two" },
+  { "expect": { "prompt": "/two", "status": "1:1 4L" } },
+  {
+    "caption": "Press Enter",
+    "note": "The cursor goes to the next two. The prompt closes."
+  },
+  { "press": "Enter" },
+  { "expect": { "prompt": "closed", "status": "1:5 4L" } },
+  {
+    "caption": "Press n twice, then N",
+    "note": "n repeats and wraps at the end, with a notice. N goes back."
+  },
+  { "type": "n" },
+  { "expect": { "status": "2:1 4L" } },
+  { "type": "nnn" },
+  {
+    "expect": {
+      "status": "1:5 4L",
+      "notice": "search hit BOTTOM, continuing at TOP"
+    }
+  },
+  { "type": "N" },
+  {
+    "expect": {
+      "status": "4:5 4L",
+      "notice": "search hit TOP, continuing at BOTTOM"
+    }
+  },
+  {
+    "caption": "Type ?four then Enter",
+    "note": "? searches backward from the cursor."
+  },
+  { "type": "gg?four" },
+  { "expect": { "prompt": "?four" } },
+  { "press": "Enter" },
+  {
+    "expect": {
+      "status": "2:5 4L",
+      "notice": "search hit TOP, continuing at BOTTOM"
+    }
+  },
+  {
+    "caption": "Type /zzz then Enter",
+    "note": "No match: the cursor stays and the notice says so."
+  },
+  { "type": "/zzz" },
+  { "press": "Enter" },
+  {
+    "expect": { "status": "2:5 4L", "notice": "E486: Pattern not found: zzz" }
+  },
+  {
+    "caption": "Type gg, w, then * and #",
+    "note": "* searches the whole word under the cursor, # goes back."
+  },
+  { "type": "ggw*" },
+  { "expect": { "status": "2:1 4L" } },
+  { "type": "#" },
+  { "expect": { "status": "1:5 4L" } },
+  { "type": "gg" },
+  {
+    "caption": "Type d/five then Enter",
+    "note": "An operator takes the search as its motion, exclusive."
+  },
+  { "type": "d/five" },
+  { "expect": { "prompt": "/five", "pending": "d" } },
+  { "press": "Enter" },
+  { "expect": { "text": "five\nsix two", "prompt": "closed" } },
+  { "type": "u" },
+  { "expect": { "text": "one two three\ntwo four two\nfive\nsix two" } },
+  {
+    "caption": "Type /tw then Esc",
+    "note": "Esc closes the prompt and nothing else happens."
+  },
+  { "type": "/tw" },
+  { "press": "Escape" },
+  { "expect": { "prompt": "closed", "status": "1:1 4L" } },
+  {
+    "caption": "Type / then Up",
+    "note": "Up brings back the newest search from the history."
+  },
+  { "type": "/" },
+  { "press": "ArrowUp" },
+  { "expect": { "prompt": "/tw" } },
+  { "press": "Escape" },
+  {
+    "caption": "Type v/four then Enter",
+    "note": "In VISUAL the search moves the cursor end and the selection stays."
+  },
+  { "type": "gg" },
+  { "type": "v/four" },
+  { "expect": { "mode": "VISUAL", "prompt": "/four" } },
+  { "press": "Enter" },
+  { "expect": { "mode": "VISUAL", "selection": "one two three\ntwo f" } }
+]

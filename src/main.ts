@@ -1198,6 +1198,11 @@ export const subscriptions = Subscription.make<
 
 const editorBounds: Bounds = { control: '.surface', selection: '#caret' }
 
+const promptBounds: Bounds = {
+  control: '.status .prompt',
+  selection: '.status .prompt-caret',
+}
+
 const paneView = (model: Model, h: HtmlBuilder<Message>): Html =>
   model.pane === 'None'
     ? h.empty
@@ -1212,6 +1217,18 @@ const paneView = (model: Model, h: HtmlBuilder<Message>): Html =>
 
 const isReading = (model: Model): boolean => model.screen._tag === 'Read'
 
+const isPrompting = (frame: Editor.Frame): boolean =>
+  Option.isSome(frame.status.prompt)
+
+const boundsOf = (model: Model, frame: Editor.Frame) =>
+  Option.isSome(model.finder)
+    ? finderBounds
+    : isPrompting(frame)
+      ? promptBounds
+      : isReading(model)
+        ? readBounds
+        : editorBounds
+
 const screenView = (
   model: Model,
   frame: Editor.Frame,
@@ -1219,7 +1236,9 @@ const screenView = (
 ): Html => {
   const editorSurface = surface(
     frame,
-    Option.isSome(model.finder) ? 'Blurred' : model.keyboard,
+    Option.isSome(model.finder) || isPrompting(frame)
+      ? 'Blurred'
+      : model.keyboard,
     h,
   )
   return h.div(
@@ -1245,11 +1264,6 @@ const screenView = (
 export const view = (model: Model, h: HtmlBuilder<Message>): Document => {
   const frame = Editor.paint(model.editor)
   const title = Editor.title(model.editor)
-  const bounds = Option.isSome(model.finder)
-    ? finderBounds
-    : isReading(model)
-      ? readBounds
-      : editorBounds
   return {
     title,
     body: h.main(
@@ -1281,7 +1295,7 @@ export const view = (model: Model, h: HtmlBuilder<Message>): Document => {
           }),
           frame.discards,
           Editor.isVimOn(model.editor) ? 'vim' : 'plain',
-          bounds,
+          boundsOf(model, frame),
           model.keyboard,
           h,
         ),

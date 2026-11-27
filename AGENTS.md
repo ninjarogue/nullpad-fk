@@ -360,6 +360,8 @@ NULLPAD_DIST=/path/to/dist pnpm test:e2e   # tests a build made elsewhere, such 
 
 Without `NULLPAD_DIST`, Playwright builds the working tree into `dist/` first, so a run always tests the current source. Traces are off by default. Pass `--trace retain-on-failure` to keep them for failing tests only.
 
+Each pre-push gate run saves the time and outcome of every test to one JSON file in `.git/nullpad-gate-history/`, in the common git dir so that every branch and worktree shares it. `e2e/reporters/gate-history.ts` writes it only when `NULLPAD_GATE_RUN=1`, which the hook sets, so other runs save nothing. `NULLPAD_GATE_HISTORY` names another folder. `pnpm gate:history [--last N]` reads the last 20 runs, or N, and prints the slowest tests, the seconds of each spec file and the tests that failed in some run. A test is flaky when one commit, run from a clean tree, both passed and failed it. A failed write prints one line and leaves the run's status as it was.
+
 Playwright runs one and a half workers for each core (`workers: '150%'` in `playwright.config.ts`). A test spends much of its time waiting for frames, so one worker for each core left about a quarter of the CPU idle. With 8 workers on 4 cores the slowest scenario took 49 of its 60 seconds.
 
 On a machine without Playwright's Chromium, install it once with `pnpm exec playwright install chromium`. Cloud sessions have it at `/opt/pw-browsers` already. The `@playwright/test` version in `package.json` must match that browser's revision.

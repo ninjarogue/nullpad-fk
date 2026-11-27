@@ -10,7 +10,11 @@ export default defineConfig({
   forbidOnly: true,
   retries: 0,
   timeout: 60_000,
-  reporter: [['list'], ['./e2e/reporters/require-tests.ts']],
+  reporter: [
+    ['list'],
+    ['./e2e/reporters/require-tests.ts'],
+    ['./e2e/reporters/gate-history.ts'],
+  ],
   use: {
     ...devices['Desktop Chrome'],
     baseURL: `http://localhost:${port}`,

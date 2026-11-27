@@ -14,9 +14,9 @@ step typecheck pnpm typecheck
 step architecture pnpm arch
 step build pnpm build
 if [ "${NULLPAD_VIM_TABLES:-}" = 1 ] || sh scripts/vim-tables-needed.sh; then
-  step e2e env NULLPAD_DIST=dist pnpm test:e2e
+  step e2e env NULLPAD_GATE_RUN=1 NULLPAD_DIST=dist pnpm test:e2e
 else
   echo "pre-push: no vim code changed since origin/main, so the vim tables are left out"
-  step e2e env NULLPAD_DIST=dist pnpm test:e2e --grep-invert @vim-table
+  step e2e env NULLPAD_GATE_RUN=1 NULLPAD_DIST=dist pnpm test:e2e --grep-invert @vim-table
 fi
 echo "pre-push: all steps passed"

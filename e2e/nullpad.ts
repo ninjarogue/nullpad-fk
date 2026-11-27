@@ -396,6 +396,601 @@ const anotherApp = async (page: Page) => {
 const isVimOff = async (page: Page): Promise<boolean> =>
   (await page.locator('.status .mode').innerText()) === 'EDIT'
 
+export type Point = Readonly<{ x: number; y: number }>
+
+export type Replacing = Readonly<{ start: number; end: number }>
+
+export type Input =
+  | Readonly<{ type: string }>
+  | Readonly<{ press: string; times?: number }>
+  | Readonly<{ paste: string }>
+  | Readonly<{ compose: string; replacing?: Replacing }>
+  | Readonly<{ commit: string }>
+  | Readonly<{ click: Point }>
+  | Readonly<{ wheel: number }>
+
+type Key = Readonly<{
+  key: string
+  code: string
+  keyCode: number
+  text: string
+  location: number
+}>
+
+const modifierBits = { Alt: 1, Control: 2, Meta: 4, Shift: 8 } as const
+
+type Modifier = keyof typeof modifierBits
+
+const isModifier = (name: string): name is Modifier => name in modifierBits
+
+const modifierKeys: Readonly<Record<Modifier, Key>> = {
+  Alt: { key: 'Alt', code: 'AltLeft', keyCode: 18, text: '', location: 1 },
+  Control: {
+    key: 'Control',
+    code: 'ControlLeft',
+    keyCode: 17,
+    text: '',
+    location: 1,
+  },
+  Meta: { key: 'Meta', code: 'MetaLeft', keyCode: 91, text: '', location: 1 },
+  Shift: {
+    key: 'Shift',
+    code: 'ShiftLeft',
+    keyCode: 16,
+    text: '',
+    location: 1,
+  },
+}
+
+const namedKeys: ReadonlyMap<string, Key> = new Map(
+  (
+    [
+      ['Backspace', 8],
+      ['Tab', 9],
+      ['Enter', 13],
+      ['Escape', 27],
+      ['PageUp', 33],
+      ['PageDown', 34],
+      ['End', 35],
+      ['Home', 36],
+      ['ArrowLeft', 37],
+      ['ArrowUp', 38],
+      ['ArrowRight', 39],
+      ['ArrowDown', 40],
+      ['Insert', 45],
+      ['Delete', 46],
+      ...Array.from(
+        { length: 12 },
+        (_, index) => [`F${index + 1}`, 112 + index] as const,
+      ),
+    ] as const
+  ).map(([name, keyCode]) => [
+    name,
+    {
+      key: name,
+      code: name,
+      keyCode,
+      text: name === 'Enter' ? '\r' : '',
+      location: 0,
+    },
+  ]),
+)
+
+const printableRows: ReadonlyArray<
+  readonly [code: string, keyCode: number, plain: string, shifted: string]
+> = [
+  ['Backquote', 192, '`', '~'],
+  ['Minus', 189, '-', '_'],
+  ['Equal', 187, '=', '+'],
+  ['BracketLeft', 219, '[', '{'],
+  ['BracketRight', 221, ']', '}'],
+  ['Backslash', 220, '\\', '|'],
+  ['Semicolon', 186, ';', ':'],
+  ['Quote', 222, "'", '"'],
+  ['Comma', 188, ',', '<'],
+  ['Period', 190, '.', '>'],
+  ['Slash', 191, '/', '?'],
+  ['Space', 32, ' ', ' '],
+  ...[...'0123456789'].map(
+    (digit, index) =>
+      [
+        `Digit${digit}`,
+        digit.charCodeAt(0),
+        digit,
+        ')!@#$%^&*('.charAt(index),
+      ] as const,
+  ),
+  ...[...'abcdefghijklmnopqrstuvwxyz'].map(
+    letter =>
+      [
+        `Key${letter.toUpperCase()}`,
+        letter.toUpperCase().charCodeAt(0),
+        letter,
+        letter.toUpperCase(),
+      ] as const,
+  ),
+]
+
+const printableKeys: ReadonlyArray<Readonly<{ plain: Key; shifted: Key }>> =
+  printableRows.map(([code, keyCode, plain, shifted]) => ({
+    plain: { key: plain, code, keyCode, text: plain, location: 0 },
+    shifted: { key: shifted, code, keyCode, text: shifted, location: 0 },
+  }))
+
+const keyFor = (name: string, shift: boolean): Key => {
+  if (isModifier(name)) {
+    return modifierKeys[name]
+  }
+  const named = namedKeys.get(name)
+  if (named !== undefined) {
+    return named
+  }
+  const printable = printableKeys.find(
+    ({ plain, shifted }) =>
+      plain.key === name || shifted.key === name || plain.code === name,
+  )
+  if (printable === undefined) {
+    throw new Error(`a burst has no key named ${JSON.stringify(name)}`)
+  }
+  return printable.shifted.key === name || shift
+    ? printable.shifted
+    : printable.plain
+}
+
+const typedKey = (char: string): Key | undefined =>
+  char === '\n' || char === '\r'
+    ? namedKeys.get('Enter')
+    : printableKeys
+        .flatMap(({ plain, shifted }) => [plain, shifted])
+        .find(key => key.key === char)
+
+type Sent =
+  | Readonly<{
+      kind: 'key'
+      down: boolean
+      key: Key
+      modifiers: number
+      commands: ReadonlyArray<string>
+    }>
+  | Readonly<{
+      kind: 'mouse'
+      type: 'mouseMoved' | 'mousePressed' | 'mouseReleased'
+      at: Point
+    }>
+  | Readonly<{ kind: 'wheel'; at: Point; deltaY: number }>
+  | Readonly<{ kind: 'compose'; text: string; replacing?: Replacing }>
+  | Readonly<{ kind: 'text'; text: string }>
+
+const chordTokens = (chord: string): ReadonlyArray<string> =>
+  [...chord].reduce<Array<string>>(
+    (tokens, char) => {
+      const building = tokens.at(-1) ?? ''
+      return char === '+' && building !== ''
+        ? [...tokens, '']
+        : [...tokens.slice(0, -1), building + char]
+    },
+    [''],
+  )
+
+const strokes = (
+  chord: string,
+  commands: ReadonlyArray<string> = [],
+): ReadonlyArray<Sent> => {
+  const tokens = chordTokens(chord)
+  const held = tokens.slice(0, -1).filter(isModifier)
+  const mask = (modifiers: ReadonlyArray<Modifier>) =>
+    modifiers.reduce((bits, modifier) => bits | modifierBits[modifier], 0)
+  const textCleared =
+    held.length > 1 || (held.length === 1 && held[0] !== 'Shift')
+  const keys = tokens.map(token => {
+    const key = keyFor(token, held.includes('Shift'))
+    return textCleared && !isModifier(token) ? { ...key, text: '' } : key
+  })
+  const downs = keys.map((key, index): Sent => ({
+    kind: 'key',
+    down: true,
+    key,
+    modifiers: mask(held.slice(0, index + 1)),
+    commands: index === keys.length - 1 ? commands : [],
+  }))
+  const ups = keys.map((key, index): Sent => ({
+    kind: 'key',
+    down: false,
+    key,
+    modifiers: mask(held.slice(0, index)),
+    commands: [],
+  }))
+  return [...downs, ...ups.reverse()]
+}
+
+const sentOf = (inputs: ReadonlyArray<Input>, pointer: Point) =>
+  inputs.reduce<Readonly<{ pointer: Point; sent: ReadonlyArray<Sent> }>>(
+    (sofar, input) => {
+      const more = (sent: ReadonlyArray<Sent>, at = sofar.pointer) => ({
+        pointer: at,
+        sent: [...sofar.sent, ...sent],
+      })
+      if ('type' in input) {
+        return more(
+          [...input.type].flatMap((char): ReadonlyArray<Sent> => {
+            const key = typedKey(char)
+            return key === undefined
+              ? [{ kind: 'text', text: char }]
+              : [true, false].map(down => ({
+                  kind: 'key',
+                  down,
+                  key,
+                  modifiers: 0,
+                  commands: [],
+                }))
+          }),
+        )
+      }
+      if ('press' in input) {
+        return more(
+          Array.from({ length: input.times ?? 1 }, () =>
+            strokes(input.press),
+          ).flat(),
+        )
+      }
+      if ('paste' in input) {
+        return more(strokes('Control+Shift+V', ['paste']))
+      }
+      if ('compose' in input) {
+        return more([
+          input.replacing === undefined
+            ? { kind: 'compose', text: input.compose }
+            : {
+                kind: 'compose',
+                text: input.compose,
+                replacing: input.replacing,
+              },
+        ])
+      }
+      if ('commit' in input) {
+        return more([{ kind: 'text', text: input.commit }])
+      }
+      if ('click' in input) {
+        return more(
+          (['mouseMoved', 'mousePressed', 'mouseReleased'] as const).map(
+            type => ({ kind: 'mouse', type, at: input.click }),
+          ),
+          input.click,
+        )
+      }
+      return more([{ kind: 'wheel', at: sofar.pointer, deltaY: input.wheel }])
+    },
+    { pointer, sent: [] },
+  ).sent
+
+const send = (cdp: CDPSession, sent: Sent): Promise<unknown> => {
+  switch (sent.kind) {
+    case 'key':
+      return cdp.send('Input.dispatchKeyEvent', {
+        type: sent.down
+          ? sent.key.text === ''
+            ? 'rawKeyDown'
+            : 'keyDown'
+          : 'keyUp',
+        modifiers: sent.modifiers,
+        windowsVirtualKeyCode: sent.key.keyCode,
+        code: sent.key.code,
+        key: sent.key.key,
+        location: sent.key.location,
+        ...(sent.down
+          ? {
+              text: sent.key.text,
+              unmodifiedText: sent.key.text,
+              commands: [...sent.commands],
+            }
+          : {}),
+      })
+    case 'mouse':
+      return cdp.send('Input.dispatchMouseEvent', {
+        type: sent.type,
+        x: sent.at.x,
+        y: sent.at.y,
+        button: sent.type === 'mouseMoved' ? 'none' : 'left',
+        buttons: sent.type === 'mousePressed' ? 1 : 0,
+        clickCount: sent.type === 'mouseMoved' ? 0 : 1,
+      })
+    case 'wheel':
+      return cdp.send('Input.dispatchMouseEvent', {
+        type: 'mouseWheel',
+        x: sent.at.x,
+        y: sent.at.y,
+        deltaX: 0,
+        deltaY: sent.deltaY,
+      })
+    case 'compose':
+      return cdp.send('Input.imeSetComposition', {
+        text: sent.text,
+        selectionStart: sent.text.length,
+        selectionEnd: sent.text.length,
+        ...(sent.replacing === undefined
+          ? {}
+          : {
+              replacementStart: sent.replacing.start,
+              replacementEnd: sent.replacing.end,
+            }),
+      })
+    case 'text':
+      return cdp.send('Input.insertText', { text: sent.text })
+  }
+}
+
+type WindowEvent = 'keydown' | 'pointerdown' | 'wheel'
+
+const windowEventOf = (sent: Sent): WindowEvent | null =>
+  sent.kind === 'key' && sent.down
+    ? 'keydown'
+    : sent.kind === 'mouse' && sent.type === 'mousePressed'
+      ? 'pointerdown'
+      : sent.kind === 'wheel'
+        ? 'wheel'
+        : null
+
+export type Frames = ReadonlyArray<ReadonlyArray<Input>>
+
+type Landing = Readonly<{
+  type: string
+  frame: number
+  timeStamp: number
+  at: number
+}>
+
+type Hold = Readonly<{ from: number; until: number }>
+
+type Watch = {
+  landings: Array<Landing>
+  holds: Array<Hold>
+  frame: number
+  counting: boolean
+  cancelled: boolean
+}
+
+declare global {
+  var nullpadBurst: Watch | undefined
+}
+
+const holdRequestUrl = 'http://burst.nullpad.invalid/hold'
+
+const leastHoldMs = 50
+
+const gate = () => {
+  const opened = { open: () => {} }
+  const done = new Promise<void>(resolve => {
+    opened.open = resolve
+  })
+  return { open: () => opened.open(), done }
+}
+
+const within = <A>(promise: Promise<A>, why: string): Promise<A> =>
+  Promise.race([
+    promise,
+    new Promise<never>((_, fail) =>
+      setTimeout(() => fail(new Error(why)), 10_000),
+    ),
+  ])
+
+const sum = (numbers: ReadonlyArray<number>) =>
+  numbers.reduce((total, each) => total + each, 0)
+
+const landingMisses = (
+  sent: ReadonlyArray<ReadonlyArray<Sent>>,
+  landings: ReadonlyArray<Landing>,
+  holds: ReadonlyArray<Hold>,
+): ReadonlyArray<string> => {
+  const counts = sent.map(
+    group =>
+      group.filter(each => {
+        const type = windowEventOf(each)
+        return type === 'keydown' || type === 'pointerdown'
+      }).length,
+  )
+  const discrete = landings.filter(landing => landing.type !== 'wheel')
+  const wheels = landings.filter(landing => landing.type === 'wheel')
+  const sentWheels = sent.flat().filter(each => each.kind === 'wheel').length
+  const groups = counts.map((count, index) => {
+    const start = sum(counts.slice(0, index))
+    return discrete.slice(start, start + count)
+  })
+  const isHeldBy = (hold: Hold | undefined) => (landing: Landing) =>
+    hold !== undefined &&
+    landing.timeStamp >= hold.from &&
+    landing.timeStamp < hold.until &&
+    landing.at >= hold.until
+  const frames = groups.map(group => {
+    const frame = group[0]?.frame
+    return frame === undefined || group.some(landing => landing.frame !== frame)
+      ? null
+      : frame
+  })
+  return [
+    ...(discrete.length === sum(counts)
+      ? []
+      : [`${discrete.length} keys and clicks landed for ${sum(counts)} sent`]),
+    ...(wheels.length === sentWheels
+      ? []
+      : [`${wheels.length} wheel turns landed for ${sentWheels} sent`]),
+    ...groups.flatMap((group, index) =>
+      group.every(isHeldBy(holds[index]))
+        ? []
+        : [
+            `frame ${index + 1}: an input was not queued behind its held main thread`,
+          ],
+    ),
+    ...wheels.flatMap(wheel =>
+      holds.some(hold => isHeldBy(hold)(wheel))
+        ? []
+        : ['a wheel turn was not queued behind a held main thread'],
+    ),
+    ...frames.flatMap((frame, index) => {
+      const earlier = frames
+        .slice(0, index)
+        .flatMap((each, at) => (each === null ? [] : [{ each, at }]))
+        .at(-1)
+      return (counts[index] ?? 0) > 0 && frame === null
+        ? [`frame ${index + 1}: its keys and clicks landed in several frames`]
+        : frame !== null &&
+            earlier !== undefined &&
+            frame - earlier.each !== index - earlier.at
+          ? [
+              `frame ${index + 1} landed ${frame - earlier.each} frames after frame ${earlier.at + 1}`,
+            ]
+          : []
+    }),
+  ]
+}
+
+function installWatch() {
+  const watch: Watch = globalThis.nullpadBurst ?? {
+    landings: [],
+    holds: [],
+    frame: 0,
+    counting: false,
+    cancelled: false,
+  }
+  if (globalThis.nullpadBurst === undefined) {
+    for (const type of ['keydown', 'pointerdown', 'wheel']) {
+      addEventListener(
+        type,
+        event =>
+          watch.landings.push({
+            type: event.type,
+            frame: watch.frame,
+            timeStamp: event.timeStamp,
+            at: performance.now(),
+          }),
+        { capture: true, passive: true },
+      )
+    }
+    globalThis.nullpadBurst = watch
+  }
+  watch.landings = []
+  watch.holds = []
+  watch.cancelled = false
+  if (!watch.counting) {
+    watch.counting = true
+    const tick = () => {
+      if (watch.counting) {
+        watch.frame += 1
+        requestAnimationFrame(tick)
+      }
+    }
+    requestAnimationFrame(tick)
+  }
+}
+
+function holdMainThreadInNextFrame({
+  url,
+  left,
+}: Readonly<{ url: string; left: number }>) {
+  const watch = globalThis.nullpadBurst
+  if (watch === undefined || watch.cancelled) {
+    return
+  }
+  const from = performance.now()
+  if (left > 1) {
+    // a timer set after a long task may run two frames later, an animation frame callback runs in the next
+    requestAnimationFrame(() =>
+      holdMainThreadInNextFrame({ url, left: left - 1 }),
+    )
+  }
+  const request = new XMLHttpRequest()
+  request.open('GET', url, false)
+  try {
+    request.send()
+  } finally {
+    watch.holds.push({ from, until: performance.now() })
+  }
+}
+
+function stopWatching() {
+  const watch = globalThis.nullpadBurst
+  if (watch !== undefined) {
+    watch.counting = false
+  }
+  return { landings: watch?.landings ?? [], holds: watch?.holds ?? [] }
+}
+
+function cancelHolds() {
+  const watch = globalThis.nullpadBurst
+  if (watch !== undefined) {
+    watch.cancelled = true
+  }
+}
+
+export const burst = async (
+  page: Page,
+  cdp: CDPSession,
+  frames: Frames,
+  stall = 0,
+): Promise<void> => {
+  const pastes = new Set(
+    frames.flat().flatMap(input => ('paste' in input ? [input.paste] : [])),
+  )
+  if (pastes.size > 1) {
+    throw new Error(
+      'a burst reads the clipboard once, so all its pastes paste one text',
+    )
+  }
+  for (const text of pastes) {
+    await page.evaluate(value => navigator.clipboard.writeText(value), text)
+  }
+  const viewport = page.viewportSize() ?? { width: 1000, height: 600 }
+  const centre = { x: viewport.width / 2, y: viewport.height / 2 }
+  const sent = frames.map(inputs => sentOf(inputs, centre))
+  const gates = frames.map(() => ({ held: gate(), released: gate() }))
+  const reached = { holds: 0 }
+  await page.route(holdRequestUrl, async route => {
+    const reachedGate = gates[reached.holds]
+    reached.holds += 1
+    reachedGate?.held.open()
+    await reachedGate?.released.done
+    await route.fulfill({
+      body: '',
+      headers: { 'access-control-allow-origin': '*' },
+    })
+  })
+  await page.evaluate(installWatch)
+  const holding = page.evaluate(holdMainThreadInNextFrame, {
+    url: holdRequestUrl,
+    left: frames.length,
+  })
+  try {
+    const acks: Array<Promise<unknown>> = []
+    for (const [index, { held, released }] of gates.entries()) {
+      await within(
+        held.done,
+        `the page never held its main thread for frame ${index + 1}`,
+      )
+      acks.push(...(sent[index] ?? []).map(each => send(cdp, each)))
+      await new Promise(resolve =>
+        setTimeout(resolve, Math.max(stall, leastHoldMs)),
+      )
+      released.open()
+    }
+    await Promise.all(acks)
+  } finally {
+    for (const { released } of gates) {
+      released.open()
+    }
+    await page.evaluate(cancelHolds)
+    await page.unroute(holdRequestUrl)
+    await holding.catch(() => undefined)
+  }
+  await settle(page)
+  await settle(page)
+  const { landings, holds } = await page.evaluate(stopWatching)
+  const misses = landingMisses(sent, landings, holds)
+  if (misses.length > 0) {
+    throw new Error(
+      `the burst did not land as sent: ${misses.join('; ')}\n${JSON.stringify({ holds, landings })}`,
+    )
+  }
+}
+
 export const driver = (page: Page, cdp: CDPSession) => {
   const screen = () => screenOf(page)
   return {
@@ -505,6 +1100,8 @@ export const driver = (page: Page, cdp: CDPSession) => {
       await page.mouse.click(x, y)
       await settle(page)
     },
+    burst: (frames: Frames, options: { stall?: number } = {}) =>
+      burst(page, cdp, frames, options.stall),
     inkIn: async (
       clip: Readonly<{ x: number; y: number; width: number; height: number }>,
     ) => {

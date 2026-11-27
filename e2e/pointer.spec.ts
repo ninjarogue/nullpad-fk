@@ -1,5 +1,6 @@
 import {
   type Nullpad,
+  type Point,
   type Screen,
   expect,
   expectNumberedLinesIntact,
@@ -336,31 +337,11 @@ const wheelThenKeys = (
   deltaY: number,
   keys: ReadonlyArray<'x' | 'ArrowDown' | 'ArrowUp'>,
 ) =>
-  Promise.all([
-    nullpad.cdp.send('Input.dispatchMouseEvent', {
-      type: 'mouseWheel',
-      x: 400,
-      y: 300,
-      deltaX: 0,
-      deltaY,
-    }),
-    ...keys.flatMap(key => {
-      const event =
-        key === 'x'
-          ? { key: 'x', code: 'KeyX', windowsVirtualKeyCode: 88, text: 'x' }
-          : {
-              key,
-              code: key,
-              windowsVirtualKeyCode: key === 'ArrowUp' ? 38 : 40,
-            }
-      return [
-        nullpad.cdp.send('Input.dispatchKeyEvent', {
-          type: key === 'x' ? 'keyDown' : 'rawKeyDown',
-          ...event,
-        }),
-        nullpad.cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', ...event }),
-      ]
-    }),
+  nullpad.burst([
+    [
+      { wheel: deltaY },
+      ...keys.map(key => (key === 'x' ? { type: key } : { press: key })),
+    ],
   ])
 
 const settleScroll = async (nullpad: Nullpad) => {
@@ -407,32 +388,13 @@ test('a letter and ArrowDown sent right after a big wheel turn leave the cursor 
   }
 })
 
-const oldFrameWindowMs = 12
-
-const letterThenClick = async (
-  nullpad: Nullpad,
-  point: Readonly<{ x: number; y: number }>,
-) => {
-  await nullpad.page.mouse.move(point.x, point.y)
-  const sent = performance.now()
-  await nullpad.page.keyboard.press('x')
-  await nullpad.page.mouse.down()
-  const clickedOldFrame = performance.now() - sent < oldFrameWindowMs
-  await nullpad.page.mouse.up()
-  return clickedOldFrame
-}
-
-const expectSomeCounted = (trials: number) =>
-  expect(
-    trials,
-    `trials whose click left within ${oldFrameWindowMs} ms of the letter`,
-  ).toBeGreaterThan(0)
+const letterThenClick = (nullpad: Nullpad, point: Point) =>
+  nullpad.burst([[{ type: 'x' }, { click: point }]])
 
 test('a click sent right after a letter lands on the line that was on screen where it clicked', async ({
   nullpad,
 }) => {
   const start = await longNoteAtTop(nullpad)
-  let counted = 0
   for (let trial = 1; trial <= 4; trial++) {
     await nullpad.press('Control+Home')
     await nullpad.wheel(start.rowHeight * 40)
@@ -442,18 +404,15 @@ test('a click sent right after a letter lands on the line that was on screen whe
     if (target === undefined || target.number === null) {
       throw new Error('no numbered row in the middle of the screen')
     }
-    const clickedOldFrame = await letterThenClick(nullpad, {
+    await letterThenClick(nullpad, {
       x: target.left + 2.25 * scrolled.cell,
       y: (target.top + target.bottom) / 2,
     })
     const after = await settleScroll(nullpad)
-    if (clickedOldFrame) {
-      counted += 1
-      expect(
-        after.status.line,
-        `trial ${trial}: the cursor is on the line clicked`,
-      ).toBe(Number(target.number))
-    }
+    expect(
+      after.status.line,
+      `trial ${trial}: the cursor is on the line clicked`,
+    ).toBe(Number(target.number))
     await nullpad.press('Control+Home')
     expect(
       linesOf(await nullpad.screen())[0],
@@ -461,7 +420,6 @@ test('a click sent right after a letter lands on the line that was on screen whe
     ).toBe('xline 1')
     await nullpad.press('Delete')
   }
-  expectSomeCounted(counted)
 })
 
 const longNoteAtEnd = async (nullpad: Nullpad) => {
@@ -562,28 +520,23 @@ test('a click sent right after a letter that scrolled the screen far lands on th
   nullpad,
 }) => {
   const start = await longNoteAtEnd(nullpad)
-  let counted = 0
   for (const [trial, rows] of [136, 136, 270, 270].entries()) {
     await nullpad.press('Control+End')
     await nullpad.wheel(-start.rowHeight * rows)
     const scrolled = await nullpad.screen()
     expect(scrolled.cursor, `trial ${trial}: line 400 is off screen`).toBeNull()
     const target = numberedRow(scrolled, 3 + 5 * trial)
-    const clickedOldFrame = await letterThenClick(nullpad, target)
+    await letterThenClick(nullpad, target)
     const after = await settleScroll(nullpad)
-    if (clickedOldFrame) {
-      counted += 1
-      expect(
-        after.status.line,
-        `trial ${trial}: the cursor is on the line clicked`,
-      ).toBe(target.number)
-    }
+    expect(
+      after.status.line,
+      `trial ${trial}: the cursor is on the line clicked`,
+    ).toBe(target.number)
     expect(
       after.cursor?.inside,
       `trial ${trial}: the cursor is on screen`,
     ).toBe(true)
   }
-  expectSomeCounted(counted)
 })
 
 test('a click made once a key has brought the cursor back on screen after a wheel turn lands on the line shown where it clicked', async ({

@@ -22,6 +22,7 @@
     "test:typist": "playwright test typist",
     "test:all": "NULLPAD_ALL=1 playwright test",
     "test:oracle": "node e2e/vim-oracle.ts",
+    "gate:history": "node e2e/gate-history.ts",
     "postinstall": "effect-tsgo patch --no-typescript --oxlint",
     "prepare": "test -e .git && git config core.hooksPath .githooks || true"
   },

@@ -4,6 +4,7 @@ import * as Buffer from './buffer'
 import * as History from './history'
 import { Input, type NamedKey, isControlAlone, noModifiers } from './input'
 import { cellAt, cellCount, cellStart } from './vim/cells'
+import * as Ex from './vim/command'
 import * as Keymap from './vim/keymap'
 import {
   type Spot,
@@ -49,11 +50,17 @@ export const Repeat = Schema.Struct({
 })
 export type Repeat = typeof Repeat.Type
 
+export const PromptHistories = Schema.Struct({
+  search: Schema.Array(Schema.String),
+  command: Schema.Array(Schema.String),
+})
+export type PromptHistories = typeof PromptHistories.Type
+
 export const Kept = Schema.Struct({
   registers: Operators.Registers,
   dot: Schema.Option(Repeat),
   seek: Seek.Memory,
-  history: Schema.Array(Schema.String),
+  history: PromptHistories,
 })
 export type Kept = typeof Kept.Type
 
@@ -61,7 +68,7 @@ export const nothingKept: Kept = {
   registers: noRegisters,
   dot: Option.none(),
   seek: Seek.forgotten,
-  history: [],
+  history: { search: [], command: [] },
 }
 
 export const BlockStay = Schema.Struct({
@@ -207,13 +214,45 @@ export const Put = Schema.Struct({
 })
 export type Put = typeof Put.Type
 
-export const Resume = Schema.Struct({
-  way: Seek.Way,
-  operator: Schema.Option(OperatorName),
-  count: Schema.UndefinedOr(Schema.Int),
-  register: Operators.RegisterName,
+export const Resume = Schema.TaggedUnion({
+  Search: {
+    way: Seek.Way,
+    operator: Schema.Option(OperatorName),
+    count: Schema.UndefinedOr(Schema.Int),
+    register: Operators.RegisterName,
+  },
+  Command: {},
 })
 export type Resume = typeof Resume.Type
+
+type SearchResume = Extract<Resume, { _tag: 'Search' }>
+
+export const promptLead = (resume: Resume): string =>
+  Resume.match(resume, {
+    Search: ({ way }) => (way === 'Forward' ? '/' : '?'),
+    Command: () => ':',
+  })
+
+export const promptHistory = (
+  kept: Kept,
+  resume: Resume,
+): ReadonlyArray<string> =>
+  Resume.match(resume, {
+    Search: () => kept.history.search,
+    Command: () => kept.history.command,
+  })
+
+export const withPromptHistory = (
+  kept: Kept,
+  resume: Resume,
+  history: ReadonlyArray<string>,
+): Kept => ({
+  ...kept,
+  history: Resume.match(resume, {
+    Search: () => ({ ...kept.history, search: history }),
+    Command: () => ({ ...kept.history, command: history }),
+  }),
+})
 
 export const Fate = Schema.TaggedUnion({
   Done: {},
@@ -235,6 +274,7 @@ export type Step = Readonly<{
   began: Option.Option<Buffer.Position>
   clipboard: Option.Option<string>
   notice: Option.Option<string>
+  save: boolean
 }>
 
 const stepOf = (
@@ -250,6 +290,7 @@ const stepOf = (
   began: Option.none(),
   clipboard: Option.none(),
   notice: Option.none(),
+  save: false,
   ...over,
 })
 
@@ -897,7 +938,13 @@ const run = (
       }
     },
     OpenSearch: ({ way, operator }) =>
-      opening(unchanged, vim, { way, operator, count, register }),
+      opening(
+        unchanged,
+        vim,
+        Resume.cases.Search.make({ way, operator, count, register }),
+      ),
+    OpenCommand: () =>
+      opening(unchanged, cleared, Resume.cases.Command.make({})),
     Seek: ({ seek }) => {
       const sought = Seek.sought(
         buffer,
@@ -1436,12 +1483,16 @@ const runVisual = (
       }
     },
     OpenSearch: ({ way }): Step =>
-      opening(unchanged, vim, {
-        way,
-        operator: Option.none(),
-        count,
-        register,
-      }),
+      opening(
+        unchanged,
+        vim,
+        Resume.cases.Search.make({
+          way,
+          operator: Option.none(),
+          count,
+          register,
+        }),
+      ),
     Seek: ({ seek }): Step => {
       const sought = Seek.sought(
         buffer,
@@ -1979,11 +2030,11 @@ export const isScreenKey = (input: Input): boolean =>
   isControlAlone(input.modifiers) &&
   Keymap.screenKeys.includes(`<C-${input.char.toLowerCase()}>`)
 
-export const searched = (
+const searched = (
   vim: Vim,
   buffer: Buffer.Buffer,
   kept: Kept,
-  { way, operator, count, register }: Resume,
+  { way, operator, count, register }: SearchResume,
   text: string,
 ): Option.Option<Step> => {
   const seek = Seek.Seek.cases.Search.make({ way, text })
@@ -2039,4 +2090,64 @@ export const modeName = (vim: Vim): ModeName =>
     Normal: (): ModeName => 'Normal',
     Insert: (): ModeName => 'Insert',
     Visual: ({ kind }): ModeName => visualModeNames[kind],
+  })
+
+const commanded = (
+  vim: Vim,
+  buffer: Buffer.Buffer,
+  kept: Kept,
+  text: string,
+): Option.Option<Step> =>
+  Mode.match(vim.mode, {
+    Normal: () => {
+      const cleared = idle(vim)
+      const unchanged = stepOf(cleared, buffer, kept)
+      const noticed = (notice: string): Step => ({
+        ...unchanged,
+        notice: Option.some(notice),
+      })
+      return Option.some(
+        Ex.Command.match(Ex.parse(text), {
+          Empty: () => unchanged,
+          Write: () => ({ ...unchanged, save: true }),
+          Unsupported: ({ text: line }) => noticed(`not supported: ${line}`),
+          Unknown: ({ text: line }) =>
+            noticed(`E492: Not an editor command: ${line}`),
+          Goto: ({ address }) =>
+            Ex.Resolved.match(
+              Ex.resolve(address, buffer.lines.length, buffer.caret.line),
+              {
+                Invalid: () => noticed('E16: Invalid range'),
+                At: ({ line }) => {
+                  const { spot, want } = motions.LastLine(
+                    buffer,
+                    spotOf(buffer),
+                    line + 1,
+                    vim.want,
+                  )
+                  return {
+                    ...unchanged,
+                    vim: { ...cleared, want },
+                    buffer: Buffer.moveTo(buffer, positionOf(buffer, spot)),
+                  }
+                },
+              },
+            ),
+        }),
+      )
+    },
+    Insert: () => Option.none(),
+    Visual: () => Option.none(),
+  })
+
+export const resumed = (
+  vim: Vim,
+  buffer: Buffer.Buffer,
+  kept: Kept,
+  resume: Resume,
+  text: string,
+): Option.Option<Step> =>
+  Resume.match(resume, {
+    Search: search => searched(vim, buffer, kept, search, text),
+    Command: () => commanded(vim, buffer, kept, text),
   })

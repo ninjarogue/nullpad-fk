@@ -94,7 +94,7 @@ const splitLines = (text: string): Array.NonEmptyReadonlyArray<string> => {
   return [first, ...rest]
 }
 
-const lineAt = (buffer: Buffer, index: number): Line =>
+export const lineAt = (buffer: Buffer, index: number): Line =>
   buffer.lines[index] ?? buffer.lines[0]
 
 const replaceLines = (

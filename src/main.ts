@@ -31,13 +31,7 @@ import {
 import { Message } from './message'
 import { readBounds, reading, reveal, scrollReading } from './reading'
 import * as Storage from './storage'
-import {
-  locate,
-  revealCaret,
-  scrollToEnd,
-  statusLine,
-  surface,
-} from './surface'
+import { locate, markAimed, statusLine, surface } from './surface'
 
 export { Message }
 
@@ -192,16 +186,9 @@ const ask = (need: Editor.Need) =>
     ReadClipboard: ({ ticket }) => ReadClipboard({ ticket }),
   })
 
-const RevealCaret = Command.define('RevealCaret', {
-  args: { align: Schema.Literals(['Nearest', 'Top']) },
-  messages: [Message.CompletedRevealCaret],
-  execute: ({ align }) =>
-    revealCaret(align).pipe(Effect.as(Message.CompletedRevealCaret())),
-})
-
-const ScrollSurfaceToEnd = Command.define('ScrollSurfaceToEnd', {
-  messages: [Message.CompletedScrollSurfaceToEnd],
-  execute: scrollToEnd.pipe(Effect.as(Message.CompletedScrollSurfaceToEnd())),
+const MarkAimed = Command.define('MarkAimed', {
+  messages: [Message.CompletedMarkAimed],
+  execute: markAimed.pipe(Effect.as(Message.CompletedMarkAimed())),
 })
 
 const autosaveDelay = '800 millis'
@@ -571,9 +558,9 @@ const adopt = (model: Model, outcome: Editor.Outcome): UpdateReturn => {
         onNone: () => [],
         onSome: need => [ask(need)],
       }),
-      ...(outcome.reveal === 'None'
+      ...(outcome.editor.target.serial === model.editor.target.serial
         ? []
-        : [RevealCaret({ align: outcome.reveal })]),
+        : [MarkAimed()]),
       ...(changed ? [WaitBeforeSave({ edits })] : []),
     ],
   }
@@ -1044,20 +1031,14 @@ const handle = (model: Model, message: Message) =>
     FailedWriteClipboard: () => ({
       model: modifyFields(model, { editor: Editor.clipboardBlocked }),
     }),
-    ScrolledSurface: ({ top, atEnd }) => {
-      const editor = Editor.scrolled(model.editor, top)
-      return {
-        model: modifyFields(model, { editor: () => editor }),
-        commands:
-          atEnd && editor !== model.editor ? [ScrollSurfaceToEnd()] : [],
-      }
-    },
-    CompletedScrollSurfaceToEnd: () => ({ model }),
+    CompletedMarkAimed: () => ({ model }),
+    ScrolledSurface: ({ top, atEnd, serial }) => ({
+      model: modifyFields(model, {
+        editor: editor => Editor.scrolled(editor, { top, atEnd, serial }),
+      }),
+    }),
     ResizedScreen: ({ rows }) =>
       respond(model, Editor.resized(model.editor, rows)),
-    CompletedRevealCaret: () => ({
-      model: modifyFields(model, { editor: Editor.revealed }),
-    }),
     FocusedKeyboard: () => ({
       model: modifyFields(model, { keyboard: () => 'Focused' }),
     }),

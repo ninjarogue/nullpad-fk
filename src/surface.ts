@@ -1,4 +1,4 @@
-import { Array, Effect, Option, Queue, Stream } from 'effect'
+import { Array, Effect, Option, Queue, Schema, Stream } from 'effect'
 import { Mount, Render } from 'foldkit'
 import { type Html, type HtmlBuilder, createKeyedLazy } from 'foldkit/html'
 
@@ -8,9 +8,13 @@ import {
   type Landing,
   type Mode,
   type PaintedLine,
+  Place,
   type PromptLine,
   Query,
   type Selection,
+  Serial,
+  type Step,
+  Target,
   graphemeReach,
 } from './core/editor'
 import type { Keyboard } from './keyboard'
@@ -341,11 +345,15 @@ const appScrolls: { recent: ReadonlyArray<AppScroll> } = { recent: [] }
  * The app scrolls after a patch, inside a frame, and that frame is on screen no sooner than the next frame begins.
  * `shownAt` is that moment on the clock of `Event.timeStamp`.
  */
-const scrollApp = (surface: HTMLElement, scroll: () => void): number => {
+const scrollSurface = (
+  surface: HTMLElement,
+  top: number,
+  author: 'App' | 'Person',
+): number => {
   const before = surface.scrollTop
-  scroll()
+  surface.scrollTop = top
   const distance = surface.scrollTop - before
-  if (distance !== 0) {
+  if (author === 'App' && distance !== 0) {
     const made: AppScroll = { distance, shownAt: Infinity }
     appScrolls.recent = [...appScrolls.recent, made]
     requestAnimationFrame(nextFrame => {
@@ -370,10 +378,7 @@ const bringOnScreen = (sheet: Sheet, y: number): number => {
   const delta = below > 0 ? below : above > 0 ? -above : 0
   return delta === 0
     ? y
-    : y -
-        scrollApp(sheet.surface, () => {
-          sheet.surface.scrollTop += delta
-        })
+    : y - scrollSurface(sheet.surface, sheet.surface.scrollTop + delta, 'App')
 }
 
 const stay = (aimFromTextLeft: number): Answer => ({
@@ -769,7 +774,10 @@ export const locate = (query: Query, revision: number): Effect.Effect<Answer> =>
     Effect.map(() =>
       Option.match(findSurface(), {
         onNone: () => stay(0),
-        onSome: surface => answer(sheetOf(surface), query),
+        onSome: surface => {
+          applyTarget(surface)
+          return answer(sheetOf(surface), query)
+        },
       }),
     ),
   )
@@ -1189,25 +1197,77 @@ const redrawSelectionAfterScroll = (surface: HTMLElement): void => {
   }
 }
 
-const lastReveal = { askedAt: 0 }
+const aiming = {
+  applied: Serial.make(0),
+  handled: '',
+  isUnreported: false,
+  askedAt: 0,
+}
 
-export const revealCaret = (align: 'Nearest' | 'Top'): Effect.Effect<void> =>
-  Effect.sync(() => {
-    lastReveal.askedAt = performance.now()
-  }).pipe(
-    Effect.andThen(Render.afterCommit),
-    Effect.map(() =>
-      Option.map(findSurface(), surface => {
-        draw(surface)
-        scrollApp(surface, () =>
-          surface.querySelector('#caret')?.scrollIntoView({
-            block: align === 'Top' ? 'start' : 'nearest',
-            inline: 'nearest',
-          }),
-        )
-      }),
-    ),
+export const markAimed: Effect.Effect<void> = Effect.sync(() => {
+  aiming.askedAt = performance.now()
+})
+
+const decodeTarget = Schema.decodeUnknownSync(Schema.fromJsonString(Target))
+
+const lineById = (
+  surface: HTMLElement,
+  id: number,
+): Option.Option<HTMLElement> =>
+  Option.fromNullishOr(
+    surface.querySelector<HTMLElement>(`.line[data-line-id="${id}"]`),
   )
+
+const bringRowOnScreen = (
+  sheet: Sheet,
+  top: number,
+  align: 'Nearest' | 'Top',
+): void => {
+  const bottom = top + sheet.rowHeight
+  const delta =
+    align === 'Top' || top < sheet.viewTop
+      ? top - sheet.viewTop
+      : Math.max(0, bottom - sheet.viewBottom)
+  if (delta !== 0) {
+    scrollSurface(sheet.surface, sheet.surface.scrollTop + delta, 'App')
+  }
+}
+
+const applyStep = (surface: HTMLElement, { place }: Step): void =>
+  Place.match(place, {
+    At: ({ anchor, align }) => {
+      Option.map(lineById(surface, anchor.lineId), line => {
+        const { top } = caretBox(
+          line,
+          Math.min(anchor.column, lineText(line).length),
+          anchor.atRowEnd,
+        )
+        bringRowOnScreen(sheetOf(surface), top, align)
+      })
+    },
+    End: () => {
+      scrollSurface(surface, surface.scrollHeight, 'App')
+    },
+  })
+
+const applyTarget = (surface: HTMLElement): void => {
+  const written = surface.dataset['target'] ?? ''
+  if (written === aiming.handled) {
+    return
+  }
+  aiming.handled = written
+  const target = decodeTarget(written)
+  if (target.serial <= aiming.applied) {
+    return
+  }
+  for (const step of target.steps) {
+    if (step.serial > aiming.applied) {
+      applyStep(surface, step)
+    }
+  }
+  aiming.applied = target.serial
+  aiming.isUnreported = true
+}
 
 const topLine = (surface: HTMLElement, sheet: Sheet): number => {
   const lines = Array.fromIterable(
@@ -1269,16 +1329,6 @@ const drawnScrollRange = (
 const isAtEnd = (surface: HTMLElement): boolean =>
   surface.scrollTop >= surface.scrollHeight - surface.clientHeight - 1
 
-export const scrollToEnd: Effect.Effect<void> = Render.afterCommit.pipe(
-  Effect.map(() =>
-    Option.map(findSurface(), surface =>
-      scrollApp(surface, () => {
-        surface.scrollTop = surface.scrollHeight
-      }),
-    ),
-  ),
-)
-
 const observe = (surface: HTMLElement): Stream.Stream<SurfaceMessage> =>
   Stream.callback<SurfaceMessage>(queue =>
     Effect.gen(function* () {
@@ -1306,12 +1356,15 @@ const observe = (surface: HTMLElement): Stream.Stream<SurfaceMessage> =>
           resizes.observe(surface)
           const wheel = { pending: 0, turnedAt: 0 }
           const dropTurnsBeforeReveal = () => {
-            if (wheel.turnedAt < lastReveal.askedAt) {
+            if (wheel.turnedAt < aiming.askedAt) {
               wheel.pending = 0
             }
           }
           const report = (top: number, atEnd: boolean) =>
-            Queue.offerUnsafe(queue, Message.ScrolledSurface({ top, atEnd }))
+            Queue.offerUnsafe(
+              queue,
+              Message.ScrolledSurface({ top, atEnd, serial: aiming.applied }),
+            )
           const thumb = { isHeld: false, isAtEnd: false }
           const reportTop = () => {
             thumb.isAtEnd = thumb.isHeld && isAtEnd(surface)
@@ -1328,9 +1381,7 @@ const observe = (surface: HTMLElement): Stream.Stream<SurfaceMessage> =>
           const releaseThumb = () => {
             document.documentElement.style.removeProperty('--held-sheet-height')
             if (thumb.isHeld && thumb.isAtEnd) {
-              scrollApp(surface, () => {
-                surface.scrollTop = surface.scrollHeight
-              })
+              scrollSurface(surface, surface.scrollHeight, 'App')
             }
             thumb.isHeld = false
           }
@@ -1359,7 +1410,7 @@ const observe = (surface: HTMLElement): Stream.Stream<SurfaceMessage> =>
             if (isDrawn) {
               wheel.pending = 0
               if (wanted !== before) {
-                surface.scrollTop = wanted
+                scrollSurface(surface, wanted, 'Person')
                 reportTop()
               }
             } else if (whenUndrawn === 'AskCore') {
@@ -1377,10 +1428,16 @@ const observe = (surface: HTMLElement): Stream.Stream<SurfaceMessage> =>
               wheel.pending = 0
             }
           }
-          const patches = new MutationObserver(() => {
+          const patched = () => {
+            applyTarget(surface)
             draw(surface)
             scrollPending('Drop')
-          })
+            if (aiming.isUnreported) {
+              aiming.isUnreported = false
+              reportTop()
+            }
+          }
+          const patches = new MutationObserver(patched)
           patches.observe(surface, {
             attributes: true,
             attributeFilter: [
@@ -1391,8 +1448,10 @@ const observe = (surface: HTMLElement): Stream.Stream<SurfaceMessage> =>
               'data-caret-shape',
               'data-selected',
               'data-jump-matches',
+              'data-target',
             ],
           })
+          patched()
           surface.addEventListener(
             'scroll',
             () => {
@@ -1536,6 +1595,7 @@ export const surface = (
       h.DataAttribute('caret-column', String(frame.caret.column)),
       h.DataAttribute('caret-end', String(frame.caret.atRowEnd)),
       h.DataAttribute('caret-shape', frame.caret.shape),
+      h.DataAttribute('target', JSON.stringify(frame.target)),
       h.DataAttribute('last-line', String(frame.status.lineCount - 1)),
       ...Option.match(frame.jump, {
         onNone: () => [],

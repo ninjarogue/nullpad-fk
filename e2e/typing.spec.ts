@@ -397,10 +397,6 @@ test('PageDown and PageUp move the cursor a textarea page and scroll its row to 
 test('Delete, PageDown and a letter in one frame scroll the cursor’s row to the top, as PageDown alone does', async ({
   nullpad,
 }) => {
-  test.fail(
-    true,
-    'known bug: a letter queued behind a queued PageDown leaves the screen where it was',
-  )
   await nullpad.paste(numberedLines(200))
   await nullpad.press('Control+Home')
   const page = await textareaPageRows(nullpad)
@@ -970,10 +966,6 @@ test('the cursor is drawn where the status line puts it after Backspace joins li
 test('Ctrl+Home in the frame after Backspace took out the last line shows the cursor on line 1', async ({
   nullpad,
 }) => {
-  test.fail(
-    true,
-    'known bug: the scroll Chrome reports after the note got shorter takes back the reveal of a key in the next frame',
-  )
   await nullpad.paste(numberedLines(30))
   for (const lineCount of [29, 28, 27]) {
     const lastLine = `line ${lineCount + 1}`

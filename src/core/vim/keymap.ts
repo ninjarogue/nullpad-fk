@@ -561,7 +561,7 @@ const reachable = <C>(
 ): ReadonlyArray<Binding<C>> =>
   Array.filter(bindings, binding => startsWith(binding.keys, keys))
 
-const isOperatorKey = (key: Key | undefined): boolean =>
+export const isOperatorKey = (key: Key | undefined): boolean =>
   Object.values(operatorKeys).includes(key ?? '')
 
 const countSlot = (

@@ -78,7 +78,7 @@ const columnsFor = (screen: Screen, width: number): number =>
   )
 
 const rowsFor = (screen: Screen): number =>
-  clamp(3, maxRows, Math.floor(screen.rows / 2) - 3)
+  clamp(3, maxRows, Math.floor(screen.rows / 2) - 2)
 
 const registerEntries = (registers: Registers, width: number): Array<Entry> => {
   const entry = (key: string, about: string): Entry => ({
@@ -117,6 +117,8 @@ const keyEntries = <C>(
   pending: Keymap.Pending,
   width: number,
 ): Array<Entry> => {
+  const countsFollow =
+    pending.keys.length === 1 && Keymap.isOperatorKey(pending.keys[0])
   const next = Array.filter(
     Keymap.following(bindings, pending),
     entry => entry.hint !== '',
@@ -144,18 +146,23 @@ const keyEntries = <C>(
     )
     return !earlierNamed && !plainHints.includes(entry.hint)
   })
-  const entries = Array.map(unaliased, (entry): Entry =>
-    entry.leads === 'Keys'
-      ? {
-          key: display(entry.key),
-          about: Keymap.groupHints[entry.key] ?? Keymap.groupHintFallback,
-          kind: 'Group',
-        }
-      : {
-          key: display(entry.key),
-          about: cut(entry.hint, width),
-          kind: 'Key',
-        },
+  const entries = Array.map(
+    Array.filter(
+      unaliased,
+      entry => !(countsFollow && /^[0-9]$/u.test(entry.key)),
+    ),
+    (entry): Entry =>
+      entry.leads === 'Keys'
+        ? {
+            key: display(entry.key),
+            about: Keymap.groupHints[entry.key] ?? Keymap.groupHintFallback,
+            kind: 'Group',
+          }
+        : {
+            key: display(entry.key),
+            about: cut(entry.hint, width),
+            kind: 'Key',
+          },
   )
   const own =
     pending.keys.length === 1 ? display(pending.keys[0] ?? '') : undefined

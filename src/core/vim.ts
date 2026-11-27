@@ -263,6 +263,10 @@ export const Fate = Schema.TaggedUnion({
   Replay: { steps: Schema.Array(Replayed) },
   ReadClipboard: { put: Put },
   OpenPrompt: { resume: Resume },
+  OpenJump: {
+    operator: Schema.Option(OperatorName),
+    register: Operators.RegisterName,
+  },
 })
 export type Fate = typeof Fate.Type
 
@@ -965,7 +969,11 @@ const run = (
       ),
     OpenCommand: () =>
       opening(unchanged, cleared, Resume.cases.Command.make({})),
-    OpenJump: () => unchanged,
+    OpenJump: ({ operator }) => ({
+      ...unchanged,
+      vim,
+      fate: Fate.cases.OpenJump.make({ operator, register }),
+    }),
     Seek: ({ seek }) => {
       const sought = Seek.sought(
         buffer,
@@ -1514,7 +1522,11 @@ const runVisual = (
           register,
         }),
       ),
-    OpenJump: (): Step => unchanged,
+    OpenJump: (): Step => ({
+      ...unchanged,
+      vim,
+      fate: Fate.cases.OpenJump.make({ operator: Option.none(), register }),
+    }),
     Seek: ({ seek }): Step => {
       const sought = Seek.sought(
         buffer,
@@ -2098,6 +2110,33 @@ export const Jumping = Schema.Struct({
   register: Operators.RegisterName,
 })
 export type Jumping = typeof Jumping.Type
+
+export type JumpRegion = Jump.Region
+
+export type JumpMarks = Jump.Marks
+
+export type JumpAct = Jump.Act
+
+export const startJumping = (
+  region: JumpRegion,
+  operator: Option.Option<OperatorName>,
+  register: Operators.RegisterName,
+): Jumping => ({ jump: Jump.open(region), operator, register })
+
+export const jumpFed = (
+  buffer: Buffer.Buffer,
+  { jump }: Jumping,
+  input: Input,
+): JumpAct => Jump.feed(buffer, jump, input)
+
+export const jumpMarks = (
+  buffer: Buffer.Buffer,
+  { jump }: Jumping,
+  drawn: Readonly<{ first: number; last: number }>,
+): JumpMarks => Jump.marks(buffer, jump, drawn)
+
+export const jumpPending = (vim: Vim, { jump }: Jumping): string =>
+  Keymap.shown(vim) + Keymap.jumpKey + jump.pattern
 
 export const jumped = (
   vim: Vim,

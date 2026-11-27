@@ -639,6 +639,7 @@ const answer = (sheet: Sheet, query: Query): Answer =>
         onNone: () => stay(0),
         onSome: element => pointAnswer(sheet, element, x, yInLine),
       }),
+    Screen: () => stay(0),
     Step: ({ at: from, direction }) =>
       Option.match(lineElement(sheet.surface, from.line), {
         onNone: () => stay(0),

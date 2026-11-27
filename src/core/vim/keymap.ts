@@ -9,7 +9,7 @@ import {
   defaultRegister,
   registerNamed,
 } from './operators'
-import { Seek, type Way } from './seek'
+import { Seek, Way } from './seek'
 import { Amount, BlockAmount, Kind as SelectionKind } from './selection'
 import { OperatorName, TargetName } from './targets'
 
@@ -31,6 +31,8 @@ export type SelectionEdge = typeof SelectionEdge.Type
 export const Command = Schema.TaggedUnion({
   Move: { motion: MotionName },
   Seek: { seek: Seek },
+  OpenSearch: { way: Way, operator: Schema.Option(OperatorName) },
+  OpenCommand: {},
   Operate: { operator: OperatorName, target: TargetName },
   OperateSeek: { operator: OperatorName, seek: Seek },
   OperateAmount: { operator: OperatorName, amount: Amount },
@@ -61,6 +63,7 @@ export type Reach = typeof Reach.Type
 export const VisualCommand = Schema.TaggedUnion({
   Move: { motion: MotionName },
   Seek: { seek: Seek },
+  OpenSearch: { way: Way },
   Operate: { operator: OperatorName, reach: Reach },
   Replace: { side: Side },
   ReplaceLetters: { letter: Schema.String },
@@ -141,6 +144,11 @@ const findRow = (
     about,
   )
 
+const openRows: ReadonlyArray<Binding<Way>> = [
+  bind('/', 'Forward', 'search forward'),
+  bind('?', 'Backward', 'search backward'),
+]
+
 const seekRows: ReadonlyArray<Binding<Seek>> = [
   findRow('f', 'Forward', false, 'to the letter'),
   findRow('F', 'Backward', false, 'back to the letter'),
@@ -151,6 +159,22 @@ const seekRows: ReadonlyArray<Binding<Seek>> = [
     ',',
     Seek.cases.Again.make({ reverse: true }),
     'the last find the other way',
+  ),
+  bind('n', Seek.cases.Next.make({ reverse: false }), 'the last search again'),
+  bind(
+    'N',
+    Seek.cases.Next.make({ reverse: true }),
+    'the last search the other way',
+  ),
+  bind(
+    '*',
+    Seek.cases.Word.make({ way: 'Forward' }),
+    'search the word forward',
+  ),
+  bind(
+    '#',
+    Seek.cases.Word.make({ way: 'Backward' }),
+    'search the word backward',
   ),
 ]
 
@@ -266,6 +290,18 @@ const operatorRows = (
         `${verb} ${row.about}`,
       ),
     ),
+    ...Array.map(openRows, row =>
+      lifted(
+        row,
+        key,
+        way =>
+          Command.cases.OpenSearch.make({
+            way,
+            operator: Option.some(operator),
+          }),
+        `${verb} ${row.about}`,
+      ),
+    ),
     operate(key + key, operator, 'Lines', `${verb} lines`),
     ...Array.map(objectRows, ([notation, target, about]) =>
       operate(key + notation, operator, target, `${verb} ${about}`),
@@ -280,6 +316,15 @@ export const normal: ReadonlyArray<Binding<Command>> = [
   ...Array.map(seekRows, row =>
     lifted(row, '', seek => Command.cases.Seek.make({ seek }), row.about),
   ),
+  ...Array.map(openRows, row =>
+    lifted(
+      row,
+      '',
+      way => Command.cases.OpenSearch.make({ way, operator: Option.none() }),
+      row.about,
+    ),
+  ),
+  bind(':', Command.cases.OpenCommand.make({}), 'command line'),
   ...Array.flatMap(OperatorName.literals, operatorRows),
   operate('x', 'Delete', 'Right', 'delete character'),
   operate('<Del>', 'Delete', 'Right', 'delete character'),
@@ -327,7 +372,7 @@ const keysWithAnArgument: ReadonlyArray<Key> = [
 
 const leave = VisualCommand.cases.Leave.make({})
 
-const screenKeys: ReadonlyArray<Key> = ['<C-e>', '<C-p>']
+export const screenKeys: ReadonlyArray<Key> = ['<C-e>', '<C-p>']
 
 const reachAbouts: Readonly<Record<Reach, string>> = {
   AsSelected: 'the selection',
@@ -353,6 +398,14 @@ export const visual: ReadonlyArray<Binding<VisualCommand>> = [
   ),
   ...Array.map(seekRows, row =>
     lifted(row, '', seek => VisualCommand.cases.Seek.make({ seek }), row.about),
+  ),
+  ...Array.map(openRows, row =>
+    lifted(
+      row,
+      '',
+      way => VisualCommand.cases.OpenSearch.make({ way }),
+      row.about,
+    ),
   ),
   ...Array.map(objectRows, ([notation, object, about]) =>
     bind(

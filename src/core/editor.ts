@@ -3,8 +3,10 @@ import { Array, Option, Order, Schema } from 'effect'
 import * as Buffer from './buffer'
 import * as History from './history'
 import { Input, type Modifiers, type NamedKey } from './input'
+import * as Line from './line'
 import * as Markdown from './markdown'
 import * as Notes from './notes'
+import * as Prompt from './prompt'
 import * as Vim from './vim'
 import * as Words from './words'
 
@@ -77,6 +79,12 @@ export const Need = Schema.TaggedUnion({
 })
 export type Need = typeof Need.Type
 
+export const Asking = Schema.Struct({
+  prompt: Prompt.Prompt,
+  resume: Vim.Resume,
+})
+export type Asking = typeof Asking.Type
+
 export const Editor = Schema.Struct({
   buffer: Buffer.Buffer,
   history: History.History,
@@ -93,6 +101,7 @@ export const Editor = Schema.Struct({
   asked: Schema.Int,
   pendingReveals: Schema.Int,
   notice: Schema.Option(Schema.String),
+  prompt: Schema.Option(Asking),
 })
 export type Editor = typeof Editor.Type
 
@@ -103,6 +112,7 @@ export type Outcome = Readonly<{
   need: Option.Option<Need>
   reveal: Reveal
   writeClipboard: Option.Option<string>
+  save: boolean
 }>
 
 export type Part = Readonly<{ text: string; isPreedit: boolean }>
@@ -115,6 +125,14 @@ export type PaintedLine = Readonly<{
 }>
 
 export type Selection = Vim.Shown
+
+export type PromptLine = Readonly<{
+  lead: string
+  before: string
+  preedit: string
+  under: string
+  after: string
+}>
 
 export type Frame = Readonly<{
   lines: ReadonlyArray<PaintedLine>
@@ -134,6 +152,7 @@ export type Frame = Readonly<{
     mode: Mode
     pending: string
     notice: string
+    prompt: Option.Option<PromptLine>
     line: number
     column: number
     lineCount: number
@@ -159,6 +178,7 @@ export const open = (text: string, vim = false): Editor => {
     asked: 0,
     pendingReveals: 0,
     notice: Option.none(),
+    prompt: Option.none(),
   }
 }
 
@@ -307,6 +327,7 @@ const done = (unrested: Editor, reveal: Reveal = 'Nearest'): Outcome => {
     need: Option.none(),
     reveal,
     writeClipboard: Option.none(),
+    save: false,
   }
 }
 
@@ -709,6 +730,7 @@ const vimDone = (
         kept: step.kept,
         discards: editor.discards + swallowed,
         goalX: moved ? Option.none() : editor.goalX,
+        notice: Option.orElse(step.notice, () => editor.notice),
       },
       moved ? { buffer: step.buffer, caretAtRowEnd: false } : {},
     ),
@@ -717,7 +739,11 @@ const vimDone = (
   )
   return {
     ...settled,
-    outcome: { ...settled.outcome, writeClipboard: step.clipboard },
+    outcome: {
+      ...settled.outcome,
+      writeClipboard: step.clipboard,
+      save: step.save,
+    },
   }
 }
 
@@ -770,20 +796,83 @@ const vimPlan = (
         }
       },
     }),
+    OpenPrompt: ({ resume }): Plan =>
+      now(
+        {
+          ...counted,
+          prompt: Option.some({ prompt: Prompt.open, resume }),
+        },
+        'None',
+      ),
     Done: () => vimDone(editor, step, swallowed),
   })
 }
 
-const inputPlan = (editor: Editor, input: Input): Plan =>
-  Option.match(editor.vim, {
-    onNone: () => plainPlan(editor, input),
-    onSome: vim =>
-      vimPlan(
-        editor,
-        vim,
-        Vim.press(vim, editor.buffer, editor.kept, input),
-        input._tag === 'Key' || input._tag === 'Chord' ? 0 : 1,
+const promptPlan = (editor: Editor, asking: Asking, input: Input): Plan => {
+  if (Vim.isScreenKey(input)) {
+    return inputPlan({ ...editor, prompt: Option.none() }, input)
+  }
+  const history = Vim.promptHistory(editor.kept, asking.resume)
+  const { prompt, act } = Prompt.feed(asking.prompt, history, input)
+  const remembering = () =>
+    Vim.withPromptHistory(
+      editor.kept,
+      asking.resume,
+      Prompt.remembered(history, prompt.line.text),
+    )
+  return Prompt.Act.match(act, {
+    Stay: () =>
+      now({ ...editor, prompt: Option.some({ ...asking, prompt }) }, 'None'),
+    Close: () =>
+      now(
+        {
+          ...editor,
+          prompt: Option.none(),
+          kept: remembering(),
+          vim: Option.map(editor.vim, Vim.idle),
+        },
+        'None',
       ),
+    Run: () => {
+      const kept = remembering()
+      const closed = { ...editor, prompt: Option.none(), kept }
+      return Option.match(
+        Option.flatMap(editor.vim, vim =>
+          Option.map(
+            Vim.resumed(
+              vim,
+              editor.buffer,
+              kept,
+              asking.resume,
+              prompt.line.text,
+            ),
+            step => ({ vim, step }),
+          ),
+        ),
+        {
+          onNone: () =>
+            now({ ...closed, vim: Option.map(editor.vim, Vim.idle) }, 'None'),
+          onSome: ({ vim, step }) => vimPlan(closed, vim, step, 0),
+        },
+      )
+    },
+  })
+}
+
+const inputPlan = (editor: Editor, input: Input): Plan =>
+  Option.match(editor.prompt, {
+    onSome: asking => promptPlan(editor, asking, input),
+    onNone: () =>
+      Option.match(editor.vim, {
+        onNone: () => plainPlan(editor, input),
+        onSome: vim =>
+          vimPlan(
+            editor,
+            vim,
+            Vim.press(vim, editor.buffer, editor.kept, input),
+            input._tag === 'Key' || input._tag === 'Chord' ? 0 : 1,
+          ),
+      }),
   })
 
 const againPlan = (editor: Editor, step: Vim.Replayed): Plan =>
@@ -795,10 +884,15 @@ const againPlan = (editor: Editor, step: Vim.Replayed): Plan =>
 
 const toggleVim = (editor: Editor): Editor =>
   Option.match(editor.vim, {
-    onSome: () => ({ ...editor, vim: Option.none() }),
+    onSome: () => ({ ...editor, vim: Option.none(), prompt: Option.none() }),
     onNone: () =>
       changeDrawn(
-        { ...editor, vim: Option.some(Vim.start), goalX: Option.none() },
+        {
+          ...editor,
+          vim: Option.some(Vim.start),
+          goalX: Option.none(),
+          prompt: Option.none(),
+        },
         { preedit: '' },
       ),
   })
@@ -820,6 +914,7 @@ const planFor = (editor: Editor, queued: Queued): Plan =>
       clickPlan(
         {
           ...editor,
+          prompt: Option.none(),
           vim: Option.map(editor.vim, vim => Vim.clicked(vim, editor.buffer)),
         },
         x,
@@ -986,6 +1081,7 @@ const run = (editor: Editor, queued: Queued): Outcome => {
         ? 'None'
         : 'Nearest',
     writeClipboard: Option.none(),
+    save: false,
   }
 }
 
@@ -1033,6 +1129,7 @@ const replay = (start: Outcome, queued: ReadonlyArray<Queued>): Outcome => {
             result.writeClipboard,
             () => reached.outcome.writeClipboard,
           ),
+          save: result.save || reached.outcome.save,
         },
         ran: reached.ran + 1,
       }
@@ -1057,6 +1154,11 @@ const countPendingReveal = (outcome: Outcome): Outcome =>
 export const revealed = (editor: Editor): Editor => ({
   ...editor,
   pendingReveals: Math.max(0, editor.pendingReveals - 1),
+})
+
+export const noticed = (editor: Editor, notice: string): Editor => ({
+  ...editor,
+  notice: Option.some(notice),
 })
 
 export const withoutNotice = (editor: Editor): Editor =>
@@ -1177,6 +1279,7 @@ export const resized = (editor: Editor, rows: number): Outcome => {
     need: Option.none(),
     reveal: 'Nearest',
     writeClipboard: Option.none(),
+    save: false,
   })
 }
 
@@ -1275,13 +1378,16 @@ export const paint = (editor: Editor): Frame => {
     selection: Option.flatMap(editor.vim, vim =>
       Vim.selection(vim, buffer, { first, last }),
     ),
-    surrounding: {
-      text: (lines[caret.line]?.text ?? '').slice(
-        near.from.column,
-        near.to.column,
-      ),
-      caret: caret.column - near.from.column,
-    },
+    surrounding: Option.match(editor.prompt, {
+      onSome: ({ prompt }) => Prompt.surrounding(prompt),
+      onNone: () => ({
+        text: (lines[caret.line]?.text ?? '').slice(
+          near.from.column,
+          near.to.column,
+        ),
+        caret: caret.column - near.from.column,
+      }),
+    }),
     discards: editor.discards,
     status: {
       mode: Option.match(editor.vim, {
@@ -1293,6 +1399,16 @@ export const paint = (editor: Editor): Frame => {
         onSome: Vim.pendingKeys,
       }),
       notice: Option.getOrElse(editor.notice, () => ''),
+      prompt: Option.map(editor.prompt, ({ prompt: { line }, resume }) => {
+        const under = Line.letterUnderCaret(line)
+        return {
+          lead: Vim.promptLead(resume),
+          before: line.text.slice(0, line.caret),
+          preedit: line.preedit,
+          under,
+          after: line.text.slice(line.caret + under.length),
+        }
+      }),
       line: caret.line + 1,
       column: caretGrapheme(lines[caret.line]?.text ?? '', caret.column) + 1,
       lineCount: lines.length,

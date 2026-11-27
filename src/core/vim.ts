@@ -1,11 +1,13 @@
-import { Array, Option, Schema } from 'effect'
+import { Array, Match, Option, Schema } from 'effect'
 
 import * as Buffer from './buffer'
 import * as History from './history'
-import { Input, type NamedKey, noModifiers } from './input'
+import { Input, type NamedKey, isControlAlone, noModifiers } from './input'
 import { cellAt, cellCount, cellStart } from './vim/cells'
+import * as Ex from './vim/command'
 import * as Keymap from './vim/keymap'
 import {
+  type Spot,
   Want,
   cellsIn,
   endOf,
@@ -23,7 +25,7 @@ import * as Operators from './vim/operators'
 import * as Seek from './vim/seek'
 import * as Selection from './vim/selection'
 import {
-  type OperatorName,
+  OperatorName,
   type Range,
   type TargetName,
   byKind,
@@ -48,10 +50,17 @@ export const Repeat = Schema.Struct({
 })
 export type Repeat = typeof Repeat.Type
 
+export const PromptHistories = Schema.Struct({
+  search: Schema.Array(Schema.String),
+  command: Schema.Array(Schema.String),
+})
+export type PromptHistories = typeof PromptHistories.Type
+
 export const Kept = Schema.Struct({
   registers: Operators.Registers,
   dot: Schema.Option(Repeat),
   seek: Seek.Memory,
+  history: PromptHistories,
 })
 export type Kept = typeof Kept.Type
 
@@ -59,6 +68,7 @@ export const nothingKept: Kept = {
   registers: noRegisters,
   dot: Option.none(),
   seek: Seek.forgotten,
+  history: { search: [], command: [] },
 }
 
 export const BlockStay = Schema.Struct({
@@ -204,12 +214,53 @@ export const Put = Schema.Struct({
 })
 export type Put = typeof Put.Type
 
+export const Resume = Schema.TaggedUnion({
+  Search: {
+    way: Seek.Way,
+    operator: Schema.Option(OperatorName),
+    count: Schema.UndefinedOr(Schema.Int),
+    register: Operators.RegisterName,
+  },
+  Command: {},
+})
+export type Resume = typeof Resume.Type
+
+type SearchResume = Extract<Resume, { _tag: 'Search' }>
+
+export const promptLead = (resume: Resume): string =>
+  Resume.match(resume, {
+    Search: ({ way }) => (way === 'Forward' ? '/' : '?'),
+    Command: () => ':',
+  })
+
+export const promptHistory = (
+  kept: Kept,
+  resume: Resume,
+): ReadonlyArray<string> =>
+  Resume.match(resume, {
+    Search: () => kept.history.search,
+    Command: () => kept.history.command,
+  })
+
+export const withPromptHistory = (
+  kept: Kept,
+  resume: Resume,
+  history: ReadonlyArray<string>,
+): Kept => ({
+  ...kept,
+  history: Resume.match(resume, {
+    Search: () => ({ ...kept.history, search: history }),
+    Command: () => ({ ...kept.history, command: history }),
+  }),
+})
+
 export const Fate = Schema.TaggedUnion({
   Done: {},
   Plain: { input: Input },
   Travel: { way: History.Way, count: Schema.Int },
   Replay: { steps: Schema.Array(Replayed) },
   ReadClipboard: { put: Put },
+  OpenPrompt: { resume: Resume },
 })
 export type Fate = typeof Fate.Type
 
@@ -222,7 +273,26 @@ export type Step = Readonly<{
   fate: Fate
   began: Option.Option<Buffer.Position>
   clipboard: Option.Option<string>
+  notice: Option.Option<string>
+  save: boolean
 }>
+
+const stepOf = (
+  vim: Vim,
+  buffer: Buffer.Buffer,
+  kept: Kept,
+  over: Partial<Step> = {},
+): Step => ({
+  vim,
+  buffer,
+  kept,
+  fate: done,
+  began: Option.none(),
+  clipboard: Option.none(),
+  notice: Option.none(),
+  save: false,
+  ...over,
+})
 
 const keyNames: Readonly<Record<NamedKey, string>> = {
   Escape: 'Esc',
@@ -293,7 +363,7 @@ export const rest = (
     : Buffer.moveTo(buffer, { line, column: target })
 }
 
-const idle = (vim: Vim): Vim => ({ ...vim, ...Keymap.idle })
+export const idle = (vim: Vim): Vim => ({ ...vim, ...Keymap.idle })
 
 type Marks = Readonly<{ anchor: Buffer.Position; cursor: Buffer.Position }>
 
@@ -577,18 +647,15 @@ const putStep = (
     register: name,
     typed: [],
   })
-  return {
-    vim: Option.isSome(held) ? normal : idle(vim),
-    buffer: Option.match(held, {
+  return stepOf(
+    Option.isSome(held) ? normal : idle(vim),
+    Option.match(held, {
       onNone: () => buffer,
       onSome: register =>
         rest(normal, Operators.put(buffer, register, side, count ?? 1), false),
     }),
-    kept: { ...kept, dot },
-    fate: done,
-    began: Option.none(),
-    clipboard: Option.none(),
-  }
+    { ...kept, dot },
+  )
 }
 
 const repeatOf = (
@@ -715,9 +782,9 @@ const putOverStep = (
     }),
     want: 'Unset',
   }
-  return {
-    vim: normal,
-    buffer: rest(
+  return stepOf(
+    normal,
+    rest(
       normal,
       Option.match(put, {
         onNone: () => deleted.buffer,
@@ -725,11 +792,9 @@ const putOverStep = (
       }),
       false,
     ),
-    kept: { ...kept, registers: deleted.registers, dot: Option.some(dot) },
-    fate: done,
-    began: Option.some(began),
-    clipboard: Option.none(),
-  }
+    { ...kept, registers: deleted.registers, dot: Option.some(dot) },
+    { began: Option.some(began) },
+  )
 }
 
 export const putClipboard = (
@@ -745,14 +810,7 @@ export const putClipboard = (
   }
   return Option.isSome(held)
     ? putOverStep(vim, buffer, kept, vim.mode, put, held)
-    : {
-        vim: idle(vim),
-        buffer,
-        kept,
-        fate: done,
-        began: Option.none(),
-        clipboard: Option.none(),
-      }
+    : stepOf(idle(vim), buffer, kept)
 }
 
 const lastAfterSplits = (
@@ -792,6 +850,27 @@ const blockRules: Readonly<
 const keepsItsCount = ({ _tag }: Keymap.Command): boolean =>
   _tag === 'InsertAsSelected' || _tag === 'InsertInBlock'
 
+const soughtStep = (
+  unchanged: Step,
+  kept: Kept,
+  cleared: Vim,
+  sought: Seek.Sought,
+): Step => ({
+  ...unchanged,
+  vim:
+    sought._tag === 'Failed' && sought.resetsColumn
+      ? { ...cleared, want: 'Unset' }
+      : cleared,
+  kept: { ...kept, seek: sought.memory },
+  notice: sought.notice,
+})
+
+const opening = (unchanged: Step, vim: Vim, resume: Resume): Step => ({
+  ...unchanged,
+  vim,
+  fate: Fate.cases.OpenPrompt.make({ resume }),
+})
+
 const run = (
   vim: Vim,
   buffer: Buffer.Buffer,
@@ -802,27 +881,16 @@ const run = (
 ): Step => {
   const cleared = idle(vim)
   const normal: Vim = { ...cleared, want: 'Unset' }
-  const unchanged: Step = {
-    vim: cleared,
-    buffer,
-    kept,
-    fate: done,
-    began: Option.none(),
-    clipboard: Option.none(),
-  }
+  const unchanged: Step = stepOf(cleared, buffer, kept)
   const repeat = Option.some({ command, count, register, typed: [] })
   const recordingStay: Vim = { ...normal, mode: insertMode(repeat) }
-  const replacedStep = (
-    after: Buffer.Buffer,
-    began: Buffer.Position,
-  ): Step => ({
-    vim: normal,
-    buffer: rest(normal, after, false),
-    kept: { ...kept, dot: repeat },
-    fate: done,
-    began: Option.some(began),
-    clipboard: Option.none(),
-  })
+  const replacedStep = (after: Buffer.Buffer, began: Buffer.Position): Step =>
+    stepOf(
+      normal,
+      rest(normal, after, false),
+      { ...kept, dot: repeat },
+      { began: Option.some(began) },
+    )
   const operated = (
     operator: OperatorName,
     target: TargetName | 'Selection',
@@ -835,18 +903,19 @@ const run = (
       register,
     )
     const after = applied.inserting ? recordingStay : normal
-    return {
-      vim: after,
-      buffer: rest(after, applied.buffer, false),
-      kept: {
+    return stepOf(
+      after,
+      rest(after, applied.buffer, false),
+      {
         ...kept,
         registers: applied.registers,
         dot: operator === 'Delete' ? repeat : kept.dot,
       },
-      fate: done,
-      began: Option.some(changeBegan(buffer, operator, target, range)),
-      clipboard: applied.clipboard,
-    }
+      {
+        began: Option.some(changeBegan(buffer, operator, target, range)),
+        clipboard: applied.clipboard,
+      },
+    )
   }
   return Keymap.Command.match(command, {
     Cancel: () => unchanged,
@@ -868,43 +937,65 @@ const run = (
         buffer: Buffer.moveTo(buffer, positionOf(buffer, spot)),
       }
     },
+    OpenSearch: ({ way, operator }) =>
+      opening(
+        unchanged,
+        vim,
+        Resume.cases.Search.make({ way, operator, count, register }),
+      ),
+    OpenCommand: () =>
+      opening(unchanged, cleared, Resume.cases.Command.make({})),
     Seek: ({ seek }) => {
-      const { memory, landing } = Seek.sought(
+      const sought = Seek.sought(
         buffer,
         spotOf(buffer),
         seek,
         count,
         kept.seek,
+        'LastLetter',
       )
-      const remembered: Step = { ...unchanged, kept: { ...kept, seek: memory } }
-      return Option.match(landing, {
-        onNone: () => remembered,
-        onSome: ({ spot }): Step => ({
-          ...remembered,
-          vim: normal,
-          buffer: Buffer.moveTo(buffer, positionOf(buffer, spot)),
+      const remembered = soughtStep(unchanged, kept, cleared, sought)
+      return Match.value(sought).pipe(
+        Match.tagsExhaustive({
+          Landed: ({ landing }): Step => ({
+            ...remembered,
+            vim: normal,
+            buffer: Buffer.moveTo(buffer, positionOf(buffer, landing.spot)),
+          }),
+          Failed: ({ cursor }): Step =>
+            Option.match(cursor, {
+              onNone: () => remembered,
+              onSome: spot => ({
+                ...remembered,
+                buffer: Buffer.moveTo(buffer, positionOf(buffer, spot)),
+              }),
+            }),
         }),
-      })
+      )
     },
     OperateSeek: ({ operator, seek }) => {
       const from = spotOf(buffer)
-      const { memory, landing } = Seek.sought(
+      const sought = Seek.sought(
         buffer,
         from,
         seek,
         count,
         kept.seek,
+        'LastLetter',
       )
-      const step = Option.match(landing, {
-        onNone: () => unchanged,
-        onSome: found =>
-          operated(
-            operator,
-            'Selection',
-            rangeToLanding(operator, buffer, from, found),
-          ),
-      })
-      return { ...step, kept: { ...step.kept, seek: memory } }
+      if (sought._tag === 'Failed') {
+        return soughtStep(unchanged, kept, cleared, sought)
+      }
+      const step = operated(
+        operator,
+        'Selection',
+        rangeToLanding(operator, buffer, from, sought.landing),
+      )
+      return {
+        ...step,
+        kept: { ...step.kept, seek: sought.memory },
+        notice: sought.notice,
+      }
     },
     Operate: ({ operator, target }) =>
       Option.match(
@@ -952,18 +1043,16 @@ const run = (
             ),
           }
         : normal
-      return {
-        vim: after,
-        buffer: rest(after, applied.buffer, false),
-        kept: {
+      return stepOf(
+        after,
+        rest(after, applied.buffer, false),
+        {
           ...kept,
           registers: applied.registers,
           dot: operator === 'Delete' ? repeat : kept.dot,
         },
-        fate: done,
-        began: Option.some(home),
-        clipboard: applied.clipboard,
-      }
+        { began: Option.some(home), clipboard: applied.clipboard },
+      )
     },
     ReplaceLetters: ({ letter }) => {
       const from = spotOf(buffer)
@@ -1166,14 +1255,7 @@ const runVisual = (
   register: Operators.RegisterName,
 ): Step => {
   const cleared = idle(vim)
-  const unchanged: Step = {
-    vim: cleared,
-    buffer,
-    kept,
-    fate: done,
-    began: Option.none(),
-    clipboard: Option.none(),
-  }
+  const unchanged: Step = stepOf(cleared, buffer, kept)
   const stays = (caret: Buffer.Position): boolean =>
     caret.line === buffer.caret.line && caret.column === buffer.caret.column
   const columnAfter = (caret: Buffer.Position): Selection.Column =>
@@ -1289,21 +1371,16 @@ const runVisual = (
         ? { ...normal, mode: insertMode(dot, block), want: 'Unset' }
         : { ...normal, want: 'Unset' }
       const rested = rest(after, applied.buffer, false)
-      return {
-        vim:
-          operator === 'Yank'
-            ? { ...after, want: yanked(rested.caret) }
-            : after,
-        buffer: rested,
-        kept: {
+      return stepOf(
+        operator === 'Yank' ? { ...after, want: yanked(rested.caret) } : after,
+        rested,
+        {
           ...kept,
           registers: applied.registers,
           dot: operator === 'Delete' ? dot : kept.dot,
         },
-        fate: done,
-        began: Option.some(began),
-        clipboard: applied.clipboard,
-      }
+        { began: Option.some(began), clipboard: applied.clipboard },
+      )
     },
     Insert: ({ at }): Step =>
       Selection.byShape(ends, {
@@ -1405,30 +1482,49 @@ const runVisual = (
         buffer: Buffer.moveTo(buffer, caret),
       }
     },
+    OpenSearch: ({ way }): Step =>
+      opening(
+        unchanged,
+        vim,
+        Resume.cases.Search.make({
+          way,
+          operator: Option.none(),
+          count,
+          register,
+        }),
+      ),
     Seek: ({ seek }): Step => {
-      const { memory, landing } = Seek.sought(
+      const sought = Seek.sought(
         buffer,
         ends.cursor,
         seek,
         count,
         kept.seek,
+        'LineBreak',
       )
-      const remembered: Step = { ...unchanged, kept: { ...kept, seek: memory } }
-      return Option.match(landing, {
-        onNone: () => remembered,
-        onSome: ({ spot }): Step => {
-          const caret = positionOf(buffer, spot)
-          return {
-            ...remembered,
-            vim: {
-              ...cleared,
-              mode: visualMode(visual.kind, visual.anchor, columnAfter(caret)),
-              want: 'Unset',
-            },
-            buffer: Buffer.moveTo(buffer, caret),
-          }
-        },
-      })
+      const remembered = soughtStep(unchanged, kept, cleared, sought)
+      const moved = (spot: Spot): Step => {
+        const caret = positionOf(buffer, spot)
+        return {
+          ...remembered,
+          vim: {
+            ...cleared,
+            mode: visualMode(visual.kind, visual.anchor, columnAfter(caret)),
+            want: 'Unset',
+          },
+          buffer: Buffer.moveTo(buffer, caret),
+        }
+      }
+      return Match.value(sought).pipe(
+        Match.tagsExhaustive({
+          Landed: ({ landing }) => moved(landing.spot),
+          Failed: ({ cursor }) =>
+            Option.match(cursor, {
+              onNone: () => remembered,
+              onSome: moved,
+            }),
+        }),
+      )
     },
     Pick: ({ object }): Step => {
       const picked = objects[object].pick(buffer, ends, count ?? 1)
@@ -1501,10 +1597,10 @@ const runVisual = (
           })),
           want: 'Unset',
         }
-        return {
-          vim: normal,
-          buffer: rest(normal, Buffer.moveTo(after, start), false),
-          kept: {
+        return stepOf(
+          normal,
+          rest(normal, Buffer.moveTo(after, start), false),
+          {
             ...kept,
             dot: Option.some({
               command,
@@ -1513,10 +1609,8 @@ const runVisual = (
               typed: [],
             }),
           },
-          fate: done,
-          began: Option.some(began),
-          clipboard: Option.none(),
-        }
+          { began: Option.some(began) },
+        )
       }
       const sameCell =
         (after: Buffer.Buffer) =>
@@ -1586,14 +1680,7 @@ const pressNormal = (
   kept: Kept,
   input: Input,
 ): Step => {
-  const unchanged: Step = {
-    vim,
-    buffer,
-    kept,
-    fate: done,
-    began: Option.none(),
-    clipboard: Option.none(),
-  }
+  const unchanged: Step = stepOf(vim, buffer, kept)
   if (isPasteByAnotherRoute(input) || isPageKey(input)) {
     return {
       ...unchanged,
@@ -1631,14 +1718,7 @@ const pressVisual = (
   visual: Visual,
   input: Input,
 ): Step => {
-  const unchanged: Step = {
-    vim,
-    buffer,
-    kept,
-    fate: done,
-    began: Option.none(),
-    clipboard: Option.none(),
-  }
+  const unchanged: Step = stepOf(vim, buffer, kept)
   if (isPageKey(input)) {
     return {
       ...unchanged,
@@ -1747,9 +1827,9 @@ const leaveInsert = (
   const back = Buffer.backspaceTarget(settled)
   const left =
     back.line === settled.caret.line ? Buffer.moveTo(settled, back) : settled
-  return {
-    vim: { ...start, last: vim.last },
-    buffer: rest(
+  return stepOf(
+    { ...start, last: vim.last },
+    rest(
       start,
       Option.match(block, {
         onNone: () => left,
@@ -1758,10 +1838,7 @@ const leaveInsert = (
       false,
     ),
     kept,
-    fate: done,
-    began: Option.none(),
-    clipboard: Option.none(),
-  }
+  )
 }
 
 const isAtNoteStart = ({ caret }: Buffer.Buffer): boolean =>
@@ -1790,16 +1867,17 @@ const leaving = (
 ): Step =>
   Option.match(recording, {
     onNone: () => leaveInsert(vim, buffer, kept, block),
-    onSome: repeat => ({
-      vim: { ...vim, mode: insertMode(Option.none(), block) },
-      buffer,
-      kept: { ...kept, dot: recording },
-      fate: Fate.cases.Replay.make({
-        steps: [...furtherCopies(repeat, buffer.lines.length), leave],
-      }),
-      began: Option.none(),
-      clipboard: Option.none(),
-    }),
+    onSome: repeat =>
+      stepOf(
+        { ...vim, mode: insertMode(Option.none(), block) },
+        buffer,
+        { ...kept, dot: recording },
+        {
+          fate: Fate.cases.Replay.make({
+            steps: [...furtherCopies(repeat, buffer.lines.length), leave],
+          }),
+        },
+      ),
   })
 
 const printableKeys = /^[\x20-\x7e\n]+$/u
@@ -1878,6 +1956,7 @@ const pressInsert = (
   leavesInsert(input)
     ? leaving(vim, buffer, kept, stay)
     : {
+        ...stepOf(vim, buffer, kept, { fate: { _tag: 'Plain', input } }),
         ...Option.match(stay.recording, {
           onNone: () => ({ vim, kept }),
           onSome: repeat =>
@@ -1885,10 +1964,6 @@ const pressInsert = (
               ? stayWith(vim, kept, repeat, stay.block, input)
               : { vim, kept },
         }),
-        buffer,
-        fate: { _tag: 'Plain', input },
-        began: Option.none(),
-        clipboard: Option.none(),
       }
 
 export const press = (
@@ -1909,14 +1984,7 @@ export const again = (
   kept: Kept,
   step: Replayed,
 ): Step => {
-  const unchanged: Step = {
-    vim,
-    buffer,
-    kept,
-    fate: done,
-    began: Option.none(),
-    clipboard: Option.none(),
-  }
+  const unchanged: Step = stepOf(vim, buffer, kept)
   const inStay = (stepped: (stay: Stay) => Step): Step =>
     Mode.match(vim.mode, {
       Normal: () => unchanged,
@@ -1926,7 +1994,13 @@ export const again = (
   return Replayed.match(step, {
     Run: ({ command, count, register }) => {
       const ran = run(vim, buffer, kept, command, count, register)
-      return { ...ran, kept: { ...ran.kept, seek: kept.seek } }
+      return {
+        ...ran,
+        kept: {
+          ...ran.kept,
+          seek: { ...ran.kept.seek, find: kept.seek.find },
+        },
+      }
     },
     Typed: ({ input }) =>
       inStay(stay => pressInsert(vim, buffer, kept, stay, input)),
@@ -1951,6 +2025,51 @@ export const landed = (
   )
 }
 
+export const isScreenKey = (input: Input): boolean =>
+  input._tag === 'Chord' &&
+  isControlAlone(input.modifiers) &&
+  Keymap.screenKeys.includes(`<C-${input.char.toLowerCase()}>`)
+
+const searched = (
+  vim: Vim,
+  buffer: Buffer.Buffer,
+  kept: Kept,
+  { way, operator, count, register }: SearchResume,
+  text: string,
+): Option.Option<Step> => {
+  const seek = Seek.Seek.cases.Search.make({ way, text })
+  return Mode.match(vim.mode, {
+    Normal: () =>
+      Option.some(
+        run(
+          vim,
+          buffer,
+          kept,
+          Option.match(operator, {
+            onNone: () => Keymap.Command.cases.Seek.make({ seek }),
+            onSome: operator =>
+              Keymap.Command.cases.OperateSeek.make({ operator, seek }),
+          }),
+          count,
+          register,
+        ),
+      ),
+    Insert: () => Option.none(),
+    Visual: visual =>
+      Option.some(
+        runVisual(
+          vim,
+          buffer,
+          kept,
+          visual,
+          Keymap.VisualCommand.cases.Seek.make({ seek }),
+          count,
+          register,
+        ),
+      ),
+  })
+}
+
 export const pendingKeys = (vim: Vim): string => Keymap.shown(vim)
 
 export type ModeName =
@@ -1971,4 +2090,64 @@ export const modeName = (vim: Vim): ModeName =>
     Normal: (): ModeName => 'Normal',
     Insert: (): ModeName => 'Insert',
     Visual: ({ kind }): ModeName => visualModeNames[kind],
+  })
+
+const commanded = (
+  vim: Vim,
+  buffer: Buffer.Buffer,
+  kept: Kept,
+  text: string,
+): Option.Option<Step> =>
+  Mode.match(vim.mode, {
+    Normal: () => {
+      const cleared = idle(vim)
+      const unchanged = stepOf(cleared, buffer, kept)
+      const noticed = (notice: string): Step => ({
+        ...unchanged,
+        notice: Option.some(notice),
+      })
+      return Option.some(
+        Ex.Command.match(Ex.parse(text), {
+          Empty: () => unchanged,
+          Write: () => ({ ...unchanged, save: true }),
+          Unsupported: ({ text: line }) => noticed(`not supported: ${line}`),
+          Unknown: ({ text: line }) =>
+            noticed(`E492: Not an editor command: ${line}`),
+          Goto: ({ address }) =>
+            Ex.Resolved.match(
+              Ex.resolve(address, buffer.lines.length, buffer.caret.line),
+              {
+                Invalid: () => noticed('E16: Invalid range'),
+                At: ({ line }) => {
+                  const { spot, want } = motions.LastLine(
+                    buffer,
+                    spotOf(buffer),
+                    line + 1,
+                    vim.want,
+                  )
+                  return {
+                    ...unchanged,
+                    vim: { ...cleared, want },
+                    buffer: Buffer.moveTo(buffer, positionOf(buffer, spot)),
+                  }
+                },
+              },
+            ),
+        }),
+      )
+    },
+    Insert: () => Option.none(),
+    Visual: () => Option.none(),
+  })
+
+export const resumed = (
+  vim: Vim,
+  buffer: Buffer.Buffer,
+  kept: Kept,
+  resume: Resume,
+  text: string,
+): Option.Option<Step> =>
+  Resume.match(resume, {
+    Search: search => searched(vim, buffer, kept, search, text),
+    Command: () => commanded(vim, buffer, kept, text),
   })

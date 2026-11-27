@@ -2,6 +2,7 @@ import { Array, Option, Order, Schema } from 'effect'
 
 import * as Fuzzy from './fuzzy'
 import { Input, type Modifiers, type NamedKey } from './input'
+import * as Line from './line'
 import * as Notes from './notes'
 
 export const Mode = Schema.TaggedUnion({
@@ -229,28 +230,6 @@ const cancelMove = (
   }
 }
 
-const segmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' })
-
-const boundaries = (text: string): ReadonlyArray<number> => [
-  0,
-  ...Array.map(
-    Array.fromIterable(segmenter.segment(text)),
-    ({ index, segment }) => index + segment.length,
-  ),
-]
-
-const boundaryBefore = (text: string, caret: number): number =>
-  Option.getOrElse(
-    Array.findLast(boundaries(text), boundary => boundary < caret),
-    () => 0,
-  )
-
-const boundaryAfter = (text: string, caret: number): number =>
-  Option.getOrElse(
-    Array.findFirst(boundaries(text), boundary => boundary > caret),
-    () => text.length,
-  )
-
 const drillInto = (
   finder: Finder,
   notes: ReadonlyArray<Notes.Note>,
@@ -279,54 +258,40 @@ const edited = (
   caret: number,
 ): Outcome => stay(drillInto({ ...finder, prompt, caret, selected: 0 }, notes))
 
-const replaceSpan = (
+const lineOf = ({ prompt, caret, preedit }: Finder): Line.Line => ({
+  text: prompt,
+  caret,
+  preedit,
+})
+
+const editedLine = (
   finder: Finder,
   notes: ReadonlyArray<Notes.Note>,
-  start: number,
-  end: number,
-  text: string,
-): Outcome => {
-  const { prompt } = finder
-  return edited(
-    finder,
-    notes,
-    prompt.slice(0, start) + text + prompt.slice(end),
-    start + text.length,
-  )
-}
+  line: Option.Option<Line.Line>,
+): Outcome =>
+  Option.match(line, {
+    onNone: () => stay(finder),
+    onSome: ({ text, caret }) => edited(finder, notes, text, caret),
+  })
 
 const typeText = (
   finder: Finder,
   notes: ReadonlyArray<Notes.Note>,
   text: string,
-): Outcome => {
-  const flat = text.replace(/\r?\n/gu, ' ')
-  return flat === ''
-    ? stay(finder)
-    : replaceSpan(finder, notes, finder.caret, finder.caret, flat)
-}
+): Outcome =>
+  editedLine(
+    finder,
+    notes,
+    Line.typeText(lineOf(finder), text.replace(/\r?\n/gu, ' ')),
+  )
 
 const erase = (
   finder: Finder,
   notes: ReadonlyArray<Notes.Note>,
   fromCaret: number,
   toCaret: number,
-): Outcome => {
-  const { prompt, caret } = finder
-  const clamp = (offset: number) => Math.max(0, Math.min(prompt.length, offset))
-  const start = clamp(caret + Math.min(fromCaret, toCaret))
-  const end = clamp(caret + Math.max(fromCaret, toCaret))
-  const nextCaret =
-    caret <= start ? caret : caret >= end ? caret - (end - start) : start
-  return start === end
-    ? stay(finder)
-    : edited(
-        finder,
-        notes,
-        prompt.slice(0, start) + prompt.slice(end),
-        nextCaret,
-      )
-}
+): Outcome =>
+  editedLine(finder, notes, Line.erase(lineOf(finder), fromCaret, toCaret))
 
 const moveHighlight = (
   finder: Finder,
@@ -437,27 +402,15 @@ const keys: Readonly<
       ? finder.mode._tag === 'Find' && finder.scope !== ''
         ? stay(withScope(finder, Notes.parentFolder(finder.scope)))
         : stay(finder)
-      : erase(
-          finder,
-          notes,
-          boundaryBefore(finder.prompt, finder.caret) - finder.caret,
-          0,
-        ),
+      : editedLine(finder, notes, Line.backspace(lineOf(finder))),
   Delete: (finder, notes) =>
-    erase(
-      finder,
-      notes,
-      0,
-      boundaryAfter(finder.prompt, finder.caret) - finder.caret,
-    ),
-  ArrowLeft: finder =>
-    moveCaret(finder, boundaryBefore(finder.prompt, finder.caret)),
-  ArrowRight: finder =>
-    moveCaret(finder, boundaryAfter(finder.prompt, finder.caret)),
+    editedLine(finder, notes, Line.deleteAfter(lineOf(finder))),
+  ArrowLeft: finder => moveCaret(finder, Line.left(lineOf(finder)).caret),
+  ArrowRight: finder => moveCaret(finder, Line.right(lineOf(finder)).caret),
   ArrowUp: (finder, notes) => moveHighlight(finder, notes, -1),
   ArrowDown: (finder, notes) => moveHighlight(finder, notes, 1),
-  Home: finder => moveCaret(finder, 0),
-  End: finder => moveCaret(finder, finder.prompt.length),
+  Home: finder => moveCaret(finder, Line.home(lineOf(finder)).caret),
+  End: finder => moveCaret(finder, Line.end(lineOf(finder)).caret),
   PageUp: (finder, notes) => moveHighlight(finder, notes, -pageRows),
   PageDown: (finder, notes) => moveHighlight(finder, notes, pageRows),
 }

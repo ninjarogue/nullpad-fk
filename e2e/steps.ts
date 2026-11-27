@@ -26,6 +26,7 @@ type Expectation = Readonly<{
   pending?: string
   keydown?: string
   notice?: string
+  prompt?: string
   clipboard?: string
   selection?: string
 }>
@@ -299,7 +300,7 @@ export const parseStep = (
     case 'expect': {
       if (!isRecord(body)) {
         return fail(
-          'expect takes { text?, status?, under?, top?, full?, title?, finder?, mode?, pending?, keydown?, notice?, clipboard?, selection? }',
+          'expect takes { text?, status?, under?, top?, full?, title?, finder?, mode?, pending?, keydown?, notice?, prompt?, clipboard?, selection? }',
         )
       }
       const fields = [
@@ -313,6 +314,7 @@ export const parseStep = (
         'pending',
         'keydown',
         'notice',
+        'prompt',
         'clipboard',
         'selection',
       ] as const
@@ -405,6 +407,11 @@ const finderText = (page: Page): Promise<string> =>
     return [`prompt ${prompt}`, ...rows].join('\n')
   })
 
+const promptText = (page: Page): Promise<string> =>
+  page.evaluate(
+    () => document.querySelector('.status .prompt')?.textContent ?? 'closed',
+  )
+
 const lastKeydowns = new WeakMap<Page, string>()
 
 type AnotherApp = Awaited<ReturnType<Nullpad['outside']>>
@@ -442,6 +449,14 @@ const checkThroughDriver = async (
     if (notice !== expectation.notice) {
       misses.push(
         `notice shows ${JSON.stringify(notice)}, expected ${JSON.stringify(expectation.notice)}`,
+      )
+    }
+  }
+  if (expectation.prompt !== undefined) {
+    const prompt = await promptText(nullpad.page)
+    if (prompt !== expectation.prompt) {
+      misses.push(
+        `prompt shows ${JSON.stringify(prompt)}, expected ${JSON.stringify(expectation.prompt)}`,
       )
     }
   }

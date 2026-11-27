@@ -25,6 +25,7 @@ export const Message = defineMessageUnion({
   BlurredKeyboard: {},
   FoundBrowserUnsupported: {},
   CompletedWaitBeforeSave: { edits: Schema.Int },
+  CompletedWaitBeforeHints: { timer: Schema.Int },
   SucceededSaveNote: { note: Note },
   FailedSaveNote: {
     draft: Draft,

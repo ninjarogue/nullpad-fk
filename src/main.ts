@@ -92,6 +92,13 @@ const SaveState = Schema.TaggedUnion({
 })
 type SaveState = typeof SaveState.Type
 
+const WhichKey = Schema.TaggedUnion({
+  Hidden: {},
+  Waiting: { timer: Schema.Int, pending: Schema.String },
+  Shown: {},
+})
+type WhichKey = typeof WhichKey.Type
+
 const OpenNote = Schema.Struct({
   id: Notes.NoteId,
   folder: Schema.String,
@@ -120,6 +127,8 @@ export const Model = Schema.Struct({
   screen: Screen,
   edits: Schema.Int,
   writtenNotice: Schema.Literals(['Unowed', 'Owed']),
+  whichKey: WhichKey,
+  whichKeyTimers: Schema.Int,
   seed: Schema.String,
   created: Schema.Int,
   now: Schema.Finite,
@@ -213,6 +222,17 @@ const WaitBeforeSave = Command.define('WaitBeforeSave', {
   execute: ({ edits }) =>
     Effect.sleep(autosaveDelay).pipe(
       Effect.as(Message.CompletedWaitBeforeSave({ edits })),
+    ),
+})
+
+const whichKeyDelay = '300 millis'
+
+const WaitBeforeHints = Command.define('WaitBeforeHints', {
+  args: { timer: Schema.Int },
+  messages: [Message.CompletedWaitBeforeHints],
+  execute: ({ timer }) =>
+    Effect.sleep(whichKeyDelay).pipe(
+      Effect.as(Message.CompletedWaitBeforeHints({ timer })),
     ),
 })
 
@@ -1000,6 +1020,8 @@ export const init: Runtime.ApplicationInit<
     screen: Screen.cases.Edit.make({}),
     edits: 0,
     writtenNotice: 'Unowed',
+    whichKey: WhichKey.cases.Hidden.make({}),
+    whichKeyTimers: 0,
     seed,
     created: 1,
     now,
@@ -1070,6 +1092,14 @@ const handle = (model: Model, message: Message) =>
     }),
     CompletedWaitBeforeSave: ({ edits }) =>
       edits === model.edits ? saveIfDirty(model) : { model },
+    CompletedWaitBeforeHints: ({ timer }) =>
+      model.whichKey._tag === 'Waiting' && model.whichKey.timer === timer
+        ? {
+            model: modifyFields(model, {
+              whichKey: () => WhichKey.cases.Shown.make({}),
+            }),
+          }
+        : { model },
     SucceededSaveNote: ({ note }) => {
       const listed = modifyFields(model, {
         notes: notes => Notes.upsert(notes, note),
@@ -1145,10 +1175,43 @@ const handle = (model: Model, message: Message) =>
     CompletedScrollReading: () => ({ model }),
   })
 
+const wantsHints = (model: Model): boolean =>
+  model.screen._tag === 'Edit' &&
+  Option.isNone(model.finder) &&
+  Editor.awaitsHints(model.editor)
+
+const settleHints = (model: Model): UpdateReturn => {
+  if (!wantsHints(model)) {
+    return model.whichKey._tag === 'Hidden'
+      ? { model }
+      : {
+          model: modifyFields(model, {
+            whichKey: () => WhichKey.cases.Hidden.make({}),
+          }),
+        }
+  }
+  const pending = Editor.pendingKeys(model.editor)
+  if (
+    model.whichKey._tag === 'Shown' ||
+    (model.whichKey._tag === 'Waiting' && model.whichKey.pending === pending)
+  ) {
+    return { model }
+  }
+  const timer = model.whichKeyTimers + 1
+  return {
+    model: modifyFields(model, {
+      whichKey: () => WhichKey.cases.Waiting.make({ timer, pending }),
+      whichKeyTimers: () => timer,
+    }),
+    commands: [WaitBeforeHints({ timer })],
+  }
+}
+
 export const update = (model: Model, message: Message): UpdateReturn => {
   const next = Update.combine(withoutNotice(model, message), [
     stepModel => handle(stepModel, message),
     finishOpening,
+    settleHints,
   ])
   const isOn = Editor.isVimOn(next.model.editor)
   return Editor.isVimOn(model.editor) === isOn
@@ -1289,7 +1352,10 @@ const screenView = (
 ): Html => {
   const shownHints = Option.filter(
     frame.hints,
-    () => model.screen._tag === 'Edit' && Option.isNone(model.finder),
+    () =>
+      model.whichKey._tag === 'Shown' &&
+      model.screen._tag === 'Edit' &&
+      Option.isNone(model.finder),
   )
   const editorSurface = surface(
     frame,

@@ -541,6 +541,34 @@ body {
   text-overflow: ellipsis;
 }
 
+.status .prompt {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: pre;
+}
+
+.status .prompt-before {
+  display: inline-flex;
+  justify-content: flex-end;
+  max-width: calc(100% - 2ch);
+  overflow: hidden;
+  vertical-align: top;
+}
+
+.status .prompt-caret {
+  anchor-name: --caret;
+  background: var(--cur);
+  color: var(--bg);
+}
+
+.status .prompt-caret:empty {
+  display: inline-block;
+  width: 1ch;
+  height: 1lh;
+  vertical-align: top;
+}
+
 .pos {
   color: var(--dim);
 }

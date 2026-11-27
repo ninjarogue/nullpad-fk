@@ -326,6 +326,21 @@ export type JumpLabel = Readonly<{
 
 export type JumpMatch = Readonly<{ line: number; from: number; to: number }>
 
+export type WhichKeyEntry = Readonly<{
+  key: string
+  text: string
+  group: boolean
+}>
+
+export type WhichKey = Readonly<{
+  pending: string
+  entries: ReadonlyArray<WhichKeyEntry>
+  more: string | null
+  rect: Readonly<{ left: number; top: number; right: number; bottom: number }>
+  caret: Readonly<{ left: number; top: number; right: number; bottom: number }>
+  surfaceHeight: number
+}>
+
 export type FinderRow = Readonly<{
   text: string
   folder: string
@@ -1231,6 +1246,40 @@ export const driver = (page: Page, cdp: CDPSession) => {
           }
         }
         return isBlock ? blockLines.join('\n') : selected
+      })
+    },
+    whichKey: async (): Promise<WhichKey | null> => {
+      await settle(page)
+      return page.evaluate(() => {
+        const panel = document.querySelector<HTMLElement>('.which-key')
+        if (panel === null) {
+          return null
+        }
+        const box = (element: Element | null) => {
+          const rect = element?.getBoundingClientRect()
+          return {
+            left: rect?.left ?? 0,
+            top: rect?.top ?? 0,
+            right: rect?.right ?? 0,
+            bottom: rect?.bottom ?? 0,
+          }
+        }
+        return {
+          pending: panel.dataset['pending'] ?? '',
+          entries: [...panel.querySelectorAll<HTMLElement>('[data-key]')].map(
+            entry => ({
+              key: entry.dataset['key'] ?? '',
+              text: (entry.textContent ?? '').trim(),
+              group: entry.hasAttribute('data-group'),
+            }),
+          ),
+          more: panel.querySelector('.more')?.textContent?.trim() ?? null,
+          rect: box(panel),
+          caret: box(document.getElementById('caret')),
+          surfaceHeight:
+            document.querySelector('.surface')?.getBoundingClientRect()
+              .height ?? 0,
+        }
       })
     },
     jumpLabels: async (): Promise<ReadonlyArray<JumpLabel>> => {
